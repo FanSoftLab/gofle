@@ -274,11 +274,17 @@ func (m model) renderStatus() string {
 	}
 
 	if m.effectiveSplit() {
-		focus := tr(m, "status_normal")
+		// High-contrast focus label so the active pane is unmistakable.
 		if m.splitFocus == 1 {
-			focus = tr(m, "status_results")
+			parts = append(parts, tr(m, "status_split")+" "+
+				matchCursorStyle.Render(" RESULTS "))
+		} else {
+			parts = append(parts, tr(m, "status_split")+" "+
+				lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#1e1e2e")).
+					Background(lipgloss.Color("#89b4fa")).
+					Render("   LOG   "))
 		}
-		parts = append(parts, tr(m, "status_split")+" "+val(focus))
 	}
 
 	return statusStyle.Render(strings.Join(parts, sep))
@@ -425,8 +431,43 @@ func (m model) remoteBrowseView() string {
 // renderLogLines renders the log body into a single string using the given pane
 // width. In split view it always shows the full log (matches live in the right
 // pane); outside split view it honors the results-only (onlyMatches) filter.
+//
+// Every row is hard-clipped to `width` cells so a single over-wide line cannot
+// soft-wrap in the terminal and push the next row's gutter out of column
+// (visible as a jagged "|" gutter strip).
 func (m model) renderLogLines(width int) string {
-	return joinRows(m.logRows(width))
+	rows := m.logRows(width)
+	// Clip to width-2: writing into the last columns makes many terminals
+	// soft-wrap (spurious blank line after every row).
+	clipW := width
+	if clipW > 2 {
+		clipW -= 2
+	}
+	for i, r := range rows {
+		if j := strings.IndexByte(r, '\n'); j >= 0 {
+			r = r[:j]
+		}
+		// Truncate only — do NOT pad to full width (padding to termW causes wrap).
+		rows[i] = clipToWidth(r, clipW)
+	}
+	for len(rows) < m.height {
+		rows = append(rows, "")
+	}
+	if len(rows) > m.height && m.height > 0 {
+		rows = rows[:m.height]
+	}
+	return joinRows(rows)
+}
+
+// clipToWidth truncates s to at most width display cells without padding.
+func clipToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if displayWidthNoANSI(s) <= width {
+		return s
+	}
+	return forceFitWidth(s, width)
 }
 
 // logRows is the row-producing core behind renderLogLines: it returns the body
@@ -442,9 +483,11 @@ func (m model) logRows(width int) []string {
 
 	lo, hi, selOK := m.selectionBounds()
 
+	// gutter occupies gutterW digits + " | " (3 cells). Content budget is the rest.
+	avail := max(width-gutterW-3, 1)
 	layout := rowLayout{
 		gutterW: gutterW,
-		avail:   max(width-gutterW-3, 1),
+		avail:   avail,
 		selLo:   lo,
 		selHi:   hi,
 		selOK:   selOK,
@@ -505,9 +548,10 @@ func (m model) matchOnlyRows(layout rowLayout) []string {
 			case layout.selOK && int64(i) >= layout.selLo && int64(i) <= layout.selHi:
 				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, selectionStyle)
 			case i == m.matchCursor:
-				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, matchStyle)
+				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, matchCursorStyle)
 			default:
-				line = m.wrapLine(layout.gutterW, ln, seg, si == 0)
+				// In results-only every row is a match — keep them tinted.
+				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, matchStyle)
 			}
 			rows = appendRow(rows, line)
 		}
@@ -517,69 +561,84 @@ func (m model) matchOnlyRows(layout rowLayout) []string {
 }
 
 // fullLogRows renders the full log (normal view and the left pane of split
-// view). m.top is the logical line at the top of the viewport; m.topWrap is the
-// wrapped row of that line currently shown at the very top. Lines are
-// hard-wrapped to the pane width.
+// view). One logical line = one screen row; topWrap is ignored (no soft-wrap).
 func (m model) fullLogRows(layout rowLayout) []string {
 	rows := make([]string, 0, m.height)
 
-	var segs []string // reused scratch for wrapSegments across every row
-
-	skip := m.topWrap
+	var segs []string
 	for ln := m.top; ln < m.idx.TotalLines() && len(rows) < m.height; ln++ {
 		content, e := m.idx.GetLine(ln)
 		if e != nil {
 			content = fmt.Sprintf("<error reading line %d>", ln)
 		}
 
-		for si, seg := range wrapSegments(content, layout.avail, segs) {
-			if skip > 0 {
-				skip--
-				continue
-			}
-
-			if len(rows) >= m.height {
-				break
-			}
-
-			// Skip empty continuation segments — they showed up as blank gaps.
-			if si > 0 && seg == "" {
-				continue
-			}
-
-			line := m.wrapLine(layout.gutterW, ln, seg, si == 0)
-			if layout.selOK && ln >= layout.selLo && ln <= layout.selHi {
-				line = selectionStyle.Render(line)
-			} else if isMatchLine(m.matches, ln) {
-				// Highlight content only (not gutter) to avoid lipgloss width quirks.
-				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, matchStyle)
-			}
-
-			rows = appendRow(rows, line)
+		// wrapSegments returns exactly one segment (truncate, never wrap).
+		segList := wrapSegments(content, layout.avail, segs)
+		seg := ""
+		if len(segList) > 0 {
+			seg = segList[0]
 		}
+
+		var line string
+		switch {
+		case layout.selOK && ln >= layout.selLo && ln <= layout.selHi:
+			line = m.wrapLineStyled(layout.gutterW, ln, seg, true, selectionStyle)
+		case m.isMatchCursorLine(ln):
+			line = m.wrapLineStyled(layout.gutterW, ln, seg, true, matchCursorStyle)
+		case isMatchLine(m.matches, ln):
+			line = m.wrapLineStyled(layout.gutterW, ln, seg, true, matchStyle)
+		default:
+			line = m.wrapLine(layout.gutterW, ln, seg, true)
+		}
+		// Never let embedded newlines expand one logical line into many rows.
+		if i := strings.IndexByte(line, '\n'); i >= 0 {
+			line = line[:i]
+		}
+		rows = append(rows, line)
 	}
 
+	// Pad to exact viewport height so the terminal never keeps ghost rows
+	// from a previous frame (looks like vertical gaps / shifted lines).
+	for len(rows) < m.height {
+		rows = append(rows, "")
+	}
 	return rows
 }
 
+// isMatchCursorLine reports whether ln is the line under the match cursor (n/p).
+func (m model) isMatchCursorLine(ln int64) bool {
+	if m.matchCursor < 0 || m.matchCursor >= len(m.matches) {
+		return false
+	}
+	return m.matches[m.matchCursor] == ln
+}
+
 // wrapLineStyled is wrapLine with a lipgloss style applied only to the content
-// column so gutter metrics stay ASCII-stable.
+// column so gutter metrics stay stable.
 func (m model) wrapLineStyled(gutterW int, ln int64, seg string, first bool, style lipgloss.Style) string {
 	seg = style.Render(seg)
 	return m.wrapLine(gutterW, ln, seg, first)
 }
 
-// wrapLine formats one wrapped segment of a logical line: the first segment
-// carries the line-number gutter, continuation segments use a blank gutter so the
-// content column stays aligned. Uses ASCII " | " (3 cells) so width math never
-// depends on box-drawing glyph metrics.
+// wrapLine formats one log row: fixed-width line number + continuous vertical
+// rule (U+2502 │) + content. The box-drawing glyph joins row-to-row into a
+// solid column; plain ASCII "|" leaves visible gaps between cells.
+//
+// Gutter (number + rule) is rendered in gutterStyle so it stays secondary to
+// log text and search highlights. Width is still gutterW+3 cells.
 func (m model) wrapLine(gutterW int, ln int64, seg string, first bool) string {
+	var gutter string
 	if first {
 		num := strconv.FormatInt(ln+1, 10)
-		pad := max(gutterW-len(num), 0)
-		return spaces(pad) + num + " | " + seg
+		if len(num) > gutterW {
+			num = num[len(num)-gutterW:]
+		}
+		// " N│ " — spaces around continuous rule (3 cells, same budget as before).
+		gutter = spaces(gutterW-len(num)) + num + " │ "
+	} else {
+		gutter = spaces(gutterW) + " │ "
 	}
-	return spaces(gutterW) + " | " + seg
+	return gutterStyle.Render(gutter) + seg
 }
 
 // sanitizeLogDisplay removes characters that do not belong in a log viewport:
@@ -661,16 +720,13 @@ func shouldDropRune(r rune) bool {
 	}
 }
 
-// appendRow appends one rendered row to rows. A rendered row normally contains no
-// '\n' of its own, but a style that injected one would occupy several terminal
-// rows, so it is split into one entry per row — that keeps len(rows) an exact row
-// count for the viewport budget and keeps the split view's panes aligned.
+// appendRow appends one rendered row. Embedded newlines are collapsed to a
+// single row (soft-wrap is disabled; multi-row expansion caused vertical gaps).
 func appendRow(rows []string, line string) []string {
-	if strings.IndexByte(line, '\n') < 0 {
-		return append(rows, line)
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
 	}
-
-	return append(rows, strings.Split(line, "\n")...)
+	return append(rows, line)
 }
 
 // joinRows writes rows back into the single newline-terminated body string the
@@ -752,9 +808,10 @@ func (m model) resultRows(width int) []string {
 
 			var line string
 			if i == m.matchCursor {
-				line = m.wrapLineStyled(gutterW, ln, seg, si == 0, matchStyle)
+				line = m.wrapLineStyled(gutterW, ln, seg, si == 0, matchCursorStyle)
 			} else {
-				line = m.wrapLine(gutterW, ln, seg, si == 0)
+				// Other hits in the results pane stay lightly highlighted.
+				line = m.wrapLineStyled(gutterW, ln, seg, si == 0, matchStyle)
 			}
 			rows = appendRow(rows, line)
 		}
@@ -778,8 +835,19 @@ func (m model) renderSplitBody() string {
 
 	left := m.logRows(leftW)
 	right := m.resultRows(rightW)
-	// ASCII divider — always 1 cell, no glyph-metric surprises.
-	div := divStyle.Render("|")
+
+	// Divider color shows focus: blue = LOG active, yellow = RESULTS active.
+	// No triangles (user request) — color + status bar is enough.
+	var div string
+	if m.splitFocus == 1 {
+		div = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f9e2af")).
+			Render("│")
+	} else {
+		div = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#89b4fa")).
+			Render("│")
+	}
 
 	var b strings.Builder
 	for i := range m.height {
@@ -790,8 +858,6 @@ func (m model) renderSplitBody() string {
 		if i < len(right) {
 			rs = right[i]
 		}
-		// Clip each pane to an exact cell width; never re-truncate the joined row
-		// (that was eating leading characters when ANSI/UTF-8 met the budget).
 		lp := clipPaneCell(ls, leftW)
 		rp := clipPaneCell(rs, rightW)
 		b.WriteString(lp)
@@ -806,40 +872,29 @@ func (m model) renderSplitBody() string {
 	return b.String()
 }
 
-// clipPaneCell forces s into exactly width terminal cells and isolates RTL/CTL.
-// Guarantees displayWidthNoANSI(result) == width so the joined split row never
-// soft-wraps in the terminal.
+// clipPaneCell truncates s to at most `width` cells and pads with spaces so the
+// split divider stays in a fixed column. Styles (match highlight) are preserved.
 func clipPaneCell(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	
-	// 1. ВИКЛИКАЄМО ТУТ: нейтралізуємо RTL/CTL до будь-яких підрахунків ширини!
-	// Тепер небезпечний текст стає ASCII-символами '?', ширина яких рахується ідеально.
 	s = isolateLTR(s)
-	
-	s = forceFitWidth(s, width)
+	// Truncate without stripping styles when possible.
+	if displayWidthNoANSI(s) > width {
+		s = truncateANSIAware(s, width)
+	}
 	w := displayWidthNoANSI(s)
 	if w < width {
+		// Reset before pad so match/selection background does not fill the pad.
 		if hasANSIIntroducer(s) {
 			s += ansiReset
 		}
 		s += strings.Repeat(" ", width-w)
-	} else if w > width {
-		// Last resort: plain truncate by visible budget.
-		s = truncateANSIAware(s, width)
-		if dw := displayWidthNoANSI(s); dw < width {
-			s += strings.Repeat(" ", width-dw)
-		}
 	}
-	
-	// Verify exact width; if still over (pathological), fall back to spaces.
 	if displayWidthNoANSI(s) > width {
 		return strings.Repeat(" ", width)
 	}
-	
-	// 2. Повертаємо вже готовий рядок
-	return s 
+	return s
 }
 
 // isComplexLTRRune reports whether r belongs to complex LTR scripts (CTL)
@@ -1034,56 +1089,24 @@ func runeWidth(r rune) int {
 	return runewidth.RuneWidth(r)
 }
 
-// wrapSegments hard-wraps content into visual rows each no wider than width
-// display cells. Wide runes are never split across rows; a rune that would
-// overflow the current row starts the next one. An empty/blank content yields a
-// single empty segment (so every logical line still occupies at least one row).
+// wrapSegments prepares one visual row per logical log line.
 //
-// Lines that contain RTL scripts are not soft-wrapped mid-run (bidi reordering
-// makes partial RTL rows jump across pane boundaries); they are hard-truncated
-// to a single segment instead.
+// Soft-wrapping was disabled on purpose: multi-segment wraps inserted extra
+// terminal rows between line numbers (vertical gaps / "shifted" rows). Long
+// lines are hard-truncated to `width` cells instead — one logical line always
+// occupies exactly one screen row.
 func wrapSegments(content string, width int, segs []string) []string {
 	// Drop file-embedded ANSI first — our own styles are applied later.
-	// Keeps random CSI final letters (m/w/t/…) from leaking into visible text.
 	content = sanitizeLogDisplay(stripANSI(content))
+	// Neutralize RTL / complex scripts so bidi cannot disturb layout.
+	content = isolateLTR(content)
 	if width <= 0 {
 		return append(segs[:0], content)
 	}
-
-	// RTL: hard-truncate one segment; mid-run wraps break terminal bidi.
-	if containsUnsafeRunes(content) {
-		seg := runewidth.Truncate(content, width, "")
-		if seg == "" {
-			return append(segs[:0], "")
-		}
-		return append(segs[:0], seg)
+	if runewidth.StringWidth(content) > width {
+		content = runewidth.Truncate(content, width, "")
 	}
-
-	segs = segs[:0]
-
-	var cur strings.Builder
-
-	w := 0
-
-	for _, r := range content {
-		rw := runeWidth(r)
-		if w > 0 && w+rw > width {
-			if cur.Len() > 0 {
-				segs = append(segs, cur.String())
-			}
-			cur.Reset()
-			w = 0
-		}
-
-		cur.WriteRune(r)
-		w += rw
-	}
-
-	if cur.Len() > 0 || len(segs) == 0 {
-		segs = append(segs, cur.String())
-	}
-
-	return segs
+	return append(segs[:0], content)
 }
 
 // ansiReset restores default SGR attributes. Appended after any hard truncate
@@ -1324,10 +1347,15 @@ func (m model) helpView() string {
 // Palette is Catppuccin Mocha with increased contrast on interactive / status
 // elements so the interface stays easy to scan in a busy terminal.
 var (
-	// matchStyle: highlight search hits with color only (no bold/underline —
-	// underline made some terminals advance an extra row = visual gaps).
+	// matchStyle: search hits — bright fg only (no Background: some terminals
+	// paint background cell-height larger and it reads as extra line spacing).
 	matchStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f5e0dc"))
+			Foreground(lipgloss.Color("#f9e2af"))
+
+	// matchCursorStyle: active match — reverse video, still no bold/underline.
+	matchCursorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#1e1e2e")).
+				Background(lipgloss.Color("#f9e2af"))
 
 	// statusStyle: plain text footer — no solid background fill.
 	statusStyle = lipgloss.NewStyle().
@@ -1347,9 +1375,10 @@ var (
 				Foreground(lipgloss.Color("#f9e2af")).
 				Bold(true)
 
-	// selectionStyle: selection range — bright fg only (no underline).
+	// selectionStyle: selection range — cyan on dark surface.
 	selectionStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#89dceb"))
+			Foreground(lipgloss.Color("#1e1e2e")).
+			Background(lipgloss.Color("#89dceb"))
 
 	// divStyle draws the vertical divider between the split panes.
 	divStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
@@ -1373,4 +1402,8 @@ var (
 
 	// dimStyle: inactive / secondary text (empty states, examples).
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#7f849c"))
+
+	// gutterStyle: line numbers + vertical rule — low contrast so they never
+	// compete with log text or match highlights.
+	gutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#585b70"))
 )

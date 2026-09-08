@@ -63,9 +63,12 @@ RUN if [ ! -f go.mod ]; then \
     fi && \
     go mod download 2>/dev/null || true
 
-# Frontend handling only for gui or all targets
+# Frontend package manifests (layer-cache for npm). COPY is a Dockerfile
+# instruction and cannot run inside a shell `RUN` — keep it at top level.
+COPY frontend/package.json frontend/package-lock.json* ./frontend/
+
+# Install frontend deps only when building GUI (or everything).
 RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
-        COPY frontend/package.json frontend/package-lock.json* ./frontend/ && \
         cd frontend && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund); \
     fi
 

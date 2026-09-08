@@ -365,6 +365,24 @@ func (m *model) navKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return *m, tea.Quit
 	}
 
+	// Tab / Shift+Tab switch split panes — handle before other routes so the
+	// key is never swallowed by scroll/match handlers. Use KeyTab type as well
+	// as the "tab" string (terminals differ).
+	if m.effectiveSplit() && (msg.Type == tea.KeyTab || key == "tab" || key == "shift+tab") {
+		if key == "shift+tab" {
+			// Cycle opposite direction (same 2-pane toggle in practice).
+			m.splitFocus ^= 1
+		} else {
+			m.splitFocus ^= 1
+		}
+		if m.splitFocus == 1 {
+			m.status = "pane: RESULTS  (↑↓ matches · Enter → log)"
+		} else {
+			m.status = "pane: LOG  (↑↓ scroll · Tab → results)"
+		}
+		return *m, nil
+	}
+
 	if m.resultsPaneKey(key) {
 		return *m, nil
 	}
@@ -389,7 +407,8 @@ func (m *model) navKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // not focused or the key is not one it owns, so the caller falls through to the
 // ordinary navigation keys.
 func (m *model) resultsPaneKey(key string) bool {
-	if !m.splitView || m.splitFocus != 1 || len(m.matches) == 0 {
+	// Only when the results pane is actually visible and focused.
+	if !m.effectiveSplit() || m.splitFocus != 1 {
 		return false
 	}
 
@@ -516,48 +535,29 @@ func (m *model) scrollKey(key string) bool {
 	return true
 }
 
-// scrollUp moves the viewport up one visual row — one match in results-only
-// mode, otherwise one wrapped row of the current logical line.
+// scrollUp moves the viewport up one logical line (one screen row).
 func (m *model) scrollUp() {
+	m.topWrap = 0
 	if m.onlyMatches {
 		m.top = max(0, m.top-1)
-
 		return
 	}
-
-	if m.topWrap > 0 {
-		m.topWrap--
-
-		return
-	}
-
 	if m.top > 0 {
 		m.top--
-		m.topWrap = m.wrapRows(m.top) - 1
 	}
 }
 
-// scrollDown moves the viewport down one visual row (see scrollUp).
+// scrollDown moves the viewport down one logical line (one screen row).
 func (m *model) scrollDown() {
+	m.topWrap = 0
 	last := max(m.lastLine(), 0)
 	if m.onlyMatches {
 		m.top = min(m.top+1, last)
-
 		return
 	}
-
-	if m.top >= last {
-		return
+	if m.top < last {
+		m.top++
 	}
-
-	if m.topWrap < m.wrapRows(m.top)-1 {
-		m.topWrap++
-
-		return
-	}
-
-	m.top++
-	m.topWrap = 0
 }
 
 // pageUp scrolls up one screenful.
@@ -609,9 +609,16 @@ func (m *model) viewModeKey(key string) bool {
 	case "r":
 		m.toggleOnlyMatches()
 		m.persistViewMode()
-	case "tab":
-		if m.splitView {
+	case "tab", "shift+tab":
+		// Prefer navKey's Tab handler (effectiveSplit + status feedback).
+		// Keep a fallback here in case viewModeKey is reached first.
+		if m.effectiveSplit() {
 			m.splitFocus ^= 1
+			if m.splitFocus == 1 {
+				m.status = "pane: RESULTS  (↑↓ matches · Enter → log)"
+			} else {
+				m.status = "pane: LOG  (↑↓ scroll · Tab → results)"
+			}
 		}
 	default:
 		return false

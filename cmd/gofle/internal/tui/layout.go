@@ -85,9 +85,11 @@ func (m model) buildLayout() layout {
 	l.bodyH = max(l.termH-footer, 1)
 
 	// Split pane widths only when the results pane has content.
+	// Leave 2 cells unused: writing into the last column makes many terminals
+	// soft-wrap (blank gap after every row).
 	if m.effectiveSplit() {
-		l.gapW = 3 // " │ "
-		inner := max(l.termW-l.gapW, 2)
+		l.gapW = 3 // " | "
+		inner := max(l.termW-l.gapW-2, 2)
 		l.leftW = inner / 2
 		l.rightW = inner - l.leftW
 		if l.leftW < 1 {
