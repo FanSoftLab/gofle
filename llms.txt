@@ -1,0 +1,103 @@
+# GoFLE
+
+> Fast Interactive Log Explorer — a cross-platform desktop app (Go + Wails v2) for
+> browsing, searching, and tailing very large local and remote (SSH) log files.
+
+## Overview
+
+GoFLE is a re-implementation of the classic [glogg](https://github.com/nickbnf/glogg)
+log explorer concept. The backend (file indexing, parallel search, SSH streaming) is
+Go; the UI is TypeScript + Vite rendered in a native webview. It is read-oriented:
+you open, search, copy, and export logs but never edit them.
+
+## Project type
+
+Application: a desktop GUI binary (`GoFLE`) and a terminal companion (`gofle`,
+in `cmd/gofle`) that share one Go backend. Module path: `GoFLE`. Go 1.26.
+Depends on `github.com/wailsapp/wails/v2`, `github.com/spf13/cobra`,
+`github.com/charmbracelet/bubbletea`, and `golang.org/x/crypto`.
+
+## Documentation
+
+- [README.md](README.md) — features, architecture, build/run, usage, security notes
+- [CONTRIBUTING.md](CONTRIBUTING.md) — build, test, and PR workflow
+- [CHANGELOG.md](CHANGELOG.md) — user-facing changes (Keep a Changelog format)
+
+## Packages
+
+| Path | Summary |
+| --- | --- |
+| `pkg/config` | App settings, recent files, AES-GCM SSH secret encryption, session persistence. Single source of truth for persisted state. |
+| `pkg/indexer` | `FileIndexer`: builds a byte-offset index, random line access via `pread`, live tail (`UpdateIndex`), and a zero-copy `ScanLines` hot path for search. |
+| `pkg/search` | `SearchEngine`: parallel regex/substring search over a line range, case-sensitivity, invert-match; caches the compiled regex for the tail poller. |
+| `pkg/ssh` | `Streamer`: streams a remote file over SSH to a local temp file, tails it every 2 s, verifies host keys via OpenSSH `known_hosts`. |
+| `pkg/remote` | Shared transport contract: `Streamer`/`Lister` interfaces + unified `Config`. `pkg/ssh` and `pkg/ftp` implement these; the app and indexer depend only on `remote`. |
+| `pkg/ftp` | `Streamer`/`Lister` over FTP/FTPS (explicit/implicit); pins the server certificate in the `ftp_certs` trust store. |
+| `pkg/logging` | Centralized `slog` setup for both binaries (stderr + `gofle.log` beside the config dir). |
+
+## Entry points
+
+- `main.go` — Wails app options, `//go:embed all:frontend/dist`, window lifecycle.
+- `app.go` — `App` struct bound to the frontend; tab lifecycle, 500 ms tail poller,
+  search orchestration, SSH open/accept flow, settings & session persistence.
+- `cmd/gofle/main.go` — `gofle` CLI entrypoint: wires the cobra command tree
+  (`version`, `ssh`, `ftp`, `list`, and the root `gofle [target]` viewer open),
+  installs SIGINT-scoped cancellation, and maps failures onto exit codes
+  (2 = usage error, 1 = runtime error).
+
+## CLI Companion
+
+`gofle` is a terminal companion that reuses the same Go backend as the desktop
+app to open a log — local, or over `ssh://` / `ftp://` — in an interactive
+Bubbletea viewer. Build it with `go build ./cmd/gofle` (the module path
+`GoFLE` is not proxy-resolvable, so `go install` does not work). Commands:
+`gofle [target]`, `gofle version`, `gofle ssh [flags] <host>`,
+`gofle ftp [flags] <host>` (`--tls explicit|implicit` for FTPS), and
+`gofle list` / `gofle list open <n>` / `gofle list clear`. The viewer exposes
+scroll, `/` search, `n`/`p` match nav, `[`/`]` first/last, `r` results-only,
+`f` follow, `g` goto, `e` export, `?` help, and `q`/`Ctrl+C` quit.
+
+## Key invariants (for contributors / agents)
+
+- A tab maps 1:1 to a file (local path or `ssh://host:port/path`); re-opening
+  focuses the existing tab.
+- `frontend/dist` must exist before any `go build`/`go test` (embedded by Go).
+- SSH secrets are encrypted at rest with AES-GCM; the key lives in `secret.key` (0600).
+- The frontend owns the session snapshot (order/groups); Go never rebuilds it.
+- Concurrent access uses `sync.RWMutex` in `App`, `FileIndexer`, `SearchEngine`,
+  `AppConfig`; the tail poller runs search without holding `tab.mu`.
+- Remote transports (ssh, ftp) sit behind the shared `pkg/remote` `Streamer` /
+  `Lister` interfaces; the app and indexer depend on `remote`, never on
+  `pkg/ssh` or `pkg/ftp` directly (avoids an import cycle).
+- SSH host keys are pinned in OpenSSH `known_hosts`; FTPS server certificates are
+  pinned in `ftp_certs` (one `host:port <sha256-fingerprint>` line per host). An
+  unknown key/cert is confirmed before being trusted; a changed one is rejected
+  as a possible MITM.
+
+## Build & test
+
+```bash
+cd frontend && npm install && npm run build && cd ..
+wails build
+go test ./... && go vet ./... && golangci-lint run
+```
+
+Reproducible multi-platform build: `./build.sh` (Docker).
+
+## Native-build prerequisites (important for agents)
+
+- **Go 1.26+**, **Node.js 18+** (npm), and the **Wails CLI v2**
+  (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
+- **Linux**: CGO must be enabled and the GTK/WebKit system libraries installed
+  (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, plus `pkg-config`/build tools).
+- macOS: Xcode command-line tools. Windows: a C compiler + the WebView2 runtime.
+- `frontend/dist` must exist before any `go build`/`go test` (embedded by Go).
+
+## Packaging caveat
+
+There is **no** repo-root `install.sh` / `GoFLE.desktop` packaging step to recommend.
+Build the app with `./build.sh` (→ `./GoFLE` at the repo root) or a raw
+`wails build` (→ `build/bin/GoFLE`) and run the resulting binary directly. A Linux
+install helper exists at `scripts/install.sh` and generates the `.desktop` entry at
+install time; do not assume a committed `GoFLE.desktop` or a root-level `install.sh`
+is present.

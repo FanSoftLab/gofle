@@ -1,0 +1,30 @@
+# Cache directories
+Thumbs.db
+*.DS_Store
+*.empty
+
+# PhpStorm project files
+/.idea/**
+
+# Netbeans project files
+nbproject
+
+# Eclipse, Zend studio, Aptana or other eclipse like project files
+.buildpath
+.project
+.settings
+
+.git/*
+.kilo/*
+GoFLE
+test_results.log
+
+# Frontend build output and dependencies
+frontend/dist
+frontend/node_modules
+
+# Wails build outputs exported from the container by build.sh (build/appicon.png
+# is committed source and must NOT be ignored).
+build/bin/
+dist/
+*.log

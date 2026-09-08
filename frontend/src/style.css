@@ -1,0 +1,1515 @@
+/* frontend/src/style.css */
+:root {
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-tertiary: #2d2d2d;
+    --text-color: #d4d4d4;
+    --text-muted: #858585;
+    --accent-color: #0e639c;
+    --accent-hover: #1177bb;
+    --border-color: #3c3c3c;
+    /* Divider between the log and search panes: slightly lighter than the
+       border on the dark theme so it reads as a distinct grip. */
+    --splitter-color: #4d4d4d;
+    
+    --log-fatal: #ff0055;
+    --log-error: #f85149;
+    --log-warn: #d29922;
+    --log-info: #58a6ff;
+    --log-debug: #8b949e;
+    --log-trace: #a371f7;
+    --log-notice: #3fb950;
+    
+    /* Base line height. VirtualScroller measures the real rendered line
+       height and overrides this var with the measured value at runtime,
+       so font/zoom changes stay in sync with row positioning. */
+    --line-height: 20px;
+    --font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+body.theme-light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f3f3f3;
+    --bg-tertiary: #e5e5e5;
+    --text-color: #1e1e1e;
+    --text-muted: #6e6e6e;
+    --accent-color: #007acc;
+    --accent-hover: #005999;
+    --border-color: #cccccc;
+    /* On the light theme the divider is slightly darker than the border. */
+    --splitter-color: #a8a8a8;
+    --log-fatal: #a60000;
+    --log-error: #cd3131;
+    --log-warn: #bf8803;
+    --log-info: #005fb8;
+    --log-debug: #616161;
+    --log-trace: #6e40c9;
+    --log-notice: #1a7f37;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+}
+
+body, html {
+    width: 100%;
+    height: 100%;
+    font-family: var(--font-family);
+    background-color: var(--bg-primary);
+    color: var(--text-color);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Drag and Drop visual indicator.
+   The whole window is the drop surface (Wails OnFileDrop is registered with
+   useDropTarget=false). Highlight #main-container while files are dragged over. */
+body.drag-over #main-container {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: -4px;
+    background-color: rgba(14, 99, 156, 0.08);
+}
+
+/* Inline SVG icons (replacing Font Awesome for offline/desktop reliability) */
+.icon {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+#btn-open .icon,
+#btn-recent .icon,
+#btn-follow .icon,
+.ctx-item .icon,
+.search-main-icon.icon {
+    margin-right: 6px;
+}
+
+.hostkey-value {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px 10px;
+    word-break: break-all;
+    color: var(--text-color);
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Tab bar — Chrome/VS Code style: tabs sit on the bottom edge of the bar and
+   the active tab visually connects to the content below. Horizontal scroll is
+   reserved in a dedicated gutter under the tabs so it never overlaps them. */
+.tab-bar-container {
+    height: 40px;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: stretch;
+    padding: 0 6px 0 4px;
+    gap: 6px;
+    flex-shrink: 0;
+    position: relative;
+}
+
+/* Scrollable tab strip. Tabs are bottom-aligned; the scrollbar lives in the
+   6px gutter below them (padding-bottom) and never covers tab content. */
+.tab-list {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    /* Permanent gutter so layout does not jump when the scrollbar appears. */
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+    /* Space for the thin horizontal scrollbar under the tabs. */
+    padding-bottom: 0;
+    margin-bottom: -1px; /* overlap the container border so active tab connects */
+}
+
+.tab-list::-webkit-scrollbar {
+    height: 4px;
+}
+
+.tab-list::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 0 6px;
+}
+
+.tab-list::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 2px;
+    min-width: 32px;
+}
+
+.tab-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+.tab-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    padding-bottom: 4px;
+}
+
+.tab-item {
+    height: 32px;
+    padding: 0 10px 0 12px;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    max-width: 200px;
+    min-width: 100px;
+    user-select: none;
+    transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.tab-item:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-color);
+}
+
+.tab-item.active {
+    background-color: var(--bg-primary);
+    border-color: var(--border-color);
+    border-bottom-color: var(--bg-primary);
+    color: var(--text-color);
+    font-weight: 600;
+    /* Accent indicator on top of the active tab */
+    box-shadow: inset 0 2px 0 0 var(--accent-color);
+    z-index: 1;
+}
+
+.tab-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+}
+
+.tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 4px;
+    color: var(--text-muted);
+    transition: background-color 0.12s, color 0.12s;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.tab-item:hover .tab-close,
+.tab-item.active .tab-close {
+    opacity: 1;
+}
+
+.tab-close:hover {
+    background-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+/* --- Tab groups (Chrome-like containers) --- */
+.tab-group {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 100%;
+    flex-shrink: 0;
+    padding: 0 3px;
+    border-radius: 6px 6px 0 0;
+    background-color: color-mix(in srgb, var(--group-color, #0e639c) 14%, transparent);
+}
+
+.tab-group-header {
+    height: 22px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px;
+    margin-bottom: 5px;
+    border-radius: 11px;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    max-width: 160px;
+    background-color: var(--group-color, var(--accent-color));
+}
+
+.tab-group-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tab-group-chevron,
+.tab-group-count {
+    font-size: 10px;
+    opacity: 0.85;
+    flex-shrink: 0;
+}
+
+.tab-group-body {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 100%;
+}
+
+.tab-group.collapsed .tab-group-body {
+    display: none;
+}
+
+.tab-item.in-group {
+    border-left: 3px solid var(--group-color, var(--accent-color));
+}
+
+/* --- Tab / group drag & drop --- */
+.tab-item.dragging,
+.tab-group-header.dragging {
+    opacity: 0.45;
+}
+
+.tab-item.drop-before,
+.tab-group-header.drop-before {
+    box-shadow: inset 2px 0 0 0 var(--accent-color);
+}
+
+.tab-item.drop-after,
+.tab-group-header.drop-after {
+    box-shadow: inset -2px 0 0 0 var(--accent-color);
+}
+
+.tab-group-header.drop-into {
+    outline: 2px dashed var(--accent-color);
+    outline-offset: 1px;
+}
+
+/* --- Context submenu (Move to Group) --- */
+.ctx-has-submenu {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.ctx-submenu {
+    position: absolute;
+    left: 100%;
+    top: -4px;
+    min-width: 170px;
+    padding: 4px 0;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    display: none;
+    z-index: 1000;
+}
+
+.ctx-has-submenu:hover .ctx-submenu {
+    display: block;
+}
+
+.ctx-submenu-item {
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.ctx-submenu-item:hover {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
+.ctx-submenu-arrow {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+/* --- Groups panel --- */
+.groups-list {
+    list-style: none;
+    margin: 0 0 12px 0;
+    padding: 0;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.groups-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+}
+
+.groups-list-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.groups-empty {
+    padding: 12px 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+}
+
+.group-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.btn-icon {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    padding: 6px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.btn-icon:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.toolbar {
+    height: 36px;
+    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+button {
+    background-color: var(--bg-tertiary);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background-color 0.15s ease;
+}
+
+button:hover {
+    background-color: var(--border-color);
+}
+
+button.active {
+    background-color: var(--accent-color);
+    border-color: var(--accent-hover);
+    color: #ffffff;
+}
+
+select {
+    background-color: var(--bg-tertiary);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    border-radius: 4px;
+    outline: none;
+    font-family: inherit;
+    font-size: 13px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23d4d4d4' d='M2.832 3.168a.5.5 0 0 1 .707 0l2.668 2.667 2.668-2.667a.5.5 0 1 1 .707.707l-3.182 3.18a.5.5 0 0 1-.707 0L2.125 3.875a.5.5 0 0 1 0-.707z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
+
+input[type="number"] {
+    background-color: var(--bg-tertiary);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    border-radius: 4px;
+    outline: none;
+    font-family: inherit;
+    font-size: 13px;
+    text-align: center;
+    width: 80px;
+}
+
+body.theme-light select {
+    background-color: #ffffff;
+    color: #1e1e1e;
+    border-color: #cccccc;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231e1e1e' d='M2.832 3.168a.5.5 0 0 1 .707 0l2.668 2.667 2.668-2.667a.5.5 0 1 1 .707.707l-3.182 3.18a.5.5 0 0 1-.707 0L2.125 3.875a.5.5 0 0 1 0-.707z'/%3E%3C/svg%3E");
+}
+
+body.theme-light select option {
+    background-color: #ffffff;
+    color: #1e1e1e;
+}
+
+.phpstorm-search-box {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0 8px;
+    position: relative;
+}
+
+.phpstorm-search-box:focus-within {
+    border-color: var(--accent-color);
+}
+
+.search-main-icon {
+    color: var(--text-muted);
+    margin-right: 6px;
+}
+
+.phpstorm-search-box input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    outline: none;
+    font-size: 13px;
+    padding: 6px 0;
+}
+
+.search-options {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.search-opt-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 4px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.search-opt-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-color);
+}
+
+.search-opt-btn.active {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
+.statusbar {
+    height: 26px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 12px;
+    font-size: 11px;
+    background-color: var(--accent-color);
+    color: #ffffff;
+    flex-shrink: 0;
+}
+
+#main-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.panel {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--bg-primary);
+}
+
+#panel-top {
+    flex: 1;
+    min-height: 100px;
+}
+
+#panel-bottom {
+    height: 250px;
+    min-height: 60px;
+    flex: none;
+}
+
+.splitter {
+    height: 6px;
+    background-color: var(--splitter-color);
+    cursor: row-resize;
+    z-index: 10;
+    flex-shrink: 0;
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.splitter:hover {
+    background-color: var(--accent-color);
+}
+
+.viewport {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: auto;
+    position: relative;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+.log-content-container {
+    position: sticky;
+    top: 0;
+    width: max-content;
+    min-width: 100%;
+    /* Visible so long lines can extend the horizontal scroll range. */
+    overflow: visible;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+/* Tall, empty element that gives the scroll viewport its (capped) scroll
+   range. Width is driven by VirtualScroller from measured line widths so
+   horizontal overflow is scrollable. */
+.log-scroll-spacer {
+    position: relative;
+    width: 1px;
+    min-width: 100%;
+}
+
+.log-row {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: var(--line-height);
+    line-height: var(--line-height);
+    display: flex;
+    font-size: 13px;
+    white-space: pre;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    cursor: pointer;
+    width: max-content;
+    min-width: 100%;
+    overflow: visible;
+}
+
+.log-row:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.log-row.highlighted {
+    background-color: rgba(14, 99, 156, 0.5) !important;
+    border-left: 3px solid #60a5fa;
+}
+
+.log-row.selected {
+    background-color: rgba(96, 165, 250, 0.3) !important;
+    border-left: 3px solid #60a5fa;
+}
+
+.log-num {
+    width: 70px;
+    min-width: 70px;
+    color: var(--text-muted);
+    text-align: right;
+    padding-right: 12px;
+    user-select: none;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+}
+
+.log-text {
+    padding-left: 8px;
+    /* Grow with content so long lines enable horizontal scroll (not flex-shrink). */
+    flex: 0 0 auto;
+    white-space: pre;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+/* Level colors only — no bold (dense monospace stays readable). */
+.log-fatal  { color: var(--log-fatal); }
+.log-error  { color: var(--log-error); }
+.log-warn   { color: var(--log-warn); }
+.log-info   { color: var(--log-info); }
+.log-debug  { color: var(--log-debug); }
+.log-trace  { color: var(--log-trace); }
+.log-notice { color: var(--log-notice); }
+
+/* LogHighlighter token colors — color only, no bold weights. */
+.hl-date   { color: var(--text-muted); }
+.hl-ip     { color: #ff9d00; }
+.hl-url    { color: #58a6ff; text-decoration: underline; }
+.hl-json-key { color: #79c0ff; }
+.hl-http-2xx { color: #3fb950; }
+.hl-http-4xx { color: #f85149; }
+.hl-fatal  { color: var(--log-fatal); }
+.hl-error  { color: var(--log-error); }
+.hl-warn   { color: var(--log-warn); }
+.hl-info   { color: var(--log-info); }
+.hl-debug  { color: var(--log-debug); }
+.hl-trace  { color: var(--log-trace); }
+.hl-notice { color: var(--log-notice); }
+.hl-uuid   { color: #bc8cff; }
+.hl-hex    { color: #ff7b72; }
+.hl-metric { color: #56d4dd; }
+.hl-pid    { color: var(--text-muted); font-style: italic; }
+
+mark.search-highlight {
+    background: rgba(234, 179, 8, 0.4);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+}
+
+/* SSH open-progress overlay: blocks interaction while a remote log streams in
+   and shows the current stage plus determinate (or indeterminate) progress. */
+.ssh-progress-box {
+    min-width: 360px;
+    max-width: 480px;
+    align-items: center;
+    text-align: center;
+}
+
+.ssh-spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent-color);
+    border-radius: 50%;
+    animation: ssh-spin 0.9s linear infinite;
+    align-self: center;
+}
+
+@keyframes ssh-spin {
+    to { transform: rotate(360deg); }
+}
+
+.ssh-progress-bar-wrap {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.ssh-progress-bar-wrap .ssh-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent-color);
+    transition: width 0.2s ease-out;
+}
+
+/* No total probed -> slide the bar back and forth instead of a percentage. */
+.ssh-progress-bar-indeterminate {
+    animation: ssh-slide 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes ssh-slide {
+    from { margin-left: 0%; width: 35%; }
+    to   { margin-left: 65%; width: 35%; }
+}
+
+.ssh-progress-bytes {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Remote directory browser: a compact file picker over SSH. */
+.ssh-path-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.ssh-path-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.ssh-browse-box {
+    min-width: 520px;
+    max-width: 720px;
+}
+
+.ssh-browse-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-primary);
+}
+
+.ssh-browse-list li {
+    padding: 7px 12px;
+    font-size: 13px;
+    font-family: var(--font-family);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.ssh-browse-list li:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.ssh-browse-selected {
+    background-color: var(--accent-color) !important;
+    color: #fff;
+}
+
+.ssh-browse-up {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.ssh-browse-loading,
+.ssh-browse-empty {
+    color: var(--text-muted);
+    cursor: default;
+    font-style: italic;
+}
+
+.ssh-browse-loading:hover,
+.ssh-browse-empty:hover {
+    background-color: transparent;
+}
+
+
+.modal-content {
+    background: var(--bg-secondary);
+    padding: 24px;
+    border-radius: 8px;
+    min-width: min(480px, 92vw);
+    width: min(520px, 92vw);
+    max-width: 92vw;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    color: var(--text-color);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+}
+
+.form-group label {
+    font-size: 12px;
+    color: var(--text-color);
+}
+
+.form-group input, .form-group select {
+    background-color: var(--bg-primary);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: 4px;
+    outline: none;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.validation-error {
+    font-size: 11px;
+    color: #ef4444;
+}
+
+.form-group input.is-invalid,
+.form-group select.is-invalid {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+}
+
+.form-group input.is-valid,
+.form-group select.is-valid {
+    border-color: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.field-error {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #ef4444;
+}
+
+label.required::after {
+    content: " *";
+    color: #ef4444;
+}
+
+.checkbox-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.color-picker-grid {
+    display: flex;
+    gap: 10px;
+}
+
+.color-circle {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+}
+
+.color-circle.selected {
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.btn-danger {
+    background-color: #dc2626;
+    color: #fff;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: var(--accent-color);
+    padding: 8px 0;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+}
+.btn-link:hover {
+    text-decoration: underline;
+}
+
+/* ── Recent files list (stable row height; no layout shift on hover) ── */
+.recent-list {
+    list-style: none;
+    max-height: 280px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.recent-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 52px;
+    min-height: 52px;
+    max-height: 52px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    /* Prevent hover background from affecting metrics */
+    background-color: transparent;
+}
+
+.recent-item:last-child {
+    border-bottom: none;
+}
+
+.recent-item:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.recent-item-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.recent-path {
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 16px;
+    height: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-color);
+}
+
+.recent-info {
+    font-size: 11px;
+    line-height: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Fixed trail: badge slot + delete — never changes size on hover */
+.recent-item-actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 72px;
+    min-width: 72px;
+    height: 28px;
+}
+
+.recent-badge-slot {
+    width: 36px;
+    min-width: 36px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.recent-badge {
+    background-color: var(--accent-color);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    padding: 0 6px;
+    border-radius: 4px;
+    line-height: 18px;
+    height: 18px;
+    box-sizing: border-box;
+    display: inline-block;
+    white-space: nowrap;
+}
+
+/* Beat global `button` / `button:hover` rules — fixed box, color-only hover */
+button.recent-remove-btn,
+.recent-remove-btn {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    max-width: 28px;
+    max-height: 28px;
+    margin: 0;
+    padding: 0;
+    gap: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    background-color: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0.5;
+    font-size: 0;
+    line-height: 0;
+    transition: none;
+}
+
+button.recent-remove-btn:hover,
+.recent-remove-btn:hover,
+.recent-item:hover button.recent-remove-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    background: rgba(239, 68, 68, 0.15);
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    opacity: 1;
+}
+
+button.recent-remove-btn .icon,
+.recent-remove-btn .icon {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    flex-shrink: 0;
+    pointer-events: none;
+    display: block;
+}
+
+.search-nav-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.btn-nav {
+    padding: 6px 10px;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.btn-nav:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background-color: var(--bg-secondary);
+}
+
+.phpstorm-search-box.invalid-regex {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 1px #ef4444;
+}
+
+.regex-error-badge {
+    background-color: #ef4444;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 11px;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 6px;
+    cursor: pointer;
+}
+
+.context-menu {
+    position: fixed;
+    z-index: 4000;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    padding: 4px 0;
+    min-width: 180px;
+}
+
+.ctx-item {
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.ctx-item:hover {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
+.ctx-divider {
+    height: 1px;
+    background-color: var(--border-color);
+    margin: 4px 0;
+}
+
+/* Input history dropdown */
+.input-history-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    margin-top: 2px;
+    background-color: var(--bg-elevated, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    max-height: 240px;
+    overflow: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.input-history-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-color);
+}
+
+.input-history-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.input-history-delete {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #999);
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 6px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.input-history-delete:hover {
+    background-color: var(--accent-danger, #c0392b);
+    color: #fff;
+}
+
+.input-history-clear {
+    padding: 6px 10px;
+    cursor: pointer;
+    text-align: center;
+    font-size: 13px;
+    color: var(--accent-danger, #c0392b);
+    border-top: 1px solid var(--border-color);
+}
+
+.input-history-clear:hover {
+    background-color: var(--accent-danger, #c0392b);
+    color: #fff;
+}
+
+.input-history-item.active,
+.input-history-item:hover {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
+/* --- Search pane layout control (orientation / side picker) --- */
+.search-layout-control {
+    position: relative;
+}
+
+#search-layout-icon {
+    pointer-events: none;
+}
+
+.popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 100;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 10px;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.popover.hidden {
+    display: none;
+}
+
+.popover-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.popover-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.layout-orientation,
+.layout-sides {
+    display: flex;
+    gap: 6px;
+}
+
+.layout-orientation {
+    flex-direction: column;
+}
+
+.layout-opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.layout-opt .icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.layout-opt:hover {
+    border-color: var(--accent-color);
+}
+
+.layout-opt.active {
+    border-color: var(--accent-color);
+    background-color: var(--accent-soft, rgba(79, 195, 247, 0.15));
+}
+
+.layout-sides {
+    justify-content: space-between;
+}
+
+.layout-side {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.layout-side .icon {
+    width: 20px;
+    height: 20px;
+}
+
+.layout-side:hover {
+    border-color: var(--accent-color);
+}
+
+.layout-side.active {
+    border-color: var(--accent-color);
+    background-color: var(--accent-soft, rgba(79, 195, 247, 0.15));
+}
+
+/* ---- UX wave 1-2: separators, empty state, toasts, help ---- */
+.toolbar-sep { width:1px; align-self:stretch; margin:6px 4px; background:var(--border,#333); }
+
+.empty-state { position:absolute; inset:0; display:flex; flex-direction:column; gap:10px;
+  align-items:center; justify-content:center; color:var(--text-dim,#8a8a8a); pointer-events:none; }
+.empty-state .empty-icon .icon { width:44px; height:44px; opacity:.45; }
+.empty-title { font-size:15px; }
+.empty-sub { font-size:12.5px; opacity:.8; }
+
+.toast-host { position:fixed; right:16px; bottom:40px; display:flex; flex-direction:column; gap:8px; z-index:9999; }
+.toast { max-width:420px; padding:10px 14px; border-radius:8px; font-size:13px; cursor:pointer; line-height:1.4;
+  background:#2b2b2b; color:#eee; box-shadow:0 4px 14px rgba(0,0,0,.35);
+  animation:toast-in 180ms ease-out; }
+.toast > span { display:block; white-space:pre-wrap; word-break:break-word; }
+.toast > br { content:''; display:block; }
+.toast-error { background:#4a1f1f; border-left:3px solid #e05555; }
+.toast-info  { background:#1f2f4a; border-left:3px solid #5a8fe0; }
+.toast-out   { opacity:0; transform:translateY(6px); transition:all 180ms ease-out; }
+@keyframes toast-in { from { opacity:0; transform:translateY(8px);} to { opacity:1; transform:none;} }
+
+.help-table { border-collapse:collapse; font-size:13px; }
+.help-table td { padding:4px 12px 4px 0; }
+kbd { background:#333; border-radius:4px; padding:2px 6px; font-family:inherit; font-size:12px; }
+
+#main-container.results-only #panel-top,
+#main-container.results-only #splitter { display:none; }
+
+#main-container.results-only #panel-bottom {
+    flex: 1;
+    height: auto;
+    min-height: 100px;
+}
+
+#status-levels span[id^="lvl"] { cursor:pointer; text-decoration:underline dotted; }
+
+/* Results-only mode badge in the status bar — clickable to exit the mode. */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 0.02em;
+    background: rgba(255, 255, 255, 0.22);
+    color: #fff;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease;
+}
+.status-badge:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+.status-badge:focus-visible {
+    outline: 1px solid #fff;
+    outline-offset: 1px;
+}
+.status-badge.hidden {
+    display: none;
+}
+
+/* Secondary AND-filter input: explicit sizing so it stays visible inside the
+   flex search box next to the primary field and option buttons. */
+#search-input { flex: 1 1 auto; min-width: 120px; }
+#secondary-search-input {
+    flex: 0 0 clamp(140px, 18vw, 260px);
+    margin-left: 6px;
+    padding: 3px 8px;
+    border-left: 1px solid var(--border-color, rgba(128,128,128,0.35));
+}
+#secondary-search-input:focus {
+    outline: none;
+}
+
+.search-clear-btn {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    margin: 0 2px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary, #999);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+.search-clear-btn:hover {
+    background: rgba(128, 128, 128, 0.2);
+    color: var(--text-primary, #eee);
+}
+.search-clear-btn.hidden {
+    display: none;
+}
+
+/* Visual link between primary search and secondary AND-filter. */
+.search-and-sep {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    margin: 0 2px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent-color, #5a8fe0);
+    background: rgba(90, 143, 224, 0.12);
+    user-select: none;
+}
+
+/* Active search: thin accent ring on the search box + emphasized match counter. */
+.phpstorm-search-box.search-active {
+    box-shadow: 0 0 0 1px var(--accent-color, #5a8fe0);
+}
+#match-counter-text.search-active {
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Log density driven by Settings → font size. */
+.viewport .log-row,
+.viewport {
+    font-size: var(--log-font-size, 13px);
+}

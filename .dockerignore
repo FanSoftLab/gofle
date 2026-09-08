@@ -1,0 +1,30 @@
+# Cache directories
+Thumbs.db
+*.DS_Store
+*.empty
+
+# PhpStorm project files
+/.idea/**
+
+# Netbeans project files
+nbproject
+
+# Eclipse, Zend studio, Aptana or other eclipse like project files
+.buildpath
+.project
+.settings
+
+.git/*
+.kilo/*
+glogg-go
+test_results.log
+
+# Build outputs (only for final stage)
+frontend/dist
+frontend/node_modules
+build/bin
+dist/
+.buildout/
+dockerman_main.log
+# NOTE: build/appicon.png is embedded via //go:embed in main.go and MUST be
+# present during `go vet`/`go build` inside the container, so it is not ignored.

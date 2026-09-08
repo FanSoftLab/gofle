@@ -1,0 +1,431 @@
+<!-- frontend/index.html -->
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- security: lock down the webview. The app loads only same-origin
+         scripts/styles (module script from the asset server, bundled CSS).
+         Inline styles are permitted because the UI sets dynamic per-tab
+         colors; inline scripts and remote origins are forbidden. -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'">
+    <title>GoFLE</title>
+</head>
+<body class="theme-dark">
+    <!-- Tab Bar Header -->
+    <div class="tab-bar-container">
+        <div class="tab-list" id="tab-list"></div>
+        <div class="tab-actions">
+            <button class="btn-icon" id="btn-settings" data-i18n-title="tooltip_settings">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <div class="search-layout-control">
+                <button class="btn-icon" id="btn-search-layout" data-i18n-title="tooltip_search_layout">
+                    <svg class="icon" viewBox="0 0 24 24" id="search-layout-icon"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg>
+                </button>
+                <div id="search-layout-popover" class="popover hidden">
+                    <div class="popover-section">
+                        <span class="popover-label" data-i18n="layout_orientation">Розташування:</span>
+                        <div class="layout-orientation">
+                            <button class="layout-opt" data-orient="horizontal" data-i18n-title="layout_horizontal_title">
+                                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg>
+                                <span data-i18n="layout_horizontal">Горизонтально</span>
+                            </button>
+                            <button class="layout-opt" data-orient="vertical" data-i18n-title="layout_vertical_title">
+                                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg>
+                                <span data-i18n="layout_vertical">Вертикально</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="popover-section">
+                        <span class="popover-label" data-i18n="layout_side">Сторона:</span>
+                        <div class="layout-sides">
+                            <button class="layout-side" data-side="top" data-i18n-title="layout_top_title">
+                                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="8" rx="1.5"/><path d="M12 13v6"/><path d="M9 16l3 3 3-3"/></svg>
+                            </button>
+                            <button class="layout-side" data-side="bottom" data-i18n-title="layout_bottom_title">
+                                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="13" width="16" height="8" rx="1.5"/><path d="M12 11V5"/><path d="M9 8l3-3 3 3"/></svg>
+                            </button>
+                            <button class="layout-side" data-side="left" data-i18n-title="layout_left_title">
+                                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="16" rx="1.5"/><path d="M13 12h6"/><path d="M16 9l3 3-3 3"/></svg>
+                            </button>
+                            <button class="layout-side" data-side="right" data-i18n-title="layout_right_title">
+                                <svg class="icon" viewBox="0 0 24 24"><rect x="13" y="4" width="8" height="16" rx="1.5"/><path d="M11 12H5"/><path d="M8 9l-3 3 3 3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Toolbar -->
+    <div class="toolbar">
+        <button class="btn-icon" id="btn-open" data-i18n-title="btn_open_title">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-recent" data-i18n-title="btn_recent_title">
+            <svg class="icon" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-open-ssh" data-i18n-title="tooltip_open_ssh">
+            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7" y2="7.5"/><line x1="7" y1="16.5" x2="7" y2="16.5"/></svg>
+        </button>
+        <span class="toolbar-sep"></span>
+        
+        <button class="btn-icon" id="btn-goto-line" data-i18n-title="tooltip_goto_line">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M4 12h11"/><path d="M12 7l5 5-5 5"/><path d="M20 5v14"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-follow" data-i18n-title="btn_follow_title">
+            <svg class="icon" viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+        </button>
+        <span class="toolbar-sep"></span>
+        
+
+        <div class="phpstorm-search-box" id="search-box-container">
+            <svg class="icon search-main-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" placeholder="Фільтр / Regex (натисніть /)">
+            <span class="search-and-sep" data-i18n="search_and_label" title="AND">AND</span>
+            <input type="text" id="secondary-search-input" data-i18n-placeholder="secondary_placeholder" data-i18n-title="secondary_tooltip" placeholder="" title="" autocomplete="off">
+            <button type="button" id="btn-clear-search" class="search-clear-btn hidden" data-i18n-title="btn_clear_search_title" title="Очистити пошук" aria-label="Clear search">×</button>
+            <span id="regex-error-indicator" class="regex-error-badge hidden" title="">!</span>
+            <div class="search-options">
+                <button class="search-opt-btn" id="btn-opt-match-case" data-i18n-title="opt_case_title">Cc</button>
+                <button class="search-opt-btn" id="btn-opt-regex" data-i18n-title="opt_regex_title">.*</button>
+                <button class="search-opt-btn" id="btn-opt-invert" data-i18n-title="opt_invert_title">!</button>
+                <button class="search-opt-btn" id="btn-search-history" data-i18n-title="btn_search_history_title" title="Історія">&#9662;</button>
+            </div>
+        </div>
+
+        <div class="search-nav-group">
+            <button class="btn-nav" id="btn-search-first" disabled data-i18n-title="nav_first_title">
+                <svg class="icon" viewBox="0 0 24 24"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
+            </button>
+            <button class="btn-nav" id="btn-search-prev" disabled data-i18n-title="nav_prev_title">
+                <svg class="icon" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+            </button>
+            <button class="btn-nav" id="btn-search-next" disabled data-i18n-title="nav_next_title">
+                <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <button class="btn-nav" id="btn-search-last" disabled data-i18n-title="nav_last_title">
+                <svg class="icon" viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+            </button>
+            <button class="btn-nav" id="btn-save-search-results" disabled data-i18n-title="btn_save_search_results_title">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Dual Resizable Panels Container -->
+    <div id="main-container">
+        <!-- Top Panel: Full Log View -->
+        <div id="panel-top" class="panel">
+            <div id="viewport-main" class="viewport"></div>
+            <div id="empty-state" class="empty-state hidden">
+                <div class="empty-icon"><svg viewBox="0 0 24 24" class="icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="empty-title" data-i18n="empty_title">Відкрийте лог, щоб почати</div>
+                <div class="empty-sub" data-i18n="empty_sub">Перетягніть файл сюди · Ctrl+O — відкрити · Ctrl+R — останні · / — пошук · підтримується ssh://</div>
+            </div>
+        </div>
+
+        <!-- Resizable Splitter Divider -->
+        <div id="splitter" class="splitter"></div>
+
+        <!-- Bottom Panel: Search Results View -->
+        <div id="panel-bottom" class="panel">
+            <div id="viewport-filter" class="viewport"></div>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="statusbar" id="statusbar">
+        <span id="status-file-text" data-i18n="status_file_none">Файл: не вибрано</span>
+        <span id="status-size-text">0 B</span>
+        <span id="status-lines-text">0</span>
+        <span id="match-counter-text">0 / 0 рядків</span>
+        <button type="button" id="status-filter-badge" class="status-badge hidden" data-i18n="status_filter_badge" data-i18n-title="status_filter_badge_title" title="">Лише результати</button>
+        <span id="status-levels" class="hidden"><span id="lvl-e" data-i18n-title="tooltip_lvl_e">E:0</span> <span id="lvl-w" data-i18n-title="tooltip_lvl_w">W:0</span></span>
+        <span id="status-tail-text" data-i18n="status_tail_none">Tail: —</span>
+    </div>
+
+    <!-- Context Menus -->
+    <div id="ctx-menu-main" class="context-menu hidden">
+        <div class="ctx-item" id="ctx-main-copy-numbered"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/><line x1="13" y1="7" x2="17" y2="7"/></svg> <span data-i18n="ctx_copy_numbered">Копіювати рядок з номером</span></div>
+        <div class="ctx-item" id="ctx-main-copy"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span data-i18n="ctx_copy_line">Копіювати рядок</span></div>
+        <div class="ctx-item" id="ctx-main-add-search"><svg class="icon" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> <span data-i18n="ctx_add_to_search">Додати до пошуку</span></div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" id="ctx-main-save-log"><svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> <span data-i18n="ctx_save_full_log">Зберегти лог як...</span></div>
+    </div>
+
+    <div id="ctx-menu-filter" class="context-menu hidden">
+        <div class="ctx-item" id="ctx-filter-copy"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span data-i18n="ctx_copy_line">Копіювати рядок</span></div>
+        <div class="ctx-item" id="ctx-filter-goto"><svg class="icon" viewBox="0 0 24 24"><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg> <span data-i18n="ctx_goto_line">Перейти</span></div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" id="ctx-filter-save"><svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> <span data-i18n="ctx_save_search_results">Зберегти результати пошуку</span></div>
+    </div>
+
+    <!-- Tab context menu (populated dynamically by TabManager) -->
+    <div id="ctx-menu-tab" class="context-menu hidden"></div>
+
+    <!-- Tab group context menu (populated dynamically by TabManager) -->
+    <div id="ctx-menu-group" class="context-menu hidden"></div>
+
+    <!-- Modal Dialogs -->
+    <div id="recent-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="recent_modal_title">Нещодавно відкриті файли</h3>
+            <ul id="recent-files-list" class="recent-list"></ul>
+            <div class="modal-actions">
+                <button id="btn-clear-recent" class="btn-danger" data-i18n="btn_clear_history">Очистити</button>
+                <button id="btn-close-recent" data-i18n="btn_close">Закрити</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="group-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="group_modal_title">Налаштування групи вкладок</h3>
+            <div class="form-group">
+                <label data-i18n="label_group_name">Назва групи:</label>
+                <input type="text" id="group-name-input" />
+            </div>
+            <div class="form-group">
+                <label data-i18n="label_group_color">Колір групи:</label>
+                <div class="color-picker-grid" id="group-color-picker">
+                    <div class="color-circle selected" data-color="#0e639c" style="background-color: #0e639c;"></div>
+                    <div class="color-circle" data-color="#10b981" style="background-color: #10b981;"></div>
+                    <div class="color-circle" data-color="#f59e0b" style="background-color: #f59e0b;"></div>
+                    <div class="color-circle" data-color="#ef4444" style="background-color: #ef4444;"></div>
+                    <div class="color-circle" data-color="#8b5cf6" style="background-color: #8b5cf6;"></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="btn-delete-group" class="btn-danger hidden" data-i18n="btn_delete_group">Видалити групу</button>
+                <button id="btn-save-group" class="active" data-i18n="btn_save">Зберегти</button>
+                <button id="btn-cancel-group" data-i18n="btn_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-rename-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="tab_options_title">Налаштування вкладки</h3>
+            <div class="form-group">
+                <label data-i18n="label_tab_name">Назва вкладки:</label>
+                <input type="text" id="tab-rename-input" />
+            </div>
+            <div class="modal-actions">
+                <button id="btn-save-tab-rename" class="active" data-i18n="btn_save">Зберегти</button>
+                <button id="btn-cancel-tab-rename" data-i18n="btn_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="goto-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="goto_modal_title">Перейти до рядка</h3>
+            <div class="form-group">
+                <label data-i18n="label_line_number">Номер рядка (1..N):</label>
+                <input type="text" inputmode="numeric" id="goto-line-input" />
+                <span id="err-goto-line" class="validation-error hidden"></span>
+            </div>
+            <div class="modal-actions">
+                <button id="btn-submit-goto" class="active" data-i18n="btn_goto">Перейти</button>
+                <button id="btn-cancel-goto" data-i18n="btn_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="settings_modal_title">Налаштування</h3>
+            <div class="form-group">
+                <label data-i18n="label_theme">Тема оформлення:</label>
+                <select id="settings-theme">
+                    <option value="system" data-i18n="opt_theme_system">Системна</option>
+                    <option value="dark" data-i18n="opt_theme_dark">Dark (Темна)</option>
+                    <option value="light" data-i18n="opt_theme_light">Light (Світла)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label data-i18n="label_language">Мова інтерфейсу:</label>
+                <select id="settings-lang">
+                    <option value="system" data-i18n="opt_lang_system">Системна</option>
+                    <option value="uk">Українська</option>
+                    <option value="en">English</option>
+                </select>
+            </div>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="settings-save-tabs" />
+                <label for="settings-save-tabs" data-i18n="label_save_tabs">Зберігати відкриті вкладки при закритті</label>
+            </div>
+            <div class="form-group">
+                <label for="settings-max-history" data-i18n="label_max_history">Макс. кількість записів в історії:</label>
+                <input type="number" id="settings-max-history" min="1" max="1000" step="1" />
+            </div>
+            <div class="form-group">
+                <label for="settings-font-size" data-i18n="label_font_size">Розмір шрифту логу:</label>
+                <select id="settings-font-size">
+                    <option value="12">12px</option>
+                    <option value="13" selected>13px</option>
+                    <option value="14">14px</option>
+                    <option value="15">15px</option>
+                    <option value="16">16px</option>
+                    <option value="18">18px</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button id="btn-save-settings" class="active" data-i18n="btn_save">Зберегти</button>
+                <button id="btn-cancel-settings" data-i18n="btn_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ssh-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="ssh_modal_title">Відкрити лог через віддалений доступ</h3>
+            <div class="form-group">
+                <label data-i18n="label_protocol">Протокол:</label>
+                <select id="ssh-protocol">
+                    <option value="ssh" data-i18n="opt_ssh">SSH</option>
+                    <option value="ftp" data-i18n="opt_ftp">FTP / FTPS</option>
+                </select>
+            </div>
+            <div class="form-group hidden" id="group-ssh-tls">
+                <label data-i18n="label_ftp_tls">Режим FTPS:</label>
+                <select id="ssh-tls-mode">
+                    <option value="none" data-i18n="opt_ftp_tls_none">Без TLS (plain)</option>
+                    <option value="explicit" data-i18n="opt_ftp_tls_explicit">Explicit FTPS</option>
+                    <option value="implicit" data-i18n="opt_ftp_tls_implicit">Implicit FTPS</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="required" data-i18n="label_ssh_host">Хост (IP / Domain):</label>
+                <input type="text" id="ssh-host" placeholder="192.168.1.100" />
+                <span id="err-ssh-host" class="field-error hidden"></span>
+            </div>
+            <div class="form-group">
+                <label class="required" data-i18n="label_ssh_port">Порт:</label>
+                <input type="number" id="ssh-port" value="22" />
+                <span id="err-ssh-port" class="field-error hidden"></span>
+            </div>
+            <div class="form-group">
+                <label data-i18n="label_ssh_auth_type">Тип автентифікації:</label>
+                <select id="ssh-auth-type">
+                    <option value="password" data-i18n="opt_ssh_auth_password">Пароль</option>
+                    <option value="key" data-i18n="opt_ssh_auth_key">Приватний ключ</option>
+                </select>
+            </div>
+            <div class="form-group" id="group-ssh-username">
+                <label class="required" data-i18n="label_ssh_username">Користувач:</label>
+                <input type="text" id="ssh-username" placeholder="root" />
+                <span id="err-ssh-username" class="field-error hidden"></span>
+            </div>
+            <div class="form-group" id="group-ssh-password">
+                <label class="required" data-i18n="label_ssh_password">Пароль:</label>
+                <input type="password" id="ssh-password" />
+                <span id="err-ssh-password" class="field-error hidden"></span>
+            </div>
+            <div class="form-group hidden" id="group-ssh-key-path">
+                <label class="required" data-i18n="label_ssh_key_path">Шлях до приватного ключа:</label>
+                <input type="text" id="ssh-key-path" placeholder="/home/user/.ssh/id_rsa" />
+                <span id="err-ssh-key-path" class="field-error hidden"></span>
+            </div>
+            <div class="form-group hidden" id="group-ssh-key-pass">
+                <label data-i18n="label_ssh_key_pass">Passphrase ключа (якщо є):</label>
+                <input type="password" id="ssh-key-pass" />
+            </div>
+            <div class="form-group">
+                <label class="required" data-i18n="label_ssh_remote_path">Шлях до файлу на сервері:</label>
+                <div class="ssh-path-row">
+                    <input type="text" id="ssh-remote-path" placeholder="/var/log/syslog" />
+                    <button id="btn-browse-ssh" type="button" data-i18n="btn_browse">Огляд…</button>
+                </div>
+                <span id="err-ssh-remote-path" class="field-error hidden"></span>
+            </div>
+            <span id="err-ssh-connection" class="validation-error hidden"></span>
+
+            <div class="modal-actions">
+                <button id="btn-submit-ssh" class="active" data-i18n="btn_connect">Підключитись</button>
+                <button id="btn-cancel-ssh" data-i18n="btn_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ssh-progress-overlay" class="modal hidden">
+        <div class="modal-content ssh-progress-box">
+            <div class="ssh-spinner"></div>
+            <h3 id="ssh-progress-stage" data-i18n="prog_connecting">Підключення…</h3>
+            <div class="ssh-progress-bar-wrap">
+                <div id="ssh-progress-bar" class="ssh-progress-bar-indeterminate"></div>
+            </div>
+            <div id="ssh-progress-bytes" class="ssh-progress-bytes">&nbsp;</div>
+        </div>
+    </div>
+
+    <div id="ssh-hostkey-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 id="ssh-hostkey-modal-title" data-i18n="ssh_hostkey_modal_title">Невідомий SSH-хост</h3>
+            <p id="ssh-hostkey-warning" data-i18n="ssh_hostkey_warning">Відбиток ключа сервера відсутній у known_hosts. Перевірте відбиток перед тим, як довіряти хосту (підміна ключа = можливий MITM):</p>
+            <div class="form-group">
+                <label data-i18n="label_ssh_host">Хост:</label>
+                <div id="ssh-hostkey-host" class="hostkey-value"></div>
+            </div>
+            <div class="form-group">
+                <label data-i18n="label_ssh_fingerprint">Відбиток (SHA256):</label>
+                <div id="ssh-hostkey-fingerprint" class="hostkey-value"></div>
+            </div>
+            <div class="modal-actions">
+                <button id="btn-accept-hostkey" class="active" data-i18n="btn_trust_host">Довіряти і запам'ятати</button>
+                <button id="btn-cancel-hostkey" data-i18n="btn_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ssh-browse-modal" class="modal hidden">
+        <div class="modal-content ssh-browse-box">
+            <h3 data-i18n="ssh_browse_title">Вибір файлу логу на сервері</h3>
+            <div class="form-group">
+                <label data-i18n="label_current_path">Поточний шлях:</label>
+                <div id="ssh-browse-path" class="hostkey-value">~</div>
+            </div>
+            <div id="ssh-browse-error" class="validation-error hidden"></div>
+            <div id="ssh-browse-loading" class="ssh-spinner hidden"></div>
+            <ul id="ssh-browse-list" class="ssh-browse-list"></ul>
+            <div class="modal-actions">
+                <button id="btn-browse-up" data-i18n="ssh_browse_up">Вгору (..)</button>
+                <button id="btn-browse-open" class="active" data-i18n="ssh_browse_open_selected">Відкрити вибране</button>
+                <button id="btn-browse-cancel" data-i18n="ssh_browse_cancel">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+    <!-- Help overlay -->
+    <div id="help-overlay" class="modal hidden">
+        <div class="modal-card help-card">
+            <h3 data-i18n="help_title">Гарячі клавиші</h3>
+            <table class="help-table"><tbody>
+                <tr><td><kbd>/</kbd></td><td data-i18n="hk_search">Фокус на пошук</td></tr>
+                <tr><td><kbd>\</kbd></td><td data-i18n="hk_secondary">AND-фільтр у результатах</td></tr>
+                <tr><td><kbd>n</kbd> / <kbd>p</kbd> · <kbd>F3</kbd> / <kbd>Shift+F3</kbd></td><td data-i18n="hk_nextprev">Наступний / попередній збіг</td></tr>
+                <tr><td><kbd>[</kbd> / <kbd>]</kbd> · <kbd>Alt+Home</kbd> / <kbd>Alt+End</kbd></td><td data-i18n="hk_firstlast">Перший / останній збіг</td></tr>
+                <tr><td><kbd>Alt+↓</kbd> / <kbd>Alt+↑</kbd></td><td data-i18n="hk_navalt">Навігація збігами (альтернативні)</td></tr>
+                <tr><td><kbd>Alt+C</kbd> / <kbd>Alt+R</kbd> / <kbd>Alt+I</kbd></td><td data-i18n="hk_searchopts">Регістр · Regex · Інверсія</td></tr>
+                <tr><td><kbd>r</kbd></td><td data-i18n="hk_resultsonly">Лише результати</td></tr>
+                <tr><td><kbd>f</kbd></td><td data-i18n="hk_follow">Слідкувати вкл/викл</td></tr>
+                <tr><td><kbd>e</kbd> · <kbd>Ctrl+S</kbd></td><td data-i18n="hk_export">Експорт</td></tr>
+                <tr><td><kbd>Ctrl+O</kbd> / <kbd>Ctrl+R</kbd> / <kbd>Ctrl+G</kbd></td><td data-i18n="hk_openrecentgoto">Відкрити / Останні / До рядка</td></tr>
+                <tr><td><kbd>Ctrl+Shift+T</kbd></td><td data-i18n="hk_reopen">Повернути закриту вкладку</td></tr>
+                <tr><td><kbd>Alt+1..9</kbd></td><td data-i18n="hk_tabs">Перемкнути вкладку</td></tr>
+                <tr><td><kbd>?</kbd> / <kbd>F1</kbd></td><td data-i18n="hk_help">Ця довідка</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td data-i18n="hk_esc">Закрити діалог / зняти фокус</td></tr>
+            </tbody></table>
+            <div class="modal-actions"><button id="btn-close-help" data-i18n="btn_close">Закрити</button></div>
+        </div>
+    </div>
+
+    <!-- Toast host -->
+    <div id="toast-host" class="toast-host"></div>
+</body>
+</html>
