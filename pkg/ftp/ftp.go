@@ -143,6 +143,11 @@ const (
 	streamProbeInterval = 30 * time.Second
 	streamCloseTimeout  = 30 * time.Second
 	streamStallTimeout  = 60 * time.Second
+	// parallelSyncThreshold is the file size above which parallel range downloads
+	// are used for the initial sync (100 MB).
+	parallelSyncThreshold = 100 * 1024 * 1024
+	// parallelSyncWorkers is the number of concurrent range downloads.
+	parallelSyncWorkers = 4
 )
 
 // resolveCertStore returns the trust store path to use: cfg.KnownHostsPath when
@@ -555,7 +560,20 @@ func (cw *countingWriter) maybeEmit(done int64) {
 
 // initialSync performs the one-time full copy of the remote file into the local
 // temp file via Retr so the indexer has the complete contents before tailing.
+//
+// For files larger than parallelSyncThreshold (100 MB), uses parallel range
+// downloads via multiple FTP connections (REST + RETR) to saturate bandwidth.
 func (s *Streamer) initialSync(ctx context.Context) error {
+	// Use parallel sync for large files when we know the total size
+	if s.remoteTotal >= parallelSyncThreshold {
+		return s.initialSyncParallel(ctx)
+	}
+
+	return s.initialSyncSequential(ctx)
+}
+
+// initialSyncSequential is the original single-stream initial sync using RETR.
+func (s *Streamer) initialSyncSequential(ctx context.Context) error {
 	r, err := withCancel(ctx, s.stopCh, func() (*ftp.Response, error) {
 		return s.client.Retr(s.cfg.RemoteFilePath)
 	})
@@ -583,6 +601,153 @@ func (s *Streamer) initialSync(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// initialSyncParallel performs the initial sync using concurrent range downloads
+// via multiple FTP connections (REST + RETR). Each range is downloaded independently
+// and written to the correct offset in the pre-allocated temp file.
+func (s *Streamer) initialSyncParallel(ctx context.Context) error {
+	if s.remoteTotal <= 0 {
+		// Unknown size, fall back to sequential
+		return s.initialSyncSequential(ctx)
+	}
+
+	// Pre-allocate the temp file to the full remote size
+	if err := s.tmpFile.Truncate(s.remoteTotal); err != nil {
+		slog.Warn("ftp: failed to pre-allocate temp file, falling back to sequential",
+			"remote", s.cfg.RemoteFilePath, "err", err)
+		return s.initialSyncSequential(ctx)
+	}
+
+	// Ensure we start at the beginning
+	if _, err := s.tmpFile.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek temp file: %w", err)
+	}
+
+	// Calculate range boundaries
+	rangeSize := s.remoteTotal / parallelSyncWorkers
+	if rangeSize == 0 {
+		rangeSize = s.remoteTotal
+	}
+
+	type rangeResult struct {
+		index int
+		start int64
+		end   int64
+		n     int64
+		err   error
+	}
+
+	results := make(chan rangeResult, parallelSyncWorkers)
+	var wg sync.WaitGroup
+
+	// Progress tracking
+	var totalDownloaded atomic.Int64
+	progressDone := make(chan struct{})
+	if s.cfg.Progress != nil {
+		s.cfg.Progress("downloading", 0, s.remoteTotal)
+		go func() {
+			ticker := time.NewTicker(progressThrottle)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ticker.C:
+					done := totalDownloaded.Load()
+					s.cfg.Progress("downloading", done, s.remoteTotal)
+				}
+			}
+		}()
+	}
+
+	// Launch workers for each range
+	for i := 0; i < parallelSyncWorkers; i++ {
+		start := int64(i) * rangeSize
+		end := start + rangeSize
+		if i == parallelSyncWorkers-1 {
+			end = s.remoteTotal // Last worker gets the remainder
+		}
+		if start >= end {
+			continue
+		}
+
+		wg.Add(1)
+		go func(idx int, rangeStart, rangeEnd int64) {
+			defer wg.Done()
+
+			n, err := s.downloadRange(ctx, rangeStart, rangeEnd)
+			results <- rangeResult{index: idx, start: rangeStart, end: rangeEnd, n: n, err: err}
+		}(i, start, end)
+	}
+
+	// Wait for all workers
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	var totalBytes int64
+	var firstErr error
+	for r := range results {
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+		totalBytes += r.n
+		totalDownloaded.Add(r.n)
+	}
+
+	close(progressDone)
+
+	if s.cfg.Progress != nil {
+		s.cfg.Progress("downloading", totalDownloaded.Load(), s.remoteTotal)
+	}
+
+	if firstErr != nil {
+		return firstErr
+	}
+
+	// Verify total bytes match expected
+	if totalBytes != s.remoteTotal {
+		slog.Warn("ftp: parallel sync byte count mismatch",
+			"expected", s.remoteTotal, "got", totalBytes,
+			"remote", s.cfg.RemoteFilePath)
+		// Not a hard error - the file might be slightly different
+	}
+
+	return nil
+}
+
+// downloadRange downloads a single byte range [start, end) of the remote file
+// using FTP RETR with offset (RetrFrom) and writes it to the correct offset in the temp file.
+func (s *Streamer) downloadRange(ctx context.Context, start, end int64) (int64, error) {
+	// Use RETR with offset for byte-range retrieval
+	r, err := withCancel(ctx, s.stopCh, func() (*ftp.Response, error) {
+		return s.client.RetrFrom(s.cfg.RemoteFilePath, uint64(start))
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = r.Close() }()
+
+	// Limit to exactly countBytes
+	countBytes := end - start
+	reader := io.LimitReader(r, countBytes)
+
+	// Write to temp file at the correct offset
+	if _, err := s.tmpFile.Seek(start, io.SeekStart); err != nil {
+		return 0, fmt.Errorf("failed to seek temp file for range %d-%d: %w", start, end, err)
+	}
+
+	cw := &countingWriter{w: s.tmpFile, s: s}
+	n, cerr := io.Copy(cw, reader)
+
+	if cerr != nil && !errors.Is(cerr, io.EOF) {
+		return n, fmt.Errorf("failed to download range %d-%d: %w", start, end, cerr)
+	}
+
+	return n, nil
 }
 
 // startSupervisor polls the remote size every probeInterval and appends newly

@@ -250,3 +250,34 @@ func BenchmarkGetLinesPage(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkGetLinesBytes covers the viewport pagination shape using the
+// allocation-free byte slice API.
+func BenchmarkGetLinesBytes(b *testing.B) {
+	fi := newBenchIndexer(b)
+	total := int64(benchTotalLines)
+
+	b.ReportAllocs()
+
+	for i := 0; b.Loop(); i++ {
+		start := (int64(i) * 53) % total
+		if items, err := fi.GetLinesBytes(start, 100); err != nil || len(items) == 0 {
+			b.Fatalf("GetLinesBytes: n=%d err=%v", len(items), err)
+		}
+	}
+}
+
+// BenchmarkGetLevelCounts measures the overhead of retrieving pre-computed
+// level marker counts from the indexer.
+func BenchmarkGetLevelCounts(b *testing.B) {
+	fi := newBenchIndexer(b)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		counts := fi.GetLevelCounts()
+		if len(counts) == 0 {
+			b.Fatal("GetLevelCounts returned empty slice")
+		}
+	}
+}

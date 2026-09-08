@@ -198,6 +198,219 @@ type chunkResult struct {
 	err     error
 }
 
+// SearchResult contains the results of a search, optionally including level counts.
+type SearchResult struct {
+	Matches    []int64
+	ErrorCount int64
+	WarnCount  int64
+}
+
+// SearchWithLevelCounts runs a search and simultaneously counts log level markers
+// (ERROR/FATAL/PANIC = E, WARN = W) in the scanned range. This fuses the search
+// pass and level stats pass into a single ScanLines call, avoiding a full-file
+// re-read when both are needed (e.g., UI showing search results + level badges).
+func (se *SearchEngine) SearchWithLevelCounts(ctx context.Context, opts SearchOptions) (SearchResult, error) {
+	if opts.Query == "" {
+		return SearchResult{Matches: []int64{}}, nil
+	}
+
+	totalLines := se.indexer.TotalLines()
+	if totalLines == 0 {
+		return SearchResult{Matches: []int64{}}, nil
+	}
+
+	// Run the search with level counting enabled
+	matches, errCount, warnCount, err := se.matchRangeWithLevels(ctx, opts, 0, totalLines)
+	return SearchResult{
+		Matches:    matches,
+		ErrorCount: errCount,
+		WarnCount:  warnCount,
+	}, err
+}
+
+// matchRangeWithLevels runs a search over [start, end) and simultaneously
+// counts log level markers. It returns matches, error count, warn count, and error.
+func (se *SearchEngine) matchRangeWithLevels(ctx context.Context, opts SearchOptions, start, end int64) (matches []int64, errCount, warnCount int64, err error) {
+	if opts.Query == "" {
+		return []int64{}, 0, 0, nil
+	}
+
+	totalLines := se.indexer.TotalLines()
+	if end > totalLines {
+		end = totalLines
+	}
+
+	if start < 0 || start >= end {
+		return []int64{}, 0, 0, nil
+	}
+
+	var re *regexp.Regexp
+
+	if opts.IsRegex {
+		compiled, err := se.compileCached(regexPattern(opts.Query, opts.CaseSensitive))
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("invalid regular expression: %w", err)
+		}
+
+		re = compiled
+	}
+
+	queryLower := strings.ToLower(opts.Query)
+	queryIsASCII := isASCII(opts.Query)
+
+	queryBytes := []byte(opts.Query)
+	queryLowerBytes := []byte(queryLower)
+	var queryLowerRunes []rune
+
+	secMatch, err := se.buildSecondaryMatcher(opts)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	if !opts.IsRegex && !opts.CaseSensitive && !queryIsASCII {
+		queryLowerRunes = []rune(queryLower)
+	}
+
+	chunkSize := int64(3000)
+	numChunks := (end - start + chunkSize - 1) / chunkSize
+	numWorkers := 1
+	if end-start > chunkSize {
+		numWorkers = max(runtime.NumCPU(), 1)
+	}
+
+	type chunkResultWithLevels struct {
+		seq      int
+		matches  []int64
+		errCount int64
+		warnCount int64
+		err      error
+	}
+
+	jobs := make(chan int64, numChunks)
+	results := make(chan chunkResultWithLevels, numChunks)
+
+	for i := start; i < end; i += chunkSize {
+		jobs <- i
+	}
+
+	close(jobs)
+
+	var wg sync.WaitGroup
+	for range numWorkers {
+		wg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					results <- chunkResultWithLevels{err: fmt.Errorf("search worker panicked: %v", r)}
+				}
+			}()
+
+			for startIdx := range jobs {
+				qseq := int((startIdx - start) / chunkSize)
+
+				select {
+				case <-ctx.Done():
+					results <- chunkResultWithLevels{seq: qseq, err: ctx.Err()}
+					return
+				default:
+				}
+
+				count := min(chunkSize, end-startIdx)
+
+				localMatches := make([]int64, 0, min(int(count), 64))
+				localErrCount := int64(0)
+				localWarnCount := int64(0)
+
+				err := se.indexer.ScanLinesRetry(startIdx, count, func(idx int64, content []byte) bool {
+					isMatch := false
+					if opts.IsRegex {
+						isMatch = re.Match(content)
+					} else if opts.CaseSensitive {
+						isMatch = bytes.Contains(content, queryBytes)
+					} else if queryIsASCII {
+						isMatch = containsFoldASCIIBytes(content, queryLowerBytes)
+					} else {
+						isMatch = containsFoldRune(content, queryLowerRunes)
+					}
+
+					if opts.InvertMatch {
+						isMatch = !isMatch
+					}
+
+					if isMatch && secMatch != nil {
+						isMatch = secMatch(content)
+					}
+
+					if isMatch {
+						localMatches = append(localMatches, idx)
+					}
+
+					// Count level markers in the first levelScanWindow bytes
+					window := content
+					if len(window) > 160 { // levelScanWindow from indexer
+						window = window[:160]
+					}
+					if bytes.Contains(window, []byte("ERROR")) ||
+						bytes.Contains(window, []byte("FATAL")) ||
+						bytes.Contains(window, []byte("PANIC")) {
+						localErrCount++
+					} else if bytes.Contains(window, []byte("WARN")) {
+						localWarnCount++
+					}
+
+					return true
+				})
+				if err != nil {
+					results <- chunkResultWithLevels{seq: qseq, err: err}
+					return
+				}
+
+				results <- chunkResultWithLevels{
+					seq:       qseq,
+					matches:   localMatches,
+					errCount:  localErrCount,
+					warnCount: localWarnCount,
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+	close(results)
+
+	ordered := make([][]int64, numChunks)
+	var totalMatches int
+	var totalErrCount, totalWarnCount int64
+	var errs []error
+	var canceled bool
+
+	for res := range results {
+		if res.err != nil {
+			if errors.Is(res.err, context.Canceled) || errors.Is(res.err, context.DeadlineExceeded) {
+				canceled = true
+				continue
+			}
+			errs = append(errs, res.err)
+			continue
+		}
+
+		ordered[res.seq] = res.matches
+		totalMatches += len(res.matches)
+		totalErrCount += res.errCount
+		totalWarnCount += res.warnCount
+	}
+
+	if canceled {
+		return nil, 0, 0, fmt.Errorf("search canceled: %w", context.Canceled)
+	}
+
+	if len(errs) > 0 {
+		return nil, 0, 0, errors.Join(errs...)
+	}
+
+	matches = slices.Concat(ordered...)
+	return matches, totalErrCount, totalWarnCount, nil
+}
+
 // matchRange runs a goroutine-pooled, chunked scan over [start, end) of the indexer, applies opts, and returns matched indices in ascending order. It honors ctx cancellation between chunks (not mid-chunk), caches compiled regexes, and does not store the result on the engine.
 func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, start, end int64) ([]int64, error) { //nolint:gocyclo,funlen // chunked pooled scan over the index is inherently branchy
 	if opts.Query == "" {

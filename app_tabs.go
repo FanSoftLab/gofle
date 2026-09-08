@@ -491,6 +491,10 @@ const (
 // one tab are serialized, so a burst of refreshes waits for the in-flight pass and
 // then reads its result instead of starting a second full scan. The pass also
 // honors the app context, so a shutdown does not leave a full-file scan running.
+//
+// OPTIMIZATION: Now uses indexer.GetLevelCounts() which provides pre-computed
+// counts at regular intervals (every 1000 lines) during index build. Only the
+// tail region after the last snapshot needs a fresh ScanLines pass.
 func (a *App) GetLevelStats(tabID string) (map[string]int64, error) {
 	a.mu.RLock()
 	tab, exists := a.tabs[tabID]
@@ -523,15 +527,58 @@ func (a *App) GetLevelStats(tabID string) (map[string]int64, error) {
 			counted = levelStats{gen: gen}
 		}
 
+		// Fast path: use pre-computed level counts from the indexer
+		levelCounts := tab.Indexer.GetLevelCounts()
+		if levelCounts != nil && len(levelCounts) > 0 {
+			// Find the last snapshot that covers lines we've already counted
+			var baseErrors, baseWarns int64
+			var baseScanned int64
+
+			for _, lc := range levelCounts {
+				if lc.LineIndex <= counted.scanned {
+					baseErrors = lc.Errors
+					baseWarns = lc.Warns
+					baseScanned = lc.LineIndex
+				} else {
+					break
+				}
+			}
+
+			// If the snapshot covers up to or past our total, we're done
+			if baseScanned >= total {
+				counted.errors = baseErrors
+				counted.warns = baseWarns
+				counted.scanned = total
+				tab.levels = counted
+				return map[string]int64{"E": counted.errors, "W": counted.warns}, nil
+			}
+
+			// Only scan from the last snapshot to the end
+			errs, warns, scanned, err := countLevelMarkers(ctx, tab.Indexer, baseScanned, total-baseScanned)
+			if errors.Is(err, indexer.ErrIndexRebuilt) {
+				continue
+			}
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			if tab.Indexer.Generation() != gen {
+				continue
+			}
+
+			counted.errors = baseErrors + errs
+			counted.warns = baseWarns + warns
+			counted.scanned = scanned
+			tab.levels = counted
+			return map[string]int64{"E": counted.errors, "W": counted.warns}, nil
+		}
+
+		// Fallback: no level counts available (old index), do full scan
 		if counted.scanned == total {
 			tab.levels = counted
 			return map[string]int64{"E": counted.errors, "W": counted.warns}, nil
 		}
 
 		errs, warns, scanned, err := countLevelMarkers(ctx, tab.Indexer, counted.scanned, total-counted.scanned)
-		// The file rotated mid-pass: the counted indices are meaningless, so the
-		// partial counts are discarded and the next attempt recounts from scratch
-		// against the rebuilt table.
 		if errors.Is(err, indexer.ErrIndexRebuilt) {
 			continue
 		}
@@ -539,8 +586,6 @@ func (a *App) GetLevelStats(tabID string) (map[string]int64, error) {
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}
-		// Same guard for a rotation that landed between the snapshot above and
-		// the start of the scan, which ScanLines itself cannot see.
 		if tab.Indexer.Generation() != gen {
 			continue
 		}
@@ -549,10 +594,6 @@ func (a *App) GetLevelStats(tabID string) (map[string]int64, error) {
 		counted.warns += warns
 		counted.scanned = scanned
 		tab.levels = counted
-		// A cancelled pass (app shutting down) returns what it counted rather than
-		// an error: the progress is consistent, and the frontend renders any
-		// rejection as an error toast — a routine shutdown must not look like a tab
-		// failure. Genuine read failures still surface above.
 		return map[string]int64{"E": counted.errors, "W": counted.warns}, nil
 	}
 

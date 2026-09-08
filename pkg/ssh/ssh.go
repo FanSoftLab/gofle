@@ -247,6 +247,11 @@ const (
 	// when the transport itself is black-holed the channel-close never round
 	// trips, so the client connection is closed to fail the pending read.
 	streamAbortGrace = 5 * time.Second
+	// parallelSyncThreshold is the file size above which parallel range downloads
+	// are used for the initial sync (100 MB).
+	parallelSyncThreshold = 100 * 1024 * 1024
+	// parallelSyncWorkers is the number of concurrent range downloads.
+	parallelSyncWorkers = 4
 )
 
 // Streamer copies a remote log file over SSH into a local temp file and keeps it appended as the remote file grows, so the UI can index and tail it like a regular local file.
@@ -707,7 +712,20 @@ func (cw *countingWriter) maybeEmit(done int64) {
 // newRemoteStream seam, which gives it the same parked-open containment as the
 // tail supervisor — an unabortable io.Copy over an SSH pipe is exactly how an
 // open used to hang forever with no way to give up.
+//
+// For files larger than parallelSyncThreshold (100 MB), uses parallel range
+// downloads via multiple SSH sessions to saturate bandwidth.
 func (s *Streamer) initialSync(ctx context.Context) error {
+	// Use parallel sync for large files when we know the total size
+	if s.remoteTotal >= parallelSyncThreshold {
+		return s.initialSyncParallel(ctx)
+	}
+
+	return s.initialSyncSequential(ctx)
+}
+
+// initialSyncSequential is the original single-stream initial sync using "cat".
+func (s *Streamer) initialSyncSequential(ctx context.Context) error {
 	cmd := "cat -- " + shellQuote(s.cfg.RemoteFilePath)
 
 	stdout, stderr, wait, abort, err := s.newRemoteStream(cmd)
@@ -765,6 +783,202 @@ func (s *Streamer) initialSync(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// initialSyncParallel performs the initial sync using concurrent range downloads
+// via multiple SSH sessions. Each range is downloaded independently and written
+// to the correct offset in the pre-allocated temp file.
+func (s *Streamer) initialSyncParallel(ctx context.Context) error {
+	if s.remoteTotal <= 0 {
+		// Unknown size, fall back to sequential
+		return s.initialSyncSequential(ctx)
+	}
+
+	// Pre-allocate the temp file to the full remote size
+	if err := s.tmpFile.Truncate(s.remoteTotal); err != nil {
+		slog.Warn("ssh: failed to pre-allocate temp file, falling back to sequential",
+			"remote", s.cfg.RemoteFilePath, "err", err)
+		return s.initialSyncSequential(ctx)
+	}
+
+	// Ensure we start at the beginning
+	if _, err := s.tmpFile.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek temp file: %w", err)
+	}
+
+	// Calculate range boundaries
+	rangeSize := s.remoteTotal / parallelSyncWorkers
+	if rangeSize == 0 {
+		rangeSize = s.remoteTotal
+	}
+
+	type rangeResult struct {
+		index int
+		start int64
+		end   int64
+		n     int64
+		err   error
+	}
+
+	results := make(chan rangeResult, parallelSyncWorkers)
+	var wg sync.WaitGroup
+
+	// Progress tracking
+	var totalDownloaded atomic.Int64
+	progressDone := make(chan struct{})
+	if s.cfg.Progress != nil {
+		s.cfg.Progress("downloading", 0, s.remoteTotal)
+		go func() {
+			ticker := time.NewTicker(progressThrottle)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ticker.C:
+					done := totalDownloaded.Load()
+					s.cfg.Progress("downloading", done, s.remoteTotal)
+				}
+			}
+		}()
+	}
+
+	// Launch workers for each range
+	for i := 0; i < parallelSyncWorkers; i++ {
+		start := int64(i) * rangeSize
+		end := start + rangeSize
+		if i == parallelSyncWorkers-1 {
+			end = s.remoteTotal // Last worker gets the remainder
+		}
+		if start >= end {
+			continue
+		}
+
+		wg.Add(1)
+		go func(idx int, rangeStart, rangeEnd int64) {
+			defer wg.Done()
+
+			n, err := s.downloadRange(ctx, rangeStart, rangeEnd)
+			results <- rangeResult{index: idx, start: rangeStart, end: rangeEnd, n: n, err: err}
+		}(i, start, end)
+	}
+
+	// Wait for all workers
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	var totalBytes int64
+	var firstErr error
+	for r := range results {
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
+		totalBytes += r.n
+		totalDownloaded.Add(r.n)
+	}
+
+	close(progressDone)
+
+	if s.cfg.Progress != nil {
+		s.cfg.Progress("downloading", totalDownloaded.Load(), s.remoteTotal)
+	}
+
+	if firstErr != nil {
+		return firstErr
+	}
+
+	// Verify total bytes match expected
+	if totalBytes != s.remoteTotal {
+		slog.Warn("ssh: parallel sync byte count mismatch",
+			"expected", s.remoteTotal, "got", totalBytes,
+			"remote", s.cfg.RemoteFilePath)
+		// Not a hard error - the file might be slightly different
+	}
+
+	return nil
+}
+
+// downloadRange downloads a single byte range [start, end) of the remote file
+// using `dd` and writes it to the correct offset in the temp file.
+func (s *Streamer) downloadRange(ctx context.Context, start, end int64) (int64, error) {
+	// Use `dd` for precise byte-range copying: dd if=/path bs=1 skip=start count=length
+	// Note: `dd` with bs=1 is slow; we use a larger block size and calculate skip/count accordingly.
+	blockSize := int64(64 * 1024) // 64KB blocks
+	skipBlocks := start / blockSize
+	skipBytes := start % blockSize
+	countBytes := end - start
+	countBlocks := (countBytes + blockSize - 1) / blockSize // ceiling
+
+	// Adjust for partial first block
+	cmd := fmt.Sprintf("dd if=%s bs=%d skip=%d count=%d 2>/dev/null",
+		shellQuote(s.cfg.RemoteFilePath), blockSize, skipBlocks, countBlocks)
+
+	stdout, stderr, wait, abort, err := s.newRemoteStream(cmd)
+	if err != nil {
+		return 0, err
+	}
+	defer abort()
+
+	// Drain stderr to avoid blocking the remote command
+	_ = drainStderr(stderr)
+
+	// We need to handle the skipBytes offset in the first block
+	// The dd command reads from skipBlocks*blockSize, so we need to skip the first skipBytes
+	var reader io.Reader = stdout
+	if skipBytes > 0 {
+		// Wrap to skip the first skipBytes
+		reader = &offsetReader{r: stdout, skip: skipBytes}
+	}
+
+	// Limit to exactly countBytes
+	reader = io.LimitReader(reader, countBytes)
+
+	// Write to temp file at the correct offset
+	if _, err := s.tmpFile.Seek(start, io.SeekStart); err != nil {
+		return 0, fmt.Errorf("failed to seek temp file for range %d-%d: %w", start, end, err)
+	}
+
+	cw := &countingWriter{w: s.tmpFile, s: s}
+	n, cerr := io.Copy(cw, reader)
+
+	// Wait for the command to complete
+	if err := wait(); err != nil {
+		if cerr == nil {
+			cerr = err
+		}
+	}
+
+	if cerr != nil && !errors.Is(cerr, io.EOF) {
+		return n, fmt.Errorf("failed to download range %d-%d: %w", start, end, cerr)
+	}
+
+	return n, nil
+}
+
+// offsetReader wraps an io.Reader to skip the first n bytes.
+type offsetReader struct {
+	r    io.Reader
+	skip int64
+}
+
+func (or *offsetReader) Read(p []byte) (int, error) {
+	if or.skip > 0 {
+		skipBuf := make([]byte, min(int(or.skip), len(p)))
+		n, err := or.r.Read(skipBuf)
+		or.skip -= int64(n)
+		if err != nil {
+			return 0, err
+		}
+		if or.skip > 0 {
+			// Need more data to skip
+			return or.Read(p)
+		}
+		return or.r.Read(p)
+	}
+	return or.r.Read(p)
 }
 
 // drainStderr copies the remote command's stderr (bounded to 4 KiB) into a

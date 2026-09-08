@@ -8,6 +8,7 @@ package indexer
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -31,12 +33,37 @@ var (
 	// ErrLineTooLarge reports content spanning more bytes than addressable in
 	// one read buffer.
 	ErrLineTooLarge = errors.New("line too large to read")
-	// ErrIndexRebuilt reports that the offset table was rebuilt (the file was
-	// rotated or truncated) while a long ScanLines pass was in flight, so the
-	// line indices it was walking no longer denote the same content. The caller
-	// must restart the operation against the refreshed index.
-	ErrIndexRebuilt = errors.New("index rebuilt during scan")
+// ErrIndexRebuilt reports that the offset table was rebuilt (the file was
+// rotated or truncated) while a long ScanLines pass was in flight, so the
+// line indices it was walking no longer denote the same content. The caller
+// must restart the operation against the refreshed index.
+ErrIndexRebuilt = errors.New("index rebuilt during scan")
 )
+
+// LevelCount holds the cumulative count of log level markers up to a certain
+// line index. Stored at regular intervals (e.g., every 1000 lines) to enable
+// fast incremental level statistics without full-file rescans.
+type LevelCount struct {
+	LineIndex int64 // The exclusive line index this count covers (0-based, up to this line)
+	Errors    int64
+	Warns     int64
+}
+
+// levelCountInterval is the granularity at which LevelCount snapshots are stored.
+// One entry per 1000 lines = ~8 KB per 1M lines (2 int64s + 1 int64 per entry).
+const levelCountInterval = 1000
+
+// Level-marker needles, hoisted out of the per-line scan closure.
+var (
+	levelTokenError = []byte("ERROR")
+	levelTokenFatal = []byte("FATAL")
+	levelTokenPanic = []byte("PANIC")
+	levelTokenWarn  = []byte("WARN")
+)
+
+// levelScanWindow bounds the per-line inspection to the conventional
+// placement of a level tag.
+const levelScanWindow = 160
 
 // lineBufPool reuses the per-line read buffers used by the single-line read
 // core (readLineUnlocked). A full-file search reads millions of lines; handing each line a
@@ -69,12 +96,23 @@ var scanBufPool = sync.Pool{
 const (
 	maxLineBufSize = 64 * 1024
 	maxScanBufSize = 1 * 1024 * 1024
-	// maxScanReadSize bounds a SINGLE ReadAt issued by the sub-span batching
-	// in eachReadSpan. Line-count-bounded chunking alone is byte-unbounded:
-	// 3000 lines of 64 KB each would attempt one ~196 MB read, and a 500k-line
-	// export chunk on such content would try to allocate tens of GB.
-	maxScanReadSize = 1 * 1024 * 1024
 )
+
+// maxScanReadSize bounds a SINGLE ReadAt issued by the sub-span batching
+// in eachReadSpan. Line-count-bounded chunking alone is byte-unbounded:
+// 3000 lines of 64 KB each would attempt one ~196 MB read, and a 500k-line
+// export chunk on such content would try to allocate tens of GB.
+// Can be configured via GOFLE_SCAN_READ_SIZE environment variable (in bytes).
+// Default is 1 MB; recommended 4-8 MB for large files to reduce lock cycles.
+var maxScanReadSize int64 = 1 * 1024 * 1024
+
+func init() {
+	if v := os.Getenv("GOFLE_SCAN_READ_SIZE"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			maxScanReadSize = n
+		}
+	}
+}
 
 // releaseLineBuf returns buf to lineBufPool unless it grew past the cap.
 func releaseLineBuf(bufPtr *[]byte, buf []byte) {
@@ -112,6 +150,9 @@ type FileIndexer struct {
 	filePath string
 	fileSize int64
 	offsets  []int64
+	// levelCounts stores cumulative level marker counts at regular intervals
+	// (every levelCountInterval lines). Used for O(1) level stats retrieval.
+	levelCounts []LevelCount
 	mu       sync.RWMutex
 	file     *os.File
 	isClosed bool
@@ -245,29 +286,34 @@ func (fi *FileIndexer) scanIndexUnlocked(limit int64) error {
 
 	if len(fi.offsets) == 0 {
 		fi.offsets = append(fi.offsets, 0)
+		// Initialize levelCounts with a zero entry at line 0
+		fi.levelCounts = []LevelCount{{LineIndex: 0, Errors: 0, Warns: 0}}
 	}
 
-	offsets, err := appendLineOffsets(fi.file, fi.offsets, startOffset, limit, fi.filePath)
+	offsets, levelCounts, err := appendLineOffsetsWithLevels(fi.file, fi.offsets, fi.levelCounts, startOffset, limit, fi.filePath)
 	fi.offsets = offsets
+	fi.levelCounts = levelCounts
 
 	return err
 }
 
-// appendLineOffsets scans r sequentially and appends the start offset of every
-// complete line it finds to offsets, returning the grown slice. startOffset is
-// the absolute file position r begins at (so the recorded offsets are absolute)
-// and limit is the file size the scan is bounded by — a trailing chunk without a
-// final newline is only recorded as a line while it still ends before limit,
-// which is what keeps a half-written last line out of the table until its
-// newline arrives.
-//
-// It takes a plain io.Reader instead of reading fi.file directly so the rotation
-// rebuild can drive it from an io.SectionReader (pread-based, no shared file
-// offset) on a private slice with fi.mu released, while the incremental growth
-// path keeps using the seek-positioned file handle.
-func appendLineOffsets(r io.Reader, offsets []int64, startOffset, limit int64, path string) ([]int64, error) {
+// appendLineOffsetsWithLevels scans r sequentially and appends the start offset
+// of every complete line it finds to offsets, while also counting log level
+// markers (ERROR, FATAL, PANIC, WARN) in the first levelScanWindow bytes of
+// each line. It returns the grown offsets slice and the updated levelCounts
+// slice. startOffset is the absolute file position r begins at (so the recorded
+// offsets are absolute) and limit is the file size the scan is bounded by.
+// levelCounts must already contain a zero entry at LineIndex 0 if starting
+// from an empty file, or the appropriate prefix if continuing from an existing
+// index.
+func appendLineOffsetsWithLevels(r io.Reader, offsets []int64, levelCounts []LevelCount, startOffset, limit int64, path string) ([]int64, []LevelCount, error) {
 	reader := bufio.NewReaderSize(r, 64*1024)
 	currentOffset := startOffset
+
+	// Current running counts
+	var errs, warns int64
+	// Next line index that will get a levelCount entry
+	nextLevelCountIndex := int64(len(offsets)) // offsets already has the initial 0
 
 	// ReadSlice hands back views into the reader's internal buffer instead of
 	// allocating a fresh []byte per line like ReadBytes (~10M allocations when
@@ -277,32 +323,82 @@ func appendLineOffsets(r io.Reader, offsets []int64, startOffset, limit int64, p
 	consumed := int64(0)
 
 	for {
-		frag, err := reader.ReadSlice('\n')
+		frag, rerr := reader.ReadSlice('\n')
 		consumed += int64(len(frag))
 
 		switch {
-		case err == nil:
+		case rerr == nil:
 			// Fragment ends with '\n': the line is complete.
 			currentOffset += consumed
 			if consumed > 0 {
 				offsets = append(offsets, currentOffset)
+
+				// Check for level tokens in this line (first levelScanWindow bytes)
+				lineBytes := frag[:len(frag)-1] // exclude '\n'
+				if len(lineBytes) > levelScanWindow {
+					lineBytes = lineBytes[:levelScanWindow]
+				}
+				if containsLevelToken(lineBytes, levelTokenError) ||
+					containsLevelToken(lineBytes, levelTokenFatal) ||
+					containsLevelToken(lineBytes, levelTokenPanic) {
+					errs++
+				} else if containsLevelToken(lineBytes, levelTokenWarn) {
+					warns++
+				}
+
+				nextLevelCountIndex = int64(len(offsets) - 1) // line index just added
+				if nextLevelCountIndex%levelCountInterval == 0 {
+					levelCounts = append(levelCounts, LevelCount{
+						LineIndex: nextLevelCountIndex,
+						Errors:    errs,
+						Warns:     warns,
+					})
+				}
 			}
 
 			consumed = 0
-		case errors.Is(err, bufio.ErrBufferFull):
+		case errors.Is(rerr, bufio.ErrBufferFull):
 			// Buffer filled mid-line: keep accumulating fragments.
-		case errors.Is(err, io.EOF):
+			// We can't check for level tokens until we have the full line.
+		case errors.Is(rerr, io.EOF):
 			// Trailing content without a final newline: recorded only while
 			// still inside the scan limit, matching the original semantics.
 			if consumed > 0 && currentOffset+consumed < limit {
 				offsets = append(offsets, currentOffset+consumed)
+
+				// Check for level tokens in this partial line
+				lineBytes := frag
+				if len(lineBytes) > levelScanWindow {
+					lineBytes = lineBytes[:levelScanWindow]
+				}
+				if containsLevelToken(lineBytes, levelTokenError) ||
+					containsLevelToken(lineBytes, levelTokenFatal) ||
+					containsLevelToken(lineBytes, levelTokenPanic) {
+					errs++
+				} else if containsLevelToken(lineBytes, levelTokenWarn) {
+					warns++
+				}
+
+				nextLevelCountIndex = int64(len(offsets) - 1)
+				if nextLevelCountIndex%levelCountInterval == 0 {
+					levelCounts = append(levelCounts, LevelCount{
+						LineIndex: nextLevelCountIndex,
+						Errors:    errs,
+						Warns:     warns,
+					})
+				}
 			}
 
-			return offsets, nil
+			return offsets, levelCounts, nil
 		default:
-			return offsets, fmt.Errorf("failed to index %s: %w", path, err)
+			return offsets, levelCounts, fmt.Errorf("failed to index %s: %w", path, rerr)
 		}
 	}
+}
+
+// containsLevelToken reports whether the token appears in the given bytes.
+func containsLevelToken(haystack, needle []byte) bool {
+	return bytes.Contains(haystack, needle)
 }
 
 // UpdateIndex checks if the file has changed since the last scan and refreshes
@@ -404,8 +500,9 @@ func (fi *FileIndexer) rebuildIndex(file *os.File, newSize int64) (int, error) {
 	// for the next (incremental) poll instead of racing this pass.
 	offsets := make([]int64, 0, estimateOffsetCap(newSize))
 	offsets = append(offsets, 0)
+	levelCounts := []LevelCount{{LineIndex: 0, Errors: 0, Warns: 0}}
 
-	offsets, err := appendLineOffsets(io.NewSectionReader(file, 0, newSize), offsets, 0, newSize, fi.filePath)
+	offsets, levelCounts, err := appendLineOffsetsWithLevels(io.NewSectionReader(file, 0, newSize), offsets, levelCounts, 0, newSize, fi.filePath)
 	if err != nil {
 		// rebuildPending stays set: the table is empty and fileSize already
 		// matches the file, so only the flag can bring the next poll back here.
@@ -421,6 +518,7 @@ func (fi *FileIndexer) rebuildIndex(file *os.File, newSize int64) (int, error) {
 	}
 
 	fi.offsets = slices.Clip(offsets)
+	fi.levelCounts = levelCounts
 	fi.rebuildPending = false
 	fi.rebuilt = true
 
@@ -483,6 +581,22 @@ func (fi *FileIndexer) TakeRebuiltFlag() bool {
 	fi.rebuilt = false
 
 	return rebuilt
+}
+
+// GetLevelCounts returns a copy of the level marker counts at each interval.
+// This enables fast incremental level statistics without full-file rescans.
+// The returned slice is a copy and safe to retain.
+func (fi *FileIndexer) GetLevelCounts() []LevelCount {
+	fi.mu.RLock()
+	defer fi.mu.RUnlock()
+
+	if len(fi.levelCounts) == 0 {
+		return nil
+	}
+
+	result := make([]LevelCount, len(fi.levelCounts))
+	copy(result, fi.levelCounts)
+	return result
 }
 
 // readAtFull fills buf with exactly len(buf) bytes from offset via pread. A
@@ -577,6 +691,51 @@ func (fi *FileIndexer) GetLineBytes(lineIndex int64) ([]byte, error) {
 	copy(out, line)
 
 	return out, nil
+}
+
+// GetLinesBytes returns a range of lines [start, start+count) as a slice of
+// freshly allocated, caller-owned byte slices. Each slice is safe to retain.
+// This avoids the per-line string allocation of GetLines, which is the dominant
+// cost in viewport rendering (100 lines × 60 fps = 6000 strings/frame).
+func (fi *FileIndexer) GetLinesBytes(start, count int64) ([][]byte, error) {
+	fi.mu.RLock()
+	defer fi.mu.RUnlock()
+
+	total := int64(len(fi.offsets) - 1)
+	if start < 0 || start >= total || count <= 0 {
+		return [][]byte{}, nil
+	}
+
+	end := min(start+count, total)
+
+	result := make([][]byte, 0, end-start)
+
+	err := fi.eachReadSpan(start, end, func(i, j, spanStart int64, buf []byte) bool {
+		for k := i; k < j; k++ {
+			lineStart := int(fi.offsets[k] - spanStart)
+
+			lineEnd := int(fi.offsets[k+1] - spanStart)
+			if lineEnd > lineStart && buf[lineEnd-1] == '\n' {
+				lineEnd--
+			}
+
+			if lineEnd > lineStart && buf[lineEnd-1] == '\r' {
+				lineEnd--
+			}
+
+			// Copy into a fresh slice so the pooled buffer can be released.
+			lineCopy := make([]byte, lineEnd-lineStart)
+			copy(lineCopy, buf[lineStart:lineEnd])
+			result = append(result, lineCopy)
+		}
+
+		return false
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // GetLine returns the content of a single line by its 0-based index.

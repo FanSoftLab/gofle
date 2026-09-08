@@ -221,3 +221,23 @@ func BenchmarkRegexCacheHit(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkSearchWithLevelCounts measures the combined search + level stats
+// pass. This should be faster than running Search + GetLevelStats separately.
+func BenchmarkSearchWithLevelCounts(b *testing.B) {
+	const nLines = 200_000
+	const k = 50
+
+	idx := benchFile(b, nLines, k)
+	se := NewSearchEngine(idx)
+	opts := SearchOptions{Query: "exception", CaseSensitive: false}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if _, err := se.SearchWithLevelCounts(b.Context(), opts); err != nil {
+			b.Fatalf("search with level counts: %v", err)
+		}
+	}
+}
