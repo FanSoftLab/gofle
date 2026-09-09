@@ -217,7 +217,7 @@ const (
 	streamProbeInterval = 30 * time.Second
 	// streamCloseTimeout bounds Close's wait for the supervisor so a parked
 	// open on a dead connection can never freeze the whole app.
-	streamCloseTimeout = 30 * time.Second
+	streamCloseTimeout = 8 * time.Second
 	reconnectBaseDelay = 1 * time.Second
 	reconnectMaxDelay  = 30 * time.Second
 	// streamOpenContainmentTimeout bounds the parked-open containment goroutine

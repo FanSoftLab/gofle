@@ -104,6 +104,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         saveSession: () => {},
         closeAllTabs: async () => {},
         openFilesAction: async () => {},
+        browseRemoteServerAction: async (_tabId: string) => {},
     };
 
     const mainScroller = new VirtualScroller('viewport-main', (start, count) => {
@@ -502,10 +503,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Go's Shutdown no longer snapshots the tabs, so a pending debounced save must
     // be flushed on teardown or the very last change would be lost.
+    // Always persist on teardown — not only when a debounce timer is pending.
+    // Previously a completed debounce left sessionSaveTimer undefined, so the
+    // exit path was a no-op; combined with Wails often skipping beforeunload,
+    // the last tab state could fail to reach disk.
     const flushSession = () => {
-        if (sessionRestoring || sessionSaveTimer === undefined) return;
-        clearTimeout(sessionSaveTimer);
-        sessionSaveTimer = undefined;
+        if (sessionRestoring) return;
+        if (sessionSaveTimer !== undefined) {
+            clearTimeout(sessionSaveTimer);
+            sessionSaveTimer = undefined;
+        }
         pushSession();
     };
     window.addEventListener('beforeunload', flushSession);
@@ -513,6 +520,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') flushSession();
     });
+    // Wails OnBeforeClose emits this so we flush even when the webview does not
+    // deliver a reliable beforeunload/pagehide on window close.
+    try {
+        (window as any).runtime?.EventsOn?.('app:before-close', () => {
+            flushSession();
+        });
+    } catch {
+        /* runtime may be absent in plain browser tests */
+    }
 
     // Wire cross-manager callbacks into the shared context.
     ctx.updateUIState = updateUIState;
@@ -843,6 +859,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     ctx.btnOpen.addEventListener('click', openFilesAction);
     ctx.openFilesAction = openFilesAction;
+    ctx.browseRemoteServerAction = async (tabId: string) => {
+        const tab = ctx.tabs.get(tabId);
+        if (!tab?.ssh) {
+            showToast(t('err_not_remote_tab'), 'error');
+            return;
+        }
+        await sshHandler.browseOnServerFromTab(tab.ssh);
+    };
 
     // Secondary AND-filter mirrors the primary box: applies on change
     // (triggerSearch debounces at 200ms), no Enter required.
@@ -948,6 +972,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         const helpEl = document.getElementById('help-overlay');
 
         // Ctrl/Cmd shortcuts — available even when focus is in an input.
+        // Ctrl/Cmd+C: copy the current line selection from the active viewport.
+        // Skip when focus is in an input/textarea (native copy should win).
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+            const tag = (e.target as HTMLElement | null)?.tagName;
+            if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+                const scroller =
+                    document.activeElement?.closest('#viewport-filter')
+                        ? filterScroller
+                        : mainScroller;
+                const range = scroller.getSelectedRange();
+                if (range) {
+                    e.preventDefault();
+                    void scroller.copySelection().then((ok) => {
+                        if (ok) showToast(t('ctx_copy_line'), 'info', 1500);
+                    });
+                    return;
+                }
+            }
+        }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
             e.preventDefault();
             ctx.btnOpen.click();
@@ -1277,6 +1320,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         tabManager.renderTabs();
         updateUIState();
+        // Persist the post-restore structure immediately (no debounce) so a
+        // quick quit right after launch cannot lose the session again.
+        if (ctx.tabs.size > 0) {
+            pushSession();
+        }
     };
 
     await restoreSavedSession();

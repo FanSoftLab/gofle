@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"GoFLE/pkg/config"
 	"GoFLE/pkg/ftp"
 	"GoFLE/pkg/indexer"
 	"GoFLE/pkg/remote"
@@ -23,6 +24,209 @@ const (
 
 // authTypePassword is the config spelling for password-based authentication.
 const authTypePassword = "password"
+
+// fillRemoteFormFromRecent writes a saved SSH/FTP summary into the connect form
+// fields so the user can browse or reopen without retyping credentials.
+func (m *model) fillRemoteFormFromRecent(sum *config.SSHConfigSummary) {
+	if sum == nil {
+		return
+	}
+	proto := sum.Protocol
+	if proto == "" {
+		proto = remote.ProtocolSSH
+	}
+	port := sum.Port
+	if port == 0 {
+		port = remoteDefaultPort(proto)
+	}
+	auth := sum.AuthType
+	if auth == "" {
+		auth = authTypePassword
+	}
+	vals := []string{
+		proto,
+		sum.Host,
+		strconv.Itoa(port),
+		sum.Username,
+		auth,
+		sum.Password,
+		sum.KeyPath,
+		sum.RemoteFilePath,
+	}
+	for i := range m.remoteForm {
+		if i < len(vals) {
+			m.remoteForm[i].SetValue(vals[i])
+		}
+	}
+}
+
+// startPathFromRemoteSummary returns the directory of the last opened remote
+// file, or "~" when the path is empty.
+func startPathFromRemoteSummary(sum *config.SSHConfigSummary) string {
+	if sum == nil {
+		return "~"
+	}
+	p := strings.TrimSpace(sum.RemoteFilePath)
+	if p == "" || p == "~" {
+		return "~"
+	}
+	return parentDir(p)
+}
+
+// browseFromRecent opens the remote directory browser using credentials from a
+// saved recent entry, starting in the directory of that entry's file.
+func (m *model) browseFromRecent(item config.RecentFileItem) tea.Cmd {
+	if item.SSH == nil {
+		m.status = "not a remote entry"
+		return nil
+	}
+	m.fillRemoteFormFromRecent(item.SSH)
+	m.remoteMode = false
+	m.remoteBrowseMode = true
+	m.remoteCurrentPath = startPathFromRemoteSummary(item.SSH)
+	m.remoteCursor = 0
+	m.remoteLoading = true
+	m.remoteBrowseErr = ""
+	m.remoteAfterTrustOpen = false
+	m.remoteProto = item.SSH.Protocol
+	if m.remoteProto == "" {
+		m.remoteProto = remote.ProtocolSSH
+	}
+	// Clear remote path field: user is choosing a new file.
+	if len(m.remoteForm) > 7 {
+		m.remoteForm[7].SetValue("")
+	}
+	return m.remoteListCmd(m.remoteCurrentPath, m.remoteFormConfig())
+}
+
+// browseSameServer opens the remote directory browser on the host of the
+// currently open remote file (or the last connect form). Used by the in-viewer
+// "b" key so the CLI TUI matches the desktop "other file on this server" action
+// for both SSH and FTP.
+func (m *model) browseSameServer() tea.Cmd {
+	if m.lastRemoteCfg != nil && m.lastRemoteCfg.Host != "" {
+		sum := summaryFromRemoteConfig(m.lastRemoteCfg)
+		m.fillRemoteFormFromRecent(sum)
+		m.remoteMode = false
+		m.remoteBrowseMode = true
+		start := parentDir(m.lastRemoteCfg.RemoteFilePath)
+		if start == "" || start == "." {
+			start = "~"
+		}
+		m.remoteCurrentPath = start
+		m.remoteCursor = 0
+		m.remoteLoading = true
+		m.remoteBrowseErr = ""
+		m.remoteAfterTrustOpen = false
+		m.remoteProto = m.lastRemoteCfg.Protocol
+		if m.remoteProto == "" {
+			m.remoteProto = remote.ProtocolSSH
+		}
+		if len(m.remoteForm) > 7 {
+			m.remoteForm[7].SetValue("")
+		}
+		return m.remoteListCmd(m.remoteCurrentPath, m.remoteFormConfig())
+	}
+	// Fallback: form already has a host from a previous connect attempt.
+	if m.remoteFormConfig().Host != "" {
+		cfg := m.remoteFormConfig()
+		m.remoteMode = false
+		m.remoteBrowseMode = true
+		start := parentDir(cfg.RemoteFilePath)
+		if start == "" || start == "." {
+			start = "~"
+		}
+		m.remoteCurrentPath = start
+		m.remoteCursor = 0
+		m.remoteLoading = true
+		m.remoteBrowseErr = ""
+		m.remoteAfterTrustOpen = false
+		m.remoteProto = cfg.Protocol
+		if m.remoteProto == "" {
+			m.remoteProto = remote.ProtocolSSH
+		}
+		if len(m.remoteForm) > 7 {
+			m.remoteForm[7].SetValue("")
+		}
+		return m.remoteListCmd(m.remoteCurrentPath, cfg)
+	}
+	m.status = "no remote connection — open an SSH/FTP file first (or press S)"
+	return nil
+}
+
+// summaryFromRemoteConfig builds a Recent-style summary from a live Config so
+// fillRemoteFormFromRecent can populate the form fields.
+func summaryFromRemoteConfig(cfg *remote.Config) *config.SSHConfigSummary {
+	if cfg == nil {
+		return nil
+	}
+	return &config.SSHConfigSummary{
+		Host:           cfg.Host,
+		Port:           cfg.Port,
+		Username:       cfg.Username,
+		RemoteFilePath: cfg.RemoteFilePath,
+		AuthType:       cfg.AuthType,
+		Password:       cfg.Password,
+		KeyPath:        cfg.KeyPath,
+		KeyPassphrase:  cfg.KeyPassphrase,
+		Protocol:       cfg.Protocol,
+		TLSMode:        cfg.TLSMode,
+	}
+}
+
+// remoteConfigFromSummary is the inverse of summaryFromRemoteConfig.
+func remoteConfigFromSummary(sum *config.SSHConfigSummary) remote.Config {
+	if sum == nil {
+		return remote.Config{}
+	}
+	proto := sum.Protocol
+	if proto == "" {
+		proto = remote.ProtocolSSH
+	}
+	port := sum.Port
+	if port == 0 {
+		port = remoteDefaultPort(proto)
+	}
+	auth := sum.AuthType
+	if auth == "" {
+		auth = authTypePassword
+	}
+	return remote.Config{
+		Protocol:       proto,
+		Host:           sum.Host,
+		Port:           port,
+		Username:       sum.Username,
+		AuthType:       auth,
+		Password:       sum.Password,
+		KeyPath:        sum.KeyPath,
+		KeyPassphrase:  sum.KeyPassphrase,
+		RemoteFilePath: sum.RemoteFilePath,
+		TLSMode:        sum.TLSMode,
+	}
+}
+
+// findRecentSummaryForTarget returns the decrypted SSH/FTP summary for a
+// recent entry whose reconstructed target matches target (ssh:// or ftp://).
+func findRecentSummaryForTarget(cfg *config.AppConfig, target string) *config.SSHConfigSummary {
+	if cfg == nil || target == "" {
+		return nil
+	}
+	for _, it := range cfg.GetRecentFiles() {
+		if !it.IsSSH || it.SSH == nil {
+			continue
+		}
+		if remoteTargetFromRecent(it) == target {
+			return it.SSH
+		}
+		// Also match by host+path when schemes differ only by default port.
+		if it.SSH.Host != "" && strings.Contains(target, it.SSH.Host) &&
+			it.SSH.RemoteFilePath != "" && strings.Contains(target, it.SSH.RemoteFilePath) {
+			return it.SSH
+		}
+	}
+	return nil
+}
+
 
 // enterRemoteMode opens the protocol-agnostic remote connect form, focusing the
 // first field. The form carries a protocol selector (ssh|ftp) so the same overlay
@@ -139,7 +343,7 @@ func (m *model) remoteFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// While the remote stream is opening off-thread, swallow input so the user
 	// cannot re-trigger the open or mutate form state mid-flight.
 	if m.remoteOpening {
-		return m, nil
+		return *m, nil
 	}
 
 	switch msg.String() {
@@ -148,22 +352,22 @@ func (m *model) remoteFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab", "up", "k":
 		m.remoteFormFocusPrev()
 
-		return m, nil
+		return *m, nil
 	case keyDown, "j":
 		m.remoteFormFocusNext()
 
-		return m, nil
+		return *m, nil
 	case keyEsc:
 		m.closeRemoteForm()
 
-		return m, nil
+		return *m, nil
 	}
 
 	var cmd tea.Cmd
 
 	m.remoteForm[m.remoteFormFocus], cmd = m.remoteForm[m.remoteFormFocus].Update(msg)
 
-	return m, cmd
+	return *m, cmd
 }
 
 // remoteFormAdvance moves focus to the next focusable field, or submits the form
@@ -177,7 +381,7 @@ func (m *model) remoteFormAdvance() (tea.Model, tea.Cmd) {
 			m.remoteFormFocus = next
 			m.remoteForm[m.remoteFormFocus].Focus()
 
-			return m, nil
+			return *m, nil
 		}
 	}
 
@@ -246,27 +450,27 @@ func (m *model) remoteSubmit() (tea.Model, tea.Cmd) {
 	cfg := m.remoteFormConfig()
 	if cfg.Host == "" {
 		m.remoteBrowseErr = "host is required"
-		return m, nil
+		return *m, nil
 	}
 
 	if cfg.Username == "" {
 		m.remoteBrowseErr = "username is required"
-		return m, nil
+		return *m, nil
 	}
 
 	if cfg.AuthType == "key" {
 		if cfg.Protocol != remote.ProtocolSSH {
 			m.remoteBrowseErr = "key auth is ssh-only"
-			return m, nil
+			return *m, nil
 		}
 
 		if cfg.KeyPath == "" {
 			m.remoteBrowseErr = "key path is required for key auth"
-			return m, nil
+			return *m, nil
 		}
 	} else if cfg.Password == "" {
 		m.remoteBrowseErr = "password is required"
-		return m, nil
+		return *m, nil
 	}
 
 	if cfg.RemoteFilePath == "" {
@@ -280,14 +484,14 @@ func (m *model) remoteSubmit() (tea.Model, tea.Cmd) {
 		m.remoteAfterTrustOpen = false
 		m.remoteProto = cfg.Protocol
 
-		return m, m.remoteListCmd("~", cfg)
+		return *m, m.remoteListCmd("~", cfg)
 	}
 	// Open the stream off the UI thread so a large remote log does not freeze
 	// the terminal (H1). The result arrives as a remoteOpenedMsg and swaps the
 	// viewer state in Update.
 	m.remoteOpening = true
 
-	return m, m.openRemoteCmd(cfg)
+	return *m, m.openRemoteCmd(cfg)
 }
 
 // remoteBrowseKey handles key input while the remote directory browser is open.
@@ -297,11 +501,11 @@ func (m *model) remoteBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.remoteLoading {
-		return m, nil
+		return *m, nil
 	}
 
 	if m.remoteOpening {
-		return m, nil
+		return *m, nil
 	}
 
 	switch msg.String() {
@@ -321,41 +525,47 @@ func (m *model) remoteBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.remoteBrowseBack()
 	}
 
-	return m, nil
+	return *m, nil
 }
 
 // remoteBrowseOpen navigates into the highlighted directory, or opens the
 // highlighted file's stream off the UI thread.
 func (m *model) remoteBrowseOpen() (tea.Model, tea.Cmd) {
 	if len(m.remoteEntries) == 0 {
-		return m, nil
+		return *m, nil
 	}
 
 	e := m.remoteEntries[m.remoteCursor]
 	if e.Kind == entryKindDir || e.Kind == entryKindSymlink {
 		m.remoteLoading = true
 
-		return m, m.remoteListCmd(e.Path, m.remoteFormConfig())
+		return *m, m.remoteListCmd(e.Path, m.remoteFormConfig())
 	}
 	// A file: fill the path and open the stream directly.
 	cfg := m.remoteFormConfig()
 	cfg.RemoteFilePath = e.Path
 	m.remoteOpening = true
 
-	return m, m.openRemoteCmd(cfg)
+	return *m, m.openRemoteCmd(cfg)
 }
 
 // remoteBrowseUp lists the parent directory, unless the browser already sits on
-// a root ("~" or "/").
+// the filesystem root ("/"). Home ("~") is no longer a hard ceiling: after the
+// first listing the path is promoted to the absolute remote home, so users can
+// walk up to /var/log etc.
 func (m *model) remoteBrowseUp() (tea.Model, tea.Cmd) {
-	if m.remoteCurrentPath == "~" || m.remoteCurrentPath == "/" {
-		return m, nil
+	if m.remoteCurrentPath == "/" {
+		return *m, nil
 	}
 
 	parent := parentDir(m.remoteCurrentPath)
+	if parent == m.remoteCurrentPath {
+		// Still unresolved "~"/"" — jump to filesystem root.
+		parent = "/"
+	}
 	m.remoteLoading = true
 
-	return m, m.remoteListCmd(parent, m.remoteFormConfig())
+	return *m, m.remoteListCmd(parent, m.remoteFormConfig())
 }
 
 // remoteBrowseBack returns to the connect form with its values preserved.
@@ -391,7 +601,7 @@ func (m *model) remoteHostTrustKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Re-run the stream open that tripped the host-key prompt, off the
 			// UI thread (H1).
 			m.remoteOpening = true
-			return m, m.openRemoteCmd(m.remoteFormConfig())
+			return *m, m.openRemoteCmd(m.remoteFormConfig())
 		}
 
 		knownHosts := ""
@@ -401,18 +611,18 @@ func (m *model) remoteHostTrustKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		if err := ssh.WriteKnownHost(knownHosts, line); err != nil {
 			m.remoteBrowseErr = err.Error()
-			return m, nil
+			return *m, nil
 		}
 
-		return m, m.remoteListCmd(m.remoteCurrentPath, m.remoteFormConfig())
+		return *m, m.remoteListCmd(m.remoteCurrentPath, m.remoteFormConfig())
 	case "n", "N", keyEsc:
 		m.remoteHostPrompt = nil
 		m.remoteBrowseErr = fmt.Sprintf("host key for %s not trusted", host)
 
-		return m, nil
+		return *m, nil
 	}
 
-	return m, nil
+	return *m, nil
 }
 
 // remoteListCmd is the async tea.Cmd that dials and lists one remote directory.
@@ -465,7 +675,16 @@ func (m *model) remoteListCmd(path string, cfg remote.Config) tea.Cmd {
 
 		entries, lerr := lister.ListDir(m.ctx, path)
 
-		return remoteListedMsg{path: path, entries: entries, err: lerr}
+		resolved := path
+		if lerr == nil && (path == "" || path == "~") {
+			home := ""
+			if h, herr := lister.HomeDir(m.ctx); herr == nil {
+				home = h
+			}
+			resolved = resolveListedPath(path, entries, home)
+		}
+
+		return remoteListedMsg{path: resolved, entries: entries, err: lerr}
 	}
 }
 
@@ -550,10 +769,15 @@ func (m *model) openRemoteCmd(cfg remote.Config) tea.Cmd {
 	}
 }
 
-// parentDir returns the parent directory of p ("~" and "/" are their own roots).
+// parentDir returns the parent directory of p. "/" is its own root; "~" is
+// treated as unresolved home and maps to "/" so the browser can leave home once
+// the absolute path is known (see resolveListedPath).
 func parentDir(p string) string {
-	if p == "~" || p == "/" {
-		return p
+	if p == "/" {
+		return "/"
+	}
+	if p == "~" || p == "" {
+		return "/"
 	}
 
 	p = strings.TrimRight(p, "/")
@@ -564,4 +788,19 @@ func parentDir(p string) string {
 	}
 
 	return p[:idx]
+}
+
+// resolveListedPath turns a "~"/"" request into the absolute directory that was
+// actually listed, using the first entry's parent or the lister's HomeDir.
+func resolveListedPath(requested string, entries []remote.DirEntry, home string) string {
+	if requested != "" && requested != "~" {
+		return requested
+	}
+	if len(entries) > 0 {
+		return parentDir(entries[0].Path)
+	}
+	if home != "" {
+		return home
+	}
+	return requested
 }

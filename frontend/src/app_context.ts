@@ -131,7 +131,10 @@ export interface AppContext {
     saveSession: () => void;
     closeAllTabs: () => Promise<void>;
     openFilesAction: () => Promise<void>;
+    /** Open remote browser on the server of the given tab (SSH/FTP). */
+    browseRemoteServerAction: (tabId: string) => Promise<void>;
 }
+
 
 export type FileStatsResponse = main.FileStatsResponse;
 export type RecentFileItem = config.RecentFileItem;

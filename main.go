@@ -71,6 +71,9 @@ func run() int {
 			}
 		},
 		OnBeforeClose: func(ctx context.Context) bool {
+			// Ask the frontend to flush the tab session before the webview is
+			// torn down. pagehide/beforeunload are unreliable under Wails.
+			wailsRuntime.EventsEmit(ctx, "app:before-close")
 			// Flushes debounced settings + window geometry to the shared config.
 			app.SaveCurrentWindowGeometry(ctx)
 			return false

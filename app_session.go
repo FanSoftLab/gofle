@@ -2,6 +2,8 @@ package main
 
 import (
 	"GoFLE/pkg/config"
+	"GoFLE/pkg/ftp"
+	"GoFLE/pkg/remote"
 	"context"
 	"errors"
 	"fmt"
@@ -104,18 +106,47 @@ func (a *App) RestoreTab(item config.SavedTabItem) (*FileStatsResponse, error) {
 			return nil, fmt.Errorf("saved SSH tab %q has no connection details", item.ID)
 		}
 
+		summary := *item.SSH
+		proto := summary.Protocol
+		if proto == "" {
+			proto = remote.ProtocolSSH
+		}
+
+		// FTP/FTPS tabs are persisted with IsSSH=true (shared remote tab shape)
+		// and Protocol="ftp". Route them through the FTP opener instead of SSH.
+		if proto == remote.ProtocolFTP {
+			ftpCfg := ftp.Config{
+				Host:           summary.Host,
+				Port:           summary.Port,
+				Username:       summary.Username,
+				AuthType:       summary.AuthType,
+				Password:       summary.Password,
+				KeyPath:        summary.KeyPath,
+				KeyPassphrase:  summary.KeyPassphrase,
+				RemoteFilePath: summary.RemoteFilePath,
+				TLSMode:        summary.TLSMode,
+				KnownHostsPath: resolveFTPCertStore(remote.Config{
+					Protocol:       remote.ProtocolFTP,
+					Host:           summary.Host,
+					Port:           summary.Port,
+					KnownHostsPath: a.cfg.KnownHostsPath(),
+				}),
+			}
+			displayPath := remotePathDisplay(remote.ProtocolFTP, ftpCfg.Host, ftpCfg.Port, ftpCfg.RemoteFilePath)
+			return a.openFTPStream(ftpCfg, displayPath, &summary, item.ID)
+		}
+
 		sshCfg := SSHConfig{
-			Host:           item.SSH.Host,
-			Port:           item.SSH.Port,
-			Username:       item.SSH.Username,
-			AuthType:       item.SSH.AuthType,
-			Password:       item.SSH.Password,
-			KeyPath:        item.SSH.KeyPath,
-			KeyPassphrase:  item.SSH.KeyPassphrase,
-			RemoteFilePath: item.SSH.RemoteFilePath,
+			Host:           summary.Host,
+			Port:           summary.Port,
+			Username:       summary.Username,
+			AuthType:       summary.AuthType,
+			Password:       summary.Password,
+			KeyPath:        summary.KeyPath,
+			KeyPassphrase:  summary.KeyPassphrase,
+			RemoteFilePath: summary.RemoteFilePath,
 		}
 		sshPathDisplay := fmt.Sprintf("ssh://%s:%d%s", sshCfg.Host, sshCfg.Port, sshCfg.RemoteFilePath)
-		summary := *item.SSH
 
 		return a.openSSHStream(sshCfg, sshPathDisplay, &summary, item.ID)
 	}

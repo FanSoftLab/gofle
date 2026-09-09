@@ -51,7 +51,7 @@ USAGE
 COMMANDS
   ssh     connect via SSH and stream a remote file
   ftp     connect via FTP/FTPS and stream a remote file
-  list    recent files (reopen interactively)
+  recent  open recent files (interactive picker)
   version print version
 
 VIEWER KEYS  (press ? inside the viewer for the full list)
@@ -79,7 +79,7 @@ VIEW MODES  (saved in settings.json → view_mode)
   gofle ftp host -u user --tls explicit --remote /var/log/x.log --view
 
   # history
-  gofle list`,
+  gofle recent`,
 	Args:         cmds.UsageArgs(cobra.MaximumNArgs(1)),
 	SilenceUsage: true,
 	// Errors are printed exactly once — by main() below. Cobra's own printer

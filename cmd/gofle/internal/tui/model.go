@@ -85,6 +85,10 @@ type model struct {
 	remoteBrowseErr      string                   // last listing/browse error
 	remoteHostPrompt     *ssh.HostKeyUnknownError // pending unknown-host trust prompt (ssh only)
 	remoteAfterTrustOpen bool                     // after trusting host: open stream (vs re-list)
+	// lastRemoteCfg holds the connection used for the currently open remote
+	// file so "browse other file on this server" can reuse credentials without
+	// re-prompting. Nil when the open target is local.
+	lastRemoteCfg *remote.Config
 
 	// Visual line selection (v to start, c to copy). selAnchor is the line the
 	// selection was anchored on; the moving end is m.top, so scrolling with

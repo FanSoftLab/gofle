@@ -105,10 +105,28 @@ export class ModalController {
                 if (f.is_ssh) {
                     const badge = document.createElement('span');
                     badge.className = 'recent-badge';
-                    badge.textContent = t('recent_ssh_badge');
+                    const proto = (f.ssh?.protocol || 'ssh').toLowerCase();
+                    badge.textContent = proto === 'ftp' ? 'FTP' : t('recent_ssh_badge');
                     badgeSlot.appendChild(badge);
                 }
                 actions.appendChild(badgeSlot);
+
+                // Remote entries: open the directory browser on the same server
+                // so the user can pick another log without retyping credentials.
+                if (f.is_ssh && f.ssh) {
+                    const browseBtn = document.createElement('button');
+                    browseBtn.type = 'button';
+                    browseBtn.className = 'recent-browse-btn';
+                    browseBtn.textContent = t('recent_browse_server');
+                    browseBtn.title = t('recent_browse_server_title');
+                    browseBtn.setAttribute('aria-label', t('recent_browse_server_title'));
+                    browseBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        recentModal.classList.add('hidden');
+                        await this.sshHandler.browseOnServerFromRecent(f);
+                    });
+                    actions.appendChild(browseBtn);
+                }
 
                 const removeBtn = document.createElement('button');
                 removeBtn.type = 'button';

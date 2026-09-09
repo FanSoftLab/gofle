@@ -22,7 +22,7 @@ import (
 // in the recent list, and finally run the Bubbletea viewer.
 //
 // It is the single entry point used by `gofle <target>` (root RunE),
-// `gofle list open <n>` and `gofle ssh --view`.
+// `gofle recent open <n>` and `gofle ssh --view`.
 func OpenViewer(cmd *cobra.Command, target string) error {
 	if strings.TrimSpace(target) == "" {
 		return errors.New("no target specified")
@@ -77,7 +77,7 @@ func OpenViewer(cmd *cobra.Command, target string) error {
 		slog.Warn("failed to persist recent entry", "target", target, "err", rerr)
 	}
 
-	return tui.RunView(ctx, idx, se, cleanup, cfg)
+	return tui.RunView(ctx, idx, se, cleanup, cfg, target)
 }
 
 // confirmHostKey surfaces an unknown SSH host key's fingerprint, asks the user

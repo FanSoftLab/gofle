@@ -141,7 +141,7 @@ func (c Config) Validate() error {
 
 const (
 	streamProbeInterval = 30 * time.Second
-	streamCloseTimeout  = 30 * time.Second
+	streamCloseTimeout  = 8 * time.Second
 	streamStallTimeout  = 60 * time.Second
 	// parallelSyncThreshold is the file size above which parallel range downloads
 	// are used for the initial sync (100 MB).

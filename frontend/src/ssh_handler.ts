@@ -228,8 +228,33 @@ export class SSHHandler {
         document.getElementById('btn-browse-ssh')?.addEventListener('click', () => this.openBrowse());
         document.getElementById('btn-browse-up')?.addEventListener('click', () => this.browseUp());
         document.getElementById('btn-browse-open')?.addEventListener('click', () => this.browseOpenSelected());
+        document.getElementById('btn-browse-goto')?.addEventListener('click', () => this.browseGotoPath());
+        document.getElementById('btn-browse-home')?.addEventListener('click', () => {
+            this.browsePath = '~';
+            this.browseCursor = 0;
+            this.listRemoteDir();
+        });
         document.getElementById('btn-browse-cancel')?.addEventListener('click', () => {
             document.getElementById('ssh-browse-modal')?.classList.add('hidden');
+        });
+
+        // Keyboard navigation inside the remote directory browser.
+        const pathInput = document.getElementById('ssh-browse-path') as HTMLInputElement | null;
+        pathInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.browseGotoPath();
+            }
+        });
+        const listEl = document.getElementById('ssh-browse-list');
+        listEl?.addEventListener('keydown', (e) => this.browseKeyDown(e));
+        // Capture arrows while the modal is open even if focus is elsewhere in it.
+        document.getElementById('ssh-browse-modal')?.addEventListener('keydown', (e) => {
+            const modal = document.getElementById('ssh-browse-modal');
+            if (!modal || modal.classList.contains('hidden')) return;
+            const tag = (e.target as HTMLElement)?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            this.browseKeyDown(e);
         });
     };
 
@@ -571,8 +596,8 @@ export class SSHHandler {
         const api = this.ctx.getApi();
         if (!api) return;
         this.browseLoading = true;
-        const pathEl = document.getElementById('ssh-browse-path');
-        if (pathEl) pathEl.textContent = this.browsePath;
+        const pathEl = document.getElementById('ssh-browse-path') as HTMLInputElement | null;
+        if (pathEl) pathEl.value = this.browsePath;
         const errEl = document.getElementById('ssh-browse-error');
         if (errEl) errEl.classList.add('hidden');
         document.getElementById('ssh-browse-loading')?.classList.add('hidden');
@@ -583,6 +608,13 @@ export class SSHHandler {
             this.pendingOpenConfig = cfg;
             const entries = await api.ListRemoteFiles(cfg, this.browsePath);
             this.browseEntries = entries || [];
+            // Backend resolves "~"/"" to the remote home, but returns only the
+            // entries. Promote browsePath to the absolute parent so "Up" can
+            // leave the home directory (previously stuck on "~").
+            if ((this.browsePath === '~' || this.browsePath === '') && this.browseEntries.length > 0) {
+                this.browsePath = this.parentOfPath(this.browseEntries[0].path);
+                if (pathEl) pathEl.value = this.browsePath;
+            }
             this.browseCursor = 0;
         } catch (err: any) {
             const sshU = this.parseSSHError(err);
@@ -603,17 +635,42 @@ export class SSHHandler {
         } finally {
             this.browseLoading = false;
             this.renderBrowse();
+            // Keep keyboard focus on the list for arrow navigation.
+            document.getElementById('ssh-browse-list')?.focus({ preventScroll: true });
         }
     }
 
-    // browseUp navigates one directory level up (unless already at root/home).
+    // parentOfPath returns the directory containing path, or "/" at the root.
+    private parentOfPath(path: string): string {
+        let p = path || '/';
+        if (p.endsWith('/') && p.length > 1) p = p.slice(0, -1);
+        const idx = p.lastIndexOf('/');
+        if (idx <= 0) return '/';
+        return p.slice(0, idx) || '/';
+    }
+
+    // browseGotoPath jumps to the path typed in the path bar (Enter / Go).
+    private browseGotoPath = () => {
+        const pathEl = document.getElementById('ssh-browse-path') as HTMLInputElement | null;
+        let next = (pathEl?.value || '').trim();
+        if (!next) next = '~';
+        // Normalize trailing slash except for root.
+        if (next.length > 1 && next.endsWith('/')) next = next.slice(0, -1);
+        this.browsePath = next;
+        this.browseCursor = 0;
+        this.listRemoteDir();
+    };
+
+    // browseUp navigates one directory level up (unless already at filesystem root).
     private browseUp = () => {
-        if (this.browsePath === '~' || this.browsePath === '/') return;
-        let parent = this.browsePath;
-        if (parent.endsWith('/')) parent = parent.slice(0, -1);
-        const idx = parent.lastIndexOf('/');
-        parent = idx <= 0 ? '/' : parent.slice(0, idx);
-        this.browsePath = parent || '/';
+        if (this.browsePath === '/') return;
+        // "~" is treated as home: resolve first list already promotes it to an
+        // absolute path; if somehow still "~", go to "/".
+        if (this.browsePath === '~' || this.browsePath === '') {
+            this.browsePath = '/';
+        } else {
+            this.browsePath = this.parentOfPath(this.browsePath);
+        }
         this.browseCursor = 0;
         this.listRemoteDir();
     };
@@ -637,18 +694,67 @@ export class SSHHandler {
         document.getElementById('ssh-browse-modal')?.classList.add('hidden');
     }
 
+    // browseKeyDown handles arrow / enter / backspace while the browser is open.
+    private browseKeyDown = (e: KeyboardEvent) => {
+        const modal = document.getElementById('ssh-browse-modal');
+        if (!modal || modal.classList.contains('hidden') || this.browseLoading) return;
+
+        switch (e.key) {
+            case 'ArrowUp':
+                e.preventDefault();
+                if (this.browseEntries.length === 0) return;
+                this.browseCursor = (this.browseCursor + this.browseEntries.length - 1) % this.browseEntries.length;
+                this.renderBrowse();
+                this.scrollBrowseCursorIntoView();
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                if (this.browseEntries.length === 0) return;
+                this.browseCursor = (this.browseCursor + 1) % this.browseEntries.length;
+                this.renderBrowse();
+                this.scrollBrowseCursorIntoView();
+                break;
+            case 'Enter':
+                e.preventDefault();
+                this.browseOpenSelected();
+                break;
+            case 'Backspace':
+                // Don't steal Backspace from the path input.
+                if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+                e.preventDefault();
+                this.browseUp();
+                break;
+            case 'Home':
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    this.browsePath = '~';
+                    this.browseCursor = 0;
+                    this.listRemoteDir();
+                }
+                break;
+        }
+    };
+
+    private scrollBrowseCursorIntoView() {
+        const listEl = document.getElementById('ssh-browse-list');
+        const sel = listEl?.querySelector('.ssh-browse-selected') as HTMLElement | null;
+        sel?.scrollIntoView({ block: 'nearest' });
+    }
+
     // renderBrowse paints the current directory listing: an "up" pseudo-row
-    // (except at root), a loading/empty placeholder, then dirs-first entries with
-    // the cursor highlighted.
+    // (except at filesystem root), a loading/empty placeholder, then dirs-first
+    // entries with the cursor highlighted.
     private renderBrowse() {
         const listEl = document.getElementById('ssh-browse-list');
         if (!listEl) return;
 
         const frag = document.createDocumentFragment();
-        if (this.browsePath !== '~' && this.browsePath !== '/') {
+        // Always offer ".." unless we are already at the filesystem root. Home
+        // is no longer a hard ceiling — users can walk up to /var/log etc.
+        if (this.browsePath !== '/') {
             const li = document.createElement('li');
             li.className = 'ssh-browse-up';
-            li.textContent = '..';
+            li.textContent = '▸ ..';
             li.addEventListener('click', () => this.browseUp());
             frag.appendChild(li);
         }
@@ -694,7 +800,82 @@ export class SSHHandler {
         if (spinner) spinner.classList.toggle('hidden', !this.browseLoading);
     }
 
+    // fillRemoteFormFromRecent writes saved SSH/FTP credentials into the connect
+    // form without opening a file. Shared by reopen and "other file on server".
+    private fillRemoteFormFromRecent(f: RecentFileItem) {
+        if (!f.ssh) return;
+        const protocol = f.ssh.protocol || 'ssh';
+        const tlsMode = f.ssh.tls_mode || 'none';
+        (document.getElementById('ssh-host') as HTMLInputElement).value = f.ssh.host || '';
+        (document.getElementById('ssh-port') as HTMLInputElement).value = String(f.ssh.port || (protocol === 'ftp' ? 21 : 22));
+        (document.getElementById('ssh-username') as HTMLInputElement).value = f.ssh.username || '';
+        (document.getElementById('ssh-protocol') as HTMLSelectElement).value = protocol;
+        (document.getElementById('ssh-protocol') as HTMLSelectElement).dispatchEvent(new Event('change'));
+        (document.getElementById('ssh-auth-type') as HTMLSelectElement).value = f.ssh.auth_type || 'password';
+        (document.getElementById('ssh-auth-type') as HTMLSelectElement).dispatchEvent(new Event('change'));
+        (document.getElementById('ssh-password') as HTMLInputElement).value = f.ssh.password || '';
+        (document.getElementById('ssh-key-path') as HTMLInputElement).value = f.ssh.key_path || '';
+        (document.getElementById('ssh-key-pass') as HTMLInputElement).value = f.ssh.key_passphrase || '';
+        (document.getElementById('ssh-remote-path') as HTMLInputElement).value = f.ssh.remote_file_path || '';
+        if (protocol === 'ftp') {
+            (document.getElementById('ssh-tls-mode') as HTMLSelectElement).value = tlsMode;
+        }
+        this.clearFieldState();
+    }
+
+    // startPathForRecent picks a sensible browser start directory for a saved
+    // remote entry: the parent of the last opened file, or "~" when unknown.
+    private startPathForRecent(f: RecentFileItem): string {
+        const remote = (f.ssh?.remote_file_path || '').trim();
+        if (!remote || remote === '~') return '~';
+        // Strip trailing slash then drop the last segment.
+        let p = remote.endsWith('/') && remote.length > 1 ? remote.slice(0, -1) : remote;
+        const idx = p.lastIndexOf('/');
+        if (idx <= 0) return '/';
+        return p.slice(0, idx) || '/';
+    }
+
+    // browseOnServerFromRecent opens the remote directory browser on a saved
+    // SSH/FTP server so the user can pick a different log without re-entering
+    // credentials. Starts in the directory of the previously opened file.
+    public browseOnServerFromRecent = async (f: RecentFileItem) => {
+        const { sshModal, errSSH } = this.ctx;
+        if (!f.ssh) return;
+        errSSH?.classList.add('hidden');
+        this.fillRemoteFormFromRecent(f);
+        // Clear the file path field: we are choosing a new one.
+        (document.getElementById('ssh-remote-path') as HTMLInputElement).value = '';
+        sshModal.classList.remove('hidden');
+        this.browseAfterTrust = false;
+        if (!this.validateConnectBasics()) {
+            return;
+        }
+        this.browsePath = this.startPathForRecent(f);
+        this.browseCursor = 0;
+        this.browseEntries = [];
+        this.browseLoading = false;
+        document.getElementById('ssh-browse-modal')?.classList.remove('hidden');
+        await this.listRemoteDir();
+    };
+
+    // browseOnServerFromTab opens the browser using credentials stored on an
+    // already-open remote tab (same host, different log file).
+    public browseOnServerFromTab = async (ssh: any) => {
+        if (!ssh) return;
+        // RecentFileItem is a Wails-generated class (requires convertValues); build
+        // via constructor so tsc accepts the value without a structural mismatch.
+        const item = {
+            path: '',
+            file_size: 0,
+            last_opened: '',
+            is_ssh: true,
+            ssh,
+        } as unknown as RecentFileItem;
+        await this.browseOnServerFromRecent(item);
+    };
+
     public reopenFromRecent = async (f: RecentFileItem) => {
+
         const { sshModal, getApi } = this.ctx;
         const api = getApi();
         if (!api || !f.ssh) return;
@@ -746,21 +927,7 @@ export class SSHHandler {
         }
 
         // Fill the form with the stored credentials, choosing the right protocol.
-        (document.getElementById('ssh-host') as HTMLInputElement).value = f.ssh.host || '';
-        (document.getElementById('ssh-port') as HTMLInputElement).value = String(f.ssh.port || (protocol === 'ftp' ? 21 : 22));
-        (document.getElementById('ssh-username') as HTMLInputElement).value = f.ssh.username || '';
-        (document.getElementById('ssh-protocol') as HTMLSelectElement).value = protocol;
-        (document.getElementById('ssh-protocol') as HTMLSelectElement).dispatchEvent(new Event('change'));
-        (document.getElementById('ssh-auth-type') as HTMLSelectElement).value = f.ssh.auth_type || 'password';
-        (document.getElementById('ssh-auth-type') as HTMLSelectElement).dispatchEvent(new Event('change'));
-        (document.getElementById('ssh-password') as HTMLInputElement).value = f.ssh.password || '';
-        (document.getElementById('ssh-key-path') as HTMLInputElement).value = f.ssh.key_path || '';
-        (document.getElementById('ssh-key-pass') as HTMLInputElement).value = f.ssh.key_passphrase || '';
-        (document.getElementById('ssh-remote-path') as HTMLInputElement).value = f.ssh.remote_file_path || '';
-        if (protocol === 'ftp') {
-            (document.getElementById('ssh-tls-mode') as HTMLSelectElement).value = tlsMode;
-        }
-        this.clearFieldState();
+        this.fillRemoteFormFromRecent(f);
         sshModal.classList.remove('hidden');
 
         if (f.ssh.remote_file_path === '') {

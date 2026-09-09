@@ -57,6 +57,8 @@ export class VirtualScroller {
   constructor(viewportId: string, fetchCallback: FetchLinesCallback) {
     this.viewport = document.getElementById(viewportId)!;
     this.fetchCallback = fetchCallback;
+    // Keyboard focus target for Shift+Arrow selection and Ctrl+C.
+    if (this.viewport.tabIndex < 0) this.viewport.tabIndex = 0;
 
     this.contentContainer = document.createElement('div');
     this.contentContainer.className = 'log-content-container';
@@ -157,6 +159,7 @@ export class VirtualScroller {
   public setHighlightedLine(index: number | null) {
     this.highlightedLineIndex = index;
     this.applyHighlighting();
+      this.applySelectionStyle();
   }
 
   public setOnRowClick(cb: (index: number) => void) {
@@ -235,6 +238,7 @@ export class VirtualScroller {
     }
     if (missingIndices.length === 0) {
       this.applyHighlighting();
+      this.applySelectionStyle();
       // Rows were only repositioned — still refresh horizontal extent (e.g. after
       // a tab switch that recycled everything then hit a warm cache path).
       requestAnimationFrame(() => this.measureContentWidth());
@@ -287,9 +291,22 @@ export class VirtualScroller {
         numEl.textContent = (line.index + 1).toString();
         textEl.innerHTML = LogHighlighter.highlightLine(line.content, this.currentSearchQuery);
 
+        // Logical index for selection / context menu (NOT line.index — on the
+        // filter pane line.index is the source log line, while the virtual
+        // position is the match ordinal).
+        rowNode.dataset.index = String(logicalIndex);
+
+        const range = this.getSelectedRange();
+        if (range && logicalIndex >= range.start && logicalIndex <= range.end) {
+          rowNode.classList.add('selected');
+        } else {
+          rowNode.classList.remove('selected');
+        }
+
         rowNode.onclick = () => {
           this.highlightedLineIndex = logicalIndex;
           this.applyHighlighting();
+          this.applySelectionStyle();
           if (this.onRowClickCallback) this.onRowClickCallback(line.index);
         };
 
@@ -297,6 +314,8 @@ export class VirtualScroller {
         fragment.appendChild(rowNode);
       }
       this.contentContainer.appendChild(fragment);
+      this.applyHighlighting();
+      this.applySelectionStyle();
       // After rows are in the DOM, expand horizontal scroll for long lines.
       requestAnimationFrame(() => this.measureContentWidth());
     }).catch((err) => {
@@ -414,14 +433,41 @@ export class VirtualScroller {
     }
   }
 
-  public copySelection() {
+  /** Copy the current line selection to the clipboard. Returns true if anything was copied. */
+  public async copySelection(): Promise<boolean> {
     const range = this.getSelectedRange();
-    if (!range) return '';
-    
-    // For now, we just return the range; actual text copying would need
-    // fetching the lines. We'll implement a callback-based approach.
-    const rangeInfo = { start: this.selectionStart, end: this.selectionEnd };
-    return { start: range.start, end: range.end };
+    if (!range) return false;
+
+    const count = range.end - range.start + 1;
+    try {
+      // fetchCallback is defined to return lines for the logical window
+      // [start, start+count) in order (main log: absolute lines; filter pane:
+      // match ordinals). Do NOT key by line.index — on the filter pane that is
+      // the source log line number and would leave almost every part empty.
+      const lines = await this.fetchCallback(range.start, count);
+      const parts: string[] = new Array(count).fill('');
+      for (let i = 0; i < lines.length && i < count; i++) {
+        parts[i] = lines[i]?.content ?? '';
+      }
+      // Prefer any content already rendered in the DOM for visible rows (avoids
+      // a second IPC when the selection is on-screen).
+      for (let i = range.start; i <= range.end; i++) {
+        const node = this.renderedNodes.get(i);
+        if (!node) continue;
+        const textEl = node.querySelector('.log-text') as HTMLElement | null;
+        const domText = textEl?.textContent;
+        if (domText != null && domText.length > 0) {
+          parts[i - range.start] = domText;
+        }
+      }
+      const text = parts.join('\n');
+      if (!text) return false;
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (err) {
+      console.error('copySelection failed:', err);
+      return false;
+    }
   }
 
   public setSelection(start: number, end: number) {
@@ -442,43 +488,40 @@ export class VirtualScroller {
 
   private applySelectionStyle() {
     const range = this.getSelectedRange();
-    if (!range) {
-      this.contentContainer.querySelectorAll('.log-row.selected').forEach(el => {
-        el.classList.remove('selected');
-      });
-      return;
-    }
-
     for (const [idx, node] of this.renderedNodes) {
-      if (idx >= range.start && idx <= range.end) {
+      if (range && idx >= range.start && idx <= range.end) {
         node.classList.add('selected');
       } else {
         node.classList.remove('selected');
-      node.classList.remove('selected');
       }
     }
   }
 
   // Mouse event handlers for selection
   private handleMouseDown = (e: MouseEvent, logicalIndex: number) => {
-    if (e.button !== 0) return; // Only left click
-    
+    if (e.button !== 0) return; // Only left click — right-click is context menu
+
+    // Focus viewport so Shift+Arrow / Ctrl+C work without clicking an input first.
+    if (this.viewport.tabIndex < 0) this.viewport.tabIndex = 0;
+    this.viewport.focus({ preventScroll: true });
+
     if (e.shiftKey && this.selectionAnchor !== null) {
-      // Extend selection
       this.extendSelection(logicalIndex);
     } else {
-      // New selection
       this.setSelection(logicalIndex, logicalIndex);
     }
     this.isSelecting = true;
+    // Prevent native text selection while dragging line ranges; single-line
+    // still shows our .selected style which is more reliable in a virtual list.
     e.preventDefault();
   }
 
   private handleMouseMove = (e: MouseEvent) => {
     if (!this.isSelecting) return;
-    // Find the row under the mouse
-    const target = e.target as HTMLElement;
-    const rowEl = target.closest('.log-row') as HTMLElement;
+    // Prefer elementFromPoint so selection still extends when the pointer is
+    // over padding / between rows / on the sticky content layer.
+    const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const rowEl = (under?.closest('.log-row') || (e.target as HTMLElement)?.closest?.('.log-row')) as HTMLElement | null;
     if (rowEl) {
       const idx = parseInt(rowEl.dataset.index || '', 10);
       if (!isNaN(idx)) {

@@ -17,28 +17,44 @@ import (
 	"github.com/charmbracelet/bubbletea"
 )
 
-// RunRecentPicker launches the interactive recent-files picker and returns the
-// target to open (local path or ssh:// URL). An empty string means the user
-// canceled (esc/q). It is the interactive equivalent of the in-viewer `o` key.
-func RunRecentPicker(items []config.RecentFileItem) (string, error) {
+// RecentPick is the result of RunRecentPicker.
+type RecentPick struct {
+	// Target is the local path or ssh:// / ftp:// URL to open. Empty when the
+	// user canceled or requested a browse instead.
+	Target string
+	// Browse is non-nil when the user pressed "b" on a remote recent entry:
+	// the caller should open the remote directory browser with this entry's
+	// credentials (other file on the same server).
+	Browse *config.RecentFileItem
+}
+
+// RunRecentPicker launches the interactive recent-files picker. It is the
+// interactive equivalent of the in-viewer `o` key, including "b" to browse
+// another file on the same SSH/FTP server.
+func RunRecentPicker(items []config.RecentFileItem) (RecentPick, error) {
 	m := recentPickerModel{items: items, cursor: 0}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	final, err := p.Run()
 	if err != nil {
-		return "", err
+		return RecentPick{}, err
 	}
 
 	mm, ok := final.(recentPickerModel)
 	if !ok || mm.canceled {
-		return "", nil
+		return RecentPick{}, nil
 	}
 
 	if mm.cursor < 0 || mm.cursor >= len(mm.items) {
-		return "", nil
+		return RecentPick{}, nil
 	}
 
 	it := mm.items[mm.cursor]
+
+	if mm.browse {
+		item := it
+		return RecentPick{Browse: &item}, nil
+	}
 
 	target := it.Path
 	if it.IsSSH && it.SSH != nil {
@@ -48,7 +64,7 @@ func RunRecentPicker(items []config.RecentFileItem) (string, error) {
 		target = remoteTargetFromRecent(it)
 	}
 
-	return target, nil
+	return RecentPick{Target: target}, nil
 }
 
 // RunView constructs the viewer model and runs the Bubbletea program. cleanup is
@@ -60,7 +76,7 @@ func RunRecentPicker(items []config.RecentFileItem) (string, error) {
 // the viewer starts — notably an in-viewer reopen of an ssh:// entry, which
 // resolves synchronously and would otherwise hold the terminal for the full
 // dial/handshake/stall watchdogs with no way to give up.
-func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.SearchEngine, cleanup func(), cfg *config.AppConfig) error {
+func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.SearchEngine, cleanup func(), cfg *config.AppConfig, target string) error {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -81,9 +97,13 @@ func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.Search
 				close(done)
 			}()
 
+			// Bound the wait so a stuck remote tail cannot freeze process exit.
+			// Streamer.Close itself is also bounded (streamCloseTimeout); keep this
+			// slightly above that so a healthy teardown almost always finishes
+			// silently and the WARN only fires on truly wedged connections.
 			select {
 			case <-done:
-			case <-time.After(5 * time.Second):
+			case <-time.After(10 * time.Second):
 				slog.Warn("gofle: viewer cleanup did not finish promptly; exiting anyway",
 					"target", idx.FilePath())
 			}
@@ -140,6 +160,16 @@ func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.Search
 		cancel:     cancel,
 	}
 	m.applyViewModeFromConfig()
+	// Seed remote credentials so "b" (other file on this server) works when the
+	// viewer was launched on an ssh:// or ftp:// target from the CLI.
+	if target != "" && cfg != nil {
+		if sum := findRecentSummaryForTarget(cfg, target); sum != nil {
+			rc := remoteConfigFromSummary(sum)
+			m.lastRemoteCfg = &rc
+			m.remoteProto = rc.Protocol
+			m.fillRemoteFormFromRecent(sum)
+		}
+	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()

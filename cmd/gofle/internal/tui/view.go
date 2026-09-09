@@ -292,7 +292,7 @@ func (m model) renderStatus() string {
 
 // recentView renders the recent-files picker overlay.
 // renderRecentList renders the recent-entries body (shared by the in-viewer
-// picker and the standalone `gofle list` picker). The entry at `cursor` is
+// picker and the standalone `gofle recent` picker). The entry at `cursor` is
 // highlighted.
 func renderRecentList(items []config.RecentFileItem, cursor int) string {
 	if len(items) == 0 {
@@ -312,6 +312,9 @@ func renderRecentList(items []config.RecentFileItem, cursor int) string {
 		kind := "local"
 		if it.IsSSH {
 			kind = "ssh"
+			if it.SSH != nil && it.SSH.Protocol == "ftp" {
+				kind = "ftp"
+			}
 		}
 
 		var line string
@@ -334,7 +337,7 @@ func (m model) recentView() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("Open recent") + "\n\n")
 	b.WriteString(renderRecentList(m.recentList, m.recentCursor))
-	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  esc cancel"))
+	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  b browse other file on server  ·  esc cancel"))
 
 	return b.String()
 }
@@ -423,7 +426,7 @@ func (m model) remoteBrowseView() string {
 		b.WriteString("\n" + errorStyle.Render(m.remoteBrowseErr))
 	}
 
-	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  Enter open file / enter dir  ·  Backspace parent  ·  Esc back to form"))
+	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  Enter open / enter dir  ·  Backspace/u parent (above home OK)  ·  Esc form"))
 
 	return b.String()
 }
@@ -1329,6 +1332,7 @@ func (m model) helpView() string {
 		"",
 		keyStyle.Render("▸ Other"),
 		helpKey("o", "open recent file"),
+		helpKey("b", "other file on this server  (SSH/FTP)"),
 		helpKey("S", "remote connect  (SSH / FTP)"),
 		helpKey("?   F1", "this help"),
 		helpKey("q   Ctrl+C", "quit"),

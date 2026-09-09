@@ -1,26 +1,30 @@
 package cmds
 
 import (
+	"context"
 	"GoFLE/cmd/gofle/internal/shared"
 	"GoFLE/cmd/gofle/internal/tui"
 	"GoFLE/pkg/config"
+	"GoFLE/pkg/remote"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-// RecentCmd lists recently opened files (shared with the GoFLE GUI).
+// RecentCmd opens recently used files (shared with the GoFLE GUI).
+// Invoked as `gofle recent` (Open recent).
 var RecentCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List recently opened files",
-	Long: `Open a recently used log file (local or SSH), shared with the GoFLE
-desktop app. Running 'gofle list' launches an interactive picker: use ↑/↓ (or
-k/j) to choose an entry and enter to open it, esc/q to cancel. For non-interactive
-use, 'gofle list open <n>' reopens entry <n> directly.`,
-	Example: `  gofle list              # interactive recent-file picker
-  gofle list open 1     # reopen recent entry 1 in the viewer
-  gofle list clear      # clear the recent list`,
+	Use:   "recent",
+	Short: "Open recent files",
+	Long: `Open a recently used log file (local or SSH/FTP), shared with the GoFLE
+desktop app. Running 'gofle recent' launches an interactive picker: use ↑/↓ (or
+k/j) to choose an entry, enter to open it, b to browse another file on the same SSH/FTP server, esc/q to cancel. For non-interactive
+use, 'gofle recent open <n>' reopens entry <n> directly.`,
+	Example: `  gofle recent              # interactive recent-file picker (Open recent)
+  gofle recent open 1       # reopen recent entry 1 in the viewer
+  gofle recent clear        # clear the recent list`,
 	Args:         UsageArgs(cobra.MaximumNArgs(0)),
 	RunE:         runRecentList,
 	SilenceUsage: true,
@@ -57,15 +61,132 @@ func runRecentList(cmd *cobra.Command, _ []string) error {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No recent files.")
 		return nil
 	}
-	// Interactive picker (up/down to choose, enter to open), identical in feel
-	// to the in-viewer "open recent" key.
-	target, err := tui.RunRecentPicker(items)
+	// Interactive picker (up/down to choose, enter to open, b to browse the
+	// same remote server), identical in feel to the in-viewer "open recent" key.
+	pick, err := tui.RunRecentPicker(items)
 	if err != nil {
 		return err
 	}
 
-	if target == "" {
+	if pick.Browse != nil {
+		return browseRecentServer(cmd, cfg, *pick.Browse)
+	}
+
+	if pick.Target == "" {
 		return nil // canceled
+	}
+
+	return OpenViewer(cmd, pick.Target)
+}
+
+// browseRecentServer opens the remote directory browser using credentials from
+// a recent SSH/FTP entry, then opens the chosen file in the viewer. Mirrors the
+// in-viewer "b browse other file on server" action for `gofle recent`.
+func browseRecentServer(cmd *cobra.Command, cfg *config.AppConfig, item config.RecentFileItem) error {
+	if item.SSH == nil {
+		return fmt.Errorf("not a remote entry")
+	}
+	sum := item.SSH
+	proto := sum.Protocol
+	if proto == "" {
+		proto = "ssh"
+	}
+	port := sum.Port
+	if port == 0 {
+		if proto == "ftp" {
+			port = 21
+		} else {
+			port = 22
+		}
+	}
+	auth := sum.AuthType
+	if auth == "" {
+		auth = authTypePassword
+	}
+
+	rcfg := remote.Config{
+		Protocol:       proto,
+		Host:           sum.Host,
+		Port:           port,
+		Username:       sum.Username,
+		AuthType:       auth,
+		Password:       sum.Password,
+		KeyPath:        sum.KeyPath,
+		KeyPassphrase:  sum.KeyPassphrase,
+		RemoteFilePath: "",
+		TLSMode:        sum.TLSMode,
+		KnownHostsPath: cfg.KnownHostsPath(),
+	}
+
+	paths := remotePaths{
+		KnownHostsPath: cfg.KnownHostsPath(),
+		FTPCerts:       cfg.KnownHostsPath(),
+	}
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Start in the parent directory of the last opened remote file when known.
+	start := sum.RemoteFilePath
+	if start == "" || start == "~" {
+		start = "/"
+	} else {
+		// parent of the file path
+		if i := strings.LastIndex(start, "/"); i > 0 {
+			start = start[:i]
+		} else if i == 0 {
+			start = "/"
+		}
+	}
+
+	if rcfg.AuthType == authTypePassword && rcfg.Password == "" {
+		pw, err := readPasswordTTY("Password: ")
+		if err != nil {
+			return err
+		}
+		rcfg.Password = pw
+	}
+
+	listCfg := rcfg
+	listCfg.RemoteFilePath = ""
+	lister, lerr := connectLister(ctx, listCfg, false, paths)
+	if lerr != nil {
+		return lerr
+	}
+
+	chosen, berr := runRemoteBrowser(ctx, cmd, lister, start)
+	if cerr := lister.Close(); cerr != nil {
+		// best-effort
+		_ = cerr
+	}
+	if berr != nil {
+		return berr
+	}
+	if chosen == "" {
+		return nil // canceled in browser
+	}
+
+	rcfg.RemoteFilePath = chosen
+	target := buildRemoteURL(proto, "", sum.Host, port, chosen)
+
+	// Persist updated path for next time; keep credentials from the summary.
+	summary := &config.SSHConfigSummary{
+		Host:           sum.Host,
+		Port:           port,
+		Username:       sum.Username,
+		RemoteFilePath: chosen,
+		AuthType:       auth,
+		Password:       rcfg.Password,
+		KeyPath:        sum.KeyPath,
+		KeyPassphrase:  sum.KeyPassphrase,
+		Protocol:       proto,
+		TLSMode:        sum.TLSMode,
+	}
+	if err := shared.RecordRecent(cfg, target, true, 0, summary); err != nil {
+		// non-fatal
+		_ = err
 	}
 
 	return OpenViewer(cmd, target)

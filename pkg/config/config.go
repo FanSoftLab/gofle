@@ -150,10 +150,12 @@ type AppConfig struct {
 
 // settingsFile is the on-disk shape of the settings.json file.
 // Shared by the CLI viewer and the desktop app (same config directory).
+// SaveTabsExit is a pointer so a missing JSON key does not silently force the
+// flag to false (Go's zero value) and wipe the "save open tabs" default.
 type settingsFile struct {
 	Theme             string `json:"theme"`
 	Language          string `json:"language"`
-	SaveTabsExit      bool   `json:"save_tabs_exit"`
+	SaveTabsExit      *bool  `json:"save_tabs_exit"`
 	SearchPaneHeight  int    `json:"search_pane_height"`
 	WindowWidth       int    `json:"window_width"`
 	WindowHeight      int    `json:"window_height"`
@@ -275,7 +277,10 @@ func (c *AppConfig) loadSettings() {
 
 	c.Theme = sf.Theme
 	c.Language = sf.Language
-	c.SaveTabsExit = sf.SaveTabsExit
+	if sf.SaveTabsExit != nil {
+		c.SaveTabsExit = *sf.SaveTabsExit
+	}
+	// else keep the constructor default (true) when the key is absent
 	c.SearchPaneHeight = sf.SearchPaneHeight
 	c.SearchPaneWidth = sf.SearchPaneWidth
 	c.SearchOrientation = sf.SearchOrientation
@@ -300,10 +305,11 @@ func (c *AppConfig) loadSettings() {
 }
 
 func (c *AppConfig) persistSettings() error {
+	saveTabs := c.SaveTabsExit
 	sf := settingsFile{
 		Theme:             c.Theme,
 		Language:          c.Language,
-		SaveTabsExit:      c.SaveTabsExit,
+		SaveTabsExit:      &saveTabs,
 		SearchPaneHeight:  c.SearchPaneHeight,
 		SearchPaneWidth:   c.SearchPaneWidth,
 		SearchOrientation: c.SearchOrientation,
@@ -771,6 +777,17 @@ func (c *AppConfig) loadSavedSession() {
 		}
 
 		c.SavedSession = &s
+		// A session file on disk with SaveTabsExit=false is an inconsistent
+		// state (disabling the flag is supposed to delete the file). It usually
+		// comes from older builds that wrote save_tabs_exit=false when the key
+		// was missing from settings.json. Re-enable so restore works again.
+		if !c.SaveTabsExit && len(s.Tabs) > 0 {
+			slog.Info("re-enabling save_tabs_exit because a saved session is present")
+			c.SaveTabsExit = true
+			if perr := c.persistSettings(); perr != nil {
+				slog.Warn("failed to persist re-enabled save_tabs_exit", "err", perr)
+			}
+		}
 
 		return
 	}

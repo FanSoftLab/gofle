@@ -1,4 +1,4 @@
-// Package cmds implements the gofle CLI subcommands (ssh, ftp, list) and the
+// Package cmds implements the gofle CLI subcommands (ssh, ftp, recent) and the
 // shared helpers they use to resolve targets, connect to remote hosts and open
 // the interactive viewer.
 package cmds

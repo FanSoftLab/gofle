@@ -107,7 +107,7 @@ func TestRecentOpenUsesOpenViewer(t *testing.T) {
 	}
 }
 
-// TestRecentCommandRejectsArg confirms that `gofle list` is interactive and
+// TestRecentCommandRejectsArg confirms that `gofle recent` is interactive and
 // no longer accepts a numeric argument: passing one is a usage error (the user
 // is meant to pick with ↑/↓ and open with enter), so no TUI is launched.
 func TestRecentCommandRejectsArg(t *testing.T) {
@@ -117,7 +117,7 @@ func TestRecentCommandRejectsArg(t *testing.T) {
 
 	_, err := RecentCmd.ExecuteC()
 	if err == nil {
-		t.Fatal("expected `gofle list 1` to be rejected (interactive picker takes no args)")
+		t.Fatal("expected `gofle recent 1` to be rejected (interactive picker takes no args)")
 	} else if !strings.Contains(err.Error(), "accepts at most 0 arg") {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -120,9 +120,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case m.exportMode:
 		return m.exportPromptKey(msg)
 	case m.recentMode:
-		m.recentPickerKey(msg)
-
-		return m, nil
+		return m.recentPickerKey(msg)
 	case m.remoteMode:
 		return m.remoteFormKey(msg)
 	case m.remoteBrowseMode:
@@ -306,7 +304,7 @@ func (m *model) submitExportPath() (resolved bool) {
 }
 
 // recentPickerKey handles input in the in-viewer recent-files picker overlay.
-func (m *model) recentPickerKey(msg tea.KeyMsg) {
+func (m *model) recentPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if len(m.recentList) > 0 {
@@ -318,10 +316,24 @@ func (m *model) recentPickerKey(msg tea.KeyMsg) {
 		}
 	case keyEnter:
 		m.openSelectedRecent()
+	case "b":
+		// Browse another file on the same remote server (SSH/FTP recent only).
+		if len(m.recentList) == 0 {
+			return *m, nil
+		}
+		item := m.recentList[m.recentCursor]
+		if !item.IsSSH || item.SSH == nil {
+			m.status = "not a remote entry — open only"
+			return *m, nil
+		}
+		m.recentMode = false
+		m.recentList = nil
+		return *m, m.browseFromRecent(item)
 	case keyEsc:
 		m.recentMode = false
 		m.recentList = nil
 	}
+	return *m, nil
 }
 
 // openSelectedRecent opens the highlighted recent entry in place and closes the
@@ -482,6 +494,10 @@ func (m *model) promptKey(key string) (cmd tea.Cmd, ok bool) {
 		m.openRecentPicker()
 
 		return nil, true
+	case "b":
+		// Browse another file on the same remote server (SSH/FTP).
+		cmd := m.browseSameServer()
+		return cmd, true
 	}
 
 	return nil, false
@@ -879,6 +895,12 @@ func (m *model) applyRemoteOpened(msg remoteOpenedMsg) {
 	m.remoteMode = false
 	m.remoteHostPrompt = nil
 	m.remoteBrowseErr = ""
+	cfg := msg.cfg
+	m.lastRemoteCfg = &cfg
+	m.remoteProto = cfg.Protocol
+	if m.remoteProto == "" {
+		m.remoteProto = remote.ProtocolSSH
+	}
 	m.status = msg.status
 }
 
@@ -1370,6 +1392,18 @@ func (m *model) reopen(target string) error {
 	m.se = se
 	m.cleanup = cleanup
 	m.resetViewerState()
+	m.lastRemoteCfg = nil
+	m.remoteProto = ""
+	// If the new target is remote, remember credentials from the matching
+	// recent entry so "b" can browse other files on the same server.
+	if m.cfg != nil {
+		if sum := findRecentSummaryForTarget(m.cfg, target); sum != nil {
+			cfg := remoteConfigFromSummary(sum)
+			m.lastRemoteCfg = &cfg
+			m.remoteProto = cfg.Protocol
+			m.fillRemoteFormFromRecent(sum)
+		}
+	}
 	m.status = "opened " + idx.FilePath()
 
 	return nil
@@ -1391,14 +1425,19 @@ func (m *model) resetViewerState() {
 	m.topWrap = 0
 }
 
-// recentPickerModel is a standalone interactive picker used by the `gofle list`
+// recentPickerModel is a standalone interactive picker used by the `gofle recent`
 // command: it lists recently opened files, navigates with up/down (or k/j), and
-// returns the chosen target (local path or ssh:// URL) on enter. This mirrors
-// the in-viewer "open recent" experience rather than taking a numeric argument.
+// returns the chosen target (local path or ssh:// URL) on enter. Pressing "b" on
+// a remote entry requests browse-other-file-on-server (same as the in-viewer o
+// picker). This mirrors the in-viewer "open recent" experience.
 type recentPickerModel struct {
 	items    []config.RecentFileItem
 	cursor   int
 	canceled bool
+	// browse is set when the user presses "b" on a remote entry: the caller
+	// should open the remote directory browser with that entry's credentials
+	// instead of opening the file.
+	browse bool
 }
 
 func (m recentPickerModel) Init() tea.Cmd { return nil }
@@ -1427,6 +1466,18 @@ func (m recentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, tea.Quit
+	case "b":
+		// Browse another file on the same remote server (SSH/FTP recent only).
+		if len(m.items) == 0 {
+			return m, nil
+		}
+		item := m.items[m.cursor]
+		if !item.IsSSH || item.SSH == nil {
+			// Local entry: ignore (same as in-viewer status); stay in picker.
+			return m, nil
+		}
+		m.browse = true
+		return m, tea.Quit
 	}
 
 	return m, nil
@@ -1436,7 +1487,8 @@ func (m recentPickerModel) View() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("Open recent") + "\n\n")
 	b.WriteString(renderRecentList(m.items, m.cursor))
-	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  esc cancel"))
+	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  b browse other file on server  ·  esc cancel"))
 
 	return b.String()
 }
+

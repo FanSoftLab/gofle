@@ -27,7 +27,7 @@ func TestRootSubcommands(t *testing.T) {
 		names[c.Name()] = true
 	}
 
-	for _, want := range []string{"ssh", "list", "version"} {
+	for _, want := range []string{"ssh", "recent", "version"} {
 		if !names[want] {
 			t.Errorf("expected subcommand %q to be registered", want)
 		}

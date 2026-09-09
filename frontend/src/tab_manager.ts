@@ -741,6 +741,12 @@ export class TabManager {
         menu.appendChild(this.menuItem(t('ctx_tab_rename'), () => this.openTabRenameModal(tabId)));
         menu.appendChild(this.menuItem(t('ctx_tab_move_left'), () => this.shiftTab(tabId, -1)));
         menu.appendChild(this.menuItem(t('ctx_tab_move_right'), () => this.shiftTab(tabId, 1)));
+        if (tab.isSSH && tab.ssh) {
+            menu.appendChild(this.divider());
+            menu.appendChild(this.menuItem(t('ctx_tab_browse_server'), () => {
+                void this.ctx.browseRemoteServerAction(tabId);
+            }));
+        }
         menu.appendChild(this.divider());
         menu.appendChild(this.menuItem(t('ctx_tab_close'), () => this.closeTab(tabId)));
         menu.appendChild(this.menuItem(t('ctx_tab_close_others'), () => this.closeOtherTabs(tabId)));
