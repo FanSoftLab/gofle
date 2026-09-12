@@ -138,17 +138,17 @@ func TestSearchRange(t *testing.T) {
 }
 
 func TestSearchRangeInvert(t *testing.T) {
-	idx := newIndexer(t, "x\ny\nx")
+	idx := newIndexer(t, "x\ny\nx\ny\nx")
 	se := NewSearchEngine(idx)
 
-	// Inverted search over [2,5) (indices 2,3,4 = y,x,x) for "x" => only index 2 (y).
+	// Inverted search over [2,5) (indices 2,3,4 = x,y,x) for "x" => only index 3 (y).
 	matches, err := se.SearchRange(t.Context(), SearchOptions{Query: "x", InvertMatch: true}, 2, 5)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
 
-	if len(matches) != 1 || matches[0] != 2 {
-		t.Fatalf("expected [2], got %v", matches)
+	if len(matches) != 1 || matches[0] != 3 {
+		t.Fatalf("expected [3], got %v", matches)
 	}
 }
 

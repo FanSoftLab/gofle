@@ -510,6 +510,10 @@ func TestLoadConfigFirstRun(t *testing.T) {
 }
 
 func TestLoadConfigExistingConfig(t *testing.T) {
+	// Isolate config directory so we don't pick up a saved session from the
+	// real config dir which would re-enable SaveTabsExit.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	cfg1, _ := LoadConfig()
 	cfg1.Theme = "dark" //nolint:goconst // test fixture literal repeated for clarity
 	cfg1.Language = "en"
