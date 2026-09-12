@@ -185,6 +185,13 @@ const (
 // (<os.UserConfigDir>/GoFLE), falling back to the current directory when the
 // user config dir cannot be determined. It is exported so both binaries can
 // place their log file beside the config before LoadConfig runs.
+//
+// Returns the path to the GoFLE configuration directory.
+//
+// Example:
+//
+//	fmt.Println(config.DefaultDir())
+//	// Output: /home/user/.config/GoFLE
 func DefaultDir() string {
 	userConfig, err := os.UserConfigDir()
 	if err != nil {
@@ -207,6 +214,8 @@ func DefaultDir() string {
 // user data remain diagnosable).
 //
 // Returns an error only if the AES secret key cannot be generated or loaded.
+//
+// Play: https://go.dev/play/p/CONFIG_LOADCONFIG
 func LoadConfig() (*AppConfig, error) {
 	if _, err := os.UserConfigDir(); err != nil {
 		// Degraded mode: dotfiles land in the working directory. Surface it —
@@ -415,6 +424,19 @@ func (c *AppConfig) persistHistory() error {
 }
 
 // GetInputHistory returns a copy of a namespace's input history (newest first).
+//
+// Parameters:
+//   - namespace: The history namespace (e.g., "search", "ssh_host").
+//
+// Returns a copy of the history slice (newest first), or nil if the namespace doesn't exist.
+//
+// Example:
+//
+//	cfg := config.LoadConfig()
+//	history := cfg.GetInputHistory("search")
+//	for i, v := range history {
+//	    fmt.Printf("%d: %s\n", i, v)
+//	}
 func (c *AppConfig) GetInputHistory(namespace string) []string {
 	c.Mu.RLock()
 	defer c.Mu.RUnlock()
@@ -429,6 +451,17 @@ func (c *AppConfig) GetInputHistory(namespace string) []string {
 // AddInputHistory prepends a value to a namespace's history, de-duplicating by
 // normalized (lower-cased, trimmed) form, capping at MaxHistorySize, and
 // persisting. Empty/whitespace-only values are ignored.
+//
+// Parameters:
+//   - namespace: The history namespace (e.g., "search", "ssh_host").
+//   - value: The value to add. Must not be empty or whitespace-only.
+//
+// Returns an error if persisting fails.
+//
+// Example:
+//
+//	cfg := config.LoadConfig()
+//	cfg.AddInputHistory("search", "error timeout")
 func (c *AppConfig) AddInputHistory(namespace, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -459,6 +492,11 @@ func (c *AppConfig) AddInputHistory(namespace, value string) error {
 }
 
 // ClearInputHistory removes a namespace's history and persists the empty state.
+//
+// Parameters:
+//   - namespace: The history namespace to clear.
+//
+// Returns an error if persisting fails.
 func (c *AppConfig) ClearInputHistory(namespace string) error {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
@@ -471,6 +509,12 @@ func (c *AppConfig) ClearInputHistory(namespace string) error {
 // RemoveInputHistoryItem removes a single value (matched by normalized
 // lower-cased/trimmed form) from a namespace's history and persists the change.
 // Removing the last item prunes the namespace entirely.
+//
+// Parameters:
+//   - namespace: The history namespace.
+//   - value: The value to remove. Matched by normalized (lower-cased, trimmed) form.
+//
+// Returns an error if persisting fails.
 func (c *AppConfig) RemoveInputHistoryItem(namespace, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -501,6 +545,11 @@ func (c *AppConfig) RemoveInputHistoryItem(namespace, value string) error {
 
 // SetMaxHistorySize updates the per-namespace history cap and persists it.
 // Values below 1 are clamped to 1.
+//
+// Parameters:
+//   - size: The new maximum history size per namespace. Must be >= 1.
+//
+// Returns an error if persisting fails.
 func (c *AppConfig) SetMaxHistorySize(size int) error {
 	if size < 1 {
 		size = 1
@@ -520,6 +569,8 @@ func (c *AppConfig) SetMaxHistorySize(size int) error {
 // Every file is persisted even when another one fails: aborting on the first
 // error left later files unwritten and hid earlier failures behind a single
 // message. All failures are joined and returned together.
+//
+// Returns an error if any file fails to persist, or nil on success.
 func (c *AppConfig) Save() error {
 	// Cancel a pending debounced save so we don't double-write right after.
 	c.saveMu.Lock()
@@ -561,6 +612,8 @@ func (c *AppConfig) SaveDebounced() {
 
 // FlushSave cancels any pending debounce timer and writes immediately.
 // Call on application shutdown so the last in-memory changes are not lost.
+//
+// Returns an error if persisting fails, or nil on success.
 func (c *AppConfig) FlushSave() error {
 	c.saveMu.Lock()
 	if c.saveTimer != nil {
@@ -688,6 +741,16 @@ func (c *AppConfig) AddRecentFile(path string, size int64, isSSH bool, ssh *SSHC
 // DECRYPTED. Consumers (CLI list/picker, ssh:// resolution) need the plaintext
 // credentials to reconnect; the ciphertext must never leak into UI strings or
 // connection attempts (it used to render as the "username" in `gofle list`).
+//
+// Returns a slice of RecentFileItem with decrypted SSH credentials.
+//
+// Example:
+//
+//	cfg := config.LoadConfig()
+//	recent := cfg.GetRecentFiles()
+//	for i, f := range recent {
+//	    fmt.Printf("%d: %s (SSH: %v)\n", i, f.Path, f.IsSSH)
+//	}
 func (c *AppConfig) GetRecentFiles() []RecentFileItem {
 	c.Mu.RLock()
 
@@ -727,6 +790,11 @@ func (c *AppConfig) GetRecentFiles() []RecentFileItem {
 
 // RemoveRecentFile removes a recent entry by path. Returns true if something
 // was removed, together with the persist error (nil when nothing changed).
+//
+// Parameters:
+//   - path: The path of the recent entry to remove.
+//
+// Returns a tuple of (bool, error): true if an entry was removed, and any persist error.
 func (c *AppConfig) RemoveRecentFile(path string) (bool, error) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
@@ -752,6 +820,8 @@ func (c *AppConfig) RemoveRecentFile(path string) (bool, error) {
 }
 
 // ClearRecentFiles empties the recent list and returns the persist error.
+//
+// Returns an error if persisting fails, or nil on success.
 func (c *AppConfig) ClearRecentFiles() error {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()

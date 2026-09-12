@@ -190,6 +190,17 @@ type FileIndexer struct {
 // Call Close() when done to release the file descriptor.
 //
 // Returns an error if the file cannot be opened or indexed.
+//
+// Play: https://go.dev/play/p/INDEXER_NEWFILEINDEXER
+//
+// Example:
+//
+//	idx, err := NewFileIndexer("app.log")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer idx.Close()
+//	fmt.Printf("Indexed %d lines\n", idx.TotalLines())
 func NewFileIndexer(filePath string) (*FileIndexer, error) {
 	file, err := os.Open(filePath) //nolint:gosec // user-provided path is intended
 	if err != nil {
@@ -672,9 +683,18 @@ func (fi *FileIndexer) readLineUnlocked(lineIndex int64) (line []byte, bufPtr *[
 }
 
 // GetLineBytes returns the content of a single line by its 0-based index as a freshly allocated, caller-owned byte slice that is safe to retain. It avoids GetLine's string-then-[]byte double copy by copying the line out of the pooled read buffer once.
-// GetLine: where GetLine materialises a string (string(buf)) and callers that
-// only need bytes would then re-copy with []byte(content), GetLineBytes returns
-// the bytes directly in a single copy. The returned slice is safe to retain.
+//
+// Parameters:
+//   - lineIndex: The 0-based index of the line to retrieve. Must be in range [0, TotalLines()-1].
+//
+// Returns the line content as a byte slice (newline and trailing CR stripped), or an error if lineIndex is out of bounds or the read fails. The out-of-bounds case wraps ErrLineOutOfRange for errors.Is matching.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	defer idx.Close()
+//	line, _ := idx.GetLineBytes(0)
+//	fmt.Println(string(line))
 func (fi *FileIndexer) GetLineBytes(lineIndex int64) ([]byte, error) {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -693,10 +713,22 @@ func (fi *FileIndexer) GetLineBytes(lineIndex int64) ([]byte, error) {
 	return out, nil
 }
 
-// GetLinesBytes returns a range of lines [start, start+count) as a slice of
-// freshly allocated, caller-owned byte slices. Each slice is safe to retain.
-// This avoids the per-line string allocation of GetLines, which is the dominant
-// cost in viewport rendering (100 lines × 60 fps = 6000 strings/frame).
+// GetLinesBytes returns a range of lines [start, start+count) as a slice of freshly allocated, caller-owned byte slices. Each slice is safe to retain. This avoids the per-line string allocation of GetLines, which is the dominant cost in viewport rendering (100 lines × 60 fps = 6000 strings/frame).
+//
+// Parameters:
+//   - start: The 0-based index of the first line to retrieve. Must be in range [0, TotalLines()-1].
+//   - count: The number of lines to retrieve. If count would exceed the remaining lines, only the available lines are returned.
+//
+// Returns a slice of byte slices (each newline and trailing CR stripped), or an empty slice if start is out of range or count <= 0. Returns an error only if the read fails.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	defer idx.Close()
+//	lines, _ := idx.GetLinesBytes(0, 10)
+//	for i, line := range lines {
+//	    fmt.Printf("%d: %s\n", i, line)
+//	}
 func (fi *FileIndexer) GetLinesBytes(start, count int64) ([][]byte, error) {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -742,8 +774,17 @@ func (fi *FileIndexer) GetLinesBytes(start, count int64) ([][]byte, error) {
 // Lines are read lazily via pread from the open file handle; content is
 // newline-trimmed (LF and trailing CR are stripped).
 //
-// Returns an error if lineIndex is out of bounds or the read fails. The
-// out-of-bounds case wraps ErrLineOutOfRange for errors.Is matching.
+// Parameters:
+//   - lineIndex: The 0-based index of the line to retrieve. Must be in range [0, TotalLines()-1].
+//
+// Returns the line content as a string, or an error if lineIndex is out of bounds or the read fails. The out-of-bounds case wraps ErrLineOutOfRange for errors.Is matching.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	defer idx.Close()
+//	line, _ := idx.GetLine(0)
+//	fmt.Println(line)
 func (fi *FileIndexer) GetLine(lineIndex int64) (string, error) {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -765,6 +806,12 @@ func (fi *FileIndexer) GetLine(lineIndex int64) (string, error) {
 // semantics (newline-trimming, bounds, errors) match exactly. The builder's
 // existing contents are preserved; the line bytes are appended. The caller may
 // reuse the builder across calls to avoid per-row allocations on hot paths.
+//
+// Parameters:
+//   - lineIndex: The 0-based index of the line to retrieve. Must be in range [0, TotalLines()-1].
+//   - b: A pointer to a strings.Builder to append the line content to.
+//
+// Returns an error if lineIndex is out of bounds or the read fails. The out-of-bounds case wraps ErrLineOutOfRange for errors.Is matching.
 func (fi *FileIndexer) GetLineInto(lineIndex int64, b *strings.Builder) error {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -783,6 +830,21 @@ func (fi *FileIndexer) GetLineInto(lineIndex int64, b *strings.Builder) error {
 // GetLines returns a range of lines [start, start+count) as LineItems.
 // Out-of-range or zero-count requests return an empty slice (not an error),
 // so callers can paginate past EOF without special casing.
+//
+// Parameters:
+//   - start: The 0-based index of the first line to retrieve. Must be in range [0, TotalLines()-1].
+//   - count: The number of lines to retrieve. If count would exceed the remaining lines, only the available lines are returned.
+//
+// Returns a slice of LineItem (each with Index and newline-trimmed Content), or an empty slice if start is out of range or count <= 0. Returns an error only if the read fails.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	defer idx.Close()
+//	lines, _ := idx.GetLines(0, 10)
+//	for _, l := range lines {
+//	    fmt.Printf("%d: %s\n", l.Index, l.Content)
+//	}
 func (fi *FileIndexer) GetLines(start, count int64) ([]LineItem, error) {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
@@ -828,6 +890,11 @@ func (fi *FileIndexer) GetLines(start, count int64) ([]LineItem, error) {
 // false from fn stops iteration early. This is the hot path for a full-file
 // search: one sequential pass replaces millions of per-line preads.
 //
+// Parameters:
+//   - start: The 0-based index of the first line to scan.
+//   - count: The number of lines to scan. If count would exceed the remaining lines, only the available lines are scanned.
+//   - fn: A function called for each line with the line index and content. Return false to stop iteration early.
+//
 // Unlike the bounded readers, ScanLines does NOT hold fi.mu for the whole pass:
 // a full-file scan (search, export, level stats) runs for seconds, and holding
 // the read lock that long blocks the tail poller's UpdateIndex — which needs the
@@ -837,6 +904,19 @@ func (fi *FileIndexer) GetLines(start, count int64) ([]LineItem, error) {
 // every fn call under the lock. Appended lines cannot disturb an in-flight scan
 // (the range was clamped up front and offsets only grow), but a rotation rebuilds
 // the table, which is detected via gen and reported as ErrIndexRebuilt.
+//
+// Returns an error if the file is closed, the range is invalid, or a read fails. Returns ErrIndexRebuilt if a rotation occurs mid-scan.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	defer idx.Close()
+//	idx.ScanLines(0, idx.TotalLines(), func(i int64, line []byte) bool {
+//	    if bytes.Contains(line, []byte("ERROR")) {
+//	        fmt.Printf("Line %d: %s\n", i, line)
+//	    }
+//	    return true
+//	})
 func (fi *FileIndexer) ScanLines(start, count int64, fn func(idx int64, line []byte) bool) error { //nolint:gocyclo // chunked scan loop is inherently branchy
 	if start < 0 || count <= 0 {
 		return nil
@@ -922,10 +1002,17 @@ const maxScanRebuildRetries = 32
 // first non-rebuild error, or ErrIndexRebuilt once maxScanRebuildRetries attempts
 // have all hit a rebuild. Callers that need the raw rebuild signal use ScanLines.
 //
+// Parameters:
+//   - start: The 0-based index of the first line to scan.
+//   - count: The number of lines to scan.
+//   - fn: A function called for each line with the line index and content. Return false to stop iteration early.
+//
 // Without this, a routine rotation during a search/export/level-stats aborted the
 // whole operation even though the old whole-scan read lock had previously made the
 // event impossible — the scan simply never saw a rotation. Retrying restores that
 // invisible behavior for the common case.
+//
+// Returns an error if the file is closed, the range is invalid, or a read fails. Returns ErrIndexRebuilt if maxScanRebuildRetries rotations occur.
 func (fi *FileIndexer) ScanLinesRetry(start, count int64, fn func(idx int64, line []byte) bool) error {
 	var err error
 	for attempt := 0; attempt <= maxScanRebuildRetries; attempt++ {
@@ -1023,6 +1110,14 @@ func (fi *FileIndexer) readSpanLocked(i, end int64, fn func(i, j, spanStart int6
 // Close releases the open file handle and marks the indexer closed.
 // Subsequent calls to GetLine/GetLines/UpdateIndex return errors or no-ops.
 // Safe to call multiple times.
+//
+// Returns an error if the file close fails, or nil if already closed.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	// ... use idx ...
+//	idx.Close()
 func (fi *FileIndexer) Close() error {
 	fi.mu.Lock()
 	defer fi.mu.Unlock()

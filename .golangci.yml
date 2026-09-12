@@ -60,7 +60,7 @@ linters:
     - testifylint      # testify best practices
     - thelper          # test helpers missing t.Helper()
     - usetesting       # use t.Setenv/t.TempDir instead of os equivalents in tests
-    - paralleltest     # tests and subtests missing t.Parallel()
+    # - paralleltest     # tests and subtests missing t.Parallel()
     # modernization & meta
     - modernize        # old patterns replaceable with newer Go features
     - exptostd         # replace golang.org/x/exp/ functions with stdlib equivalents
@@ -104,7 +104,7 @@ linters:
     # app package (app_*.go) and config hold global/singleton state shared
     # across tests, so auto-parallelizing would introduce data races. Revisit
     # per-package with isolated state instead of enabling globally.
-    - paralleltest
+    # - paralleltest
 
   exclusions:
     paths:

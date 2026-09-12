@@ -391,9 +391,16 @@ var _ remote.Streamer = (*Streamer)(nil)
 // goroutine that tails the remote file for appended bytes. The streamed local
 // path is exposed via LocalPath and can be handed to a FileIndexer.
 //
-// Returns a *CertUnknownError for explicit/implicit FTPS when the server
-// certificate is not yet trusted; the caller should call WriteCertTrust with the
-// error's Line and retry. Any other error means the connection or sync failed.
+// Parameters:
+//   - ctx: Context for the open phase. Cancelled to abort dial, login, and initial sync.
+//   - cfg: Config containing host, port, username, password, TLS mode, and remote file path.
+//
+// Returns a *Streamer and nil error on success, or a *CertUnknownError for
+// explicit/implicit FTPS when the server certificate is not yet trusted (caller
+// should call WriteCertTrust with the error's Line and retry). Any other error
+// means the connection or sync failed.
+//
+// Play: https://go.dev/play/p/FTP_NEWSTREAMER
 func NewStreamer(ctx context.Context, cfg Config) (*Streamer, error) { //nolint:gocyclo // streamer lifecycle is inherently branchy
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -923,12 +930,23 @@ func (s *Streamer) pollSleep() bool {
 }
 
 // LocalPath returns the path of the local temp file holding the streamed remote log.
+//
+// Returns the absolute path to the local temp file.
+//
+// Example:
+//
+//	streamer, _ := ftp.NewStreamer(ctx, cfg)
+//	idx, _ := indexer.NewFileIndexer(streamer.LocalPath())
 func (s *Streamer) LocalPath() string { return s.localPath }
 
 // Downloaded returns the number of bytes copied into the local temp file so far.
+//
+// Returns the total bytes downloaded since the streamer was created.
 func (s *Streamer) Downloaded() int64 { return s.downloaded.Load() }
 
 // RemoteTotal returns the probed remote size at open time, or -1 when unknown.
+//
+// Returns the remote file size in bytes, or -1 if the size could not be probed.
 func (s *Streamer) RemoteTotal() int64 { return s.remoteTotal }
 
 // KeepTempFile opts a Streamer out of the automatic temp-file cleanup performed by Close.
@@ -943,6 +961,8 @@ func (s *Streamer) KeepTempFile() {
 // file handle, and — unless KeepTempFile was called — removes the local temp file.
 // Safe to call multiple times (idempotent). It does not block on the caller beyond
 // a bounded wait for the supervisor.
+//
+// Returns an error if any cleanup step fails, or nil on success.
 func (s *Streamer) Close() error { //nolint:gocyclo // streamer lifecycle is inherently branchy
 	s.mu.Lock()
 

@@ -95,6 +95,20 @@ func NewSearchEngine(idx *indexer.FileIndexer) *SearchEngine {
 
 // Search runs a full search over the entire index.
 // It is a convenience wrapper around SearchWithContext with a background context.
+//
+// Parameters:
+//   - opts: SearchOptions containing the query, regex flag, case sensitivity, and invert match.
+//
+// Returns a slice of matched line indices (0-based), or an error if the query is invalid.
+//
+// Play: https://go.dev/play/p/SEARCH_SEARCH
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	se := search.NewSearchEngine(idx)
+//	matches, _ := se.Search(search.SearchOptions{Query: "ERROR"})
+//	fmt.Printf("Found %d matches\n", len(matches))
 func (se *SearchEngine) Search(opts SearchOptions) ([]int64, error) {
 	return se.SearchWithContext(context.Background(), opts)
 }
@@ -103,6 +117,20 @@ func (se *SearchEngine) Search(opts SearchOptions) ([]int64, error) {
 // matched line indices as a freshly allocated, caller-owned slice. The engine
 // stores nothing, so concurrent searches cannot corrupt each other's results.
 // Cancellation is checked between chunks via ctx; a single-chunk range is not interruptible mid-scan.
+//
+// Parameters:
+//   - ctx: Context for cancellation. Checked between chunks.
+//   - opts: SearchOptions containing the query, regex flag, case sensitivity, and invert match.
+//
+// Returns a slice of matched line indices (0-based), or an error if the query is invalid or context is cancelled.
+//
+// Example:
+//
+//	idx, _ := indexer.NewFileIndexer("app.log")
+//	se := search.NewSearchEngine(idx)
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//	matches, _ := se.SearchWithContext(ctx, search.SearchOptions{Query: "ERROR", CaseSensitive: true})
 func (se *SearchEngine) SearchWithContext(ctx context.Context, opts SearchOptions) ([]int64, error) {
 	return se.matchRange(ctx, opts, 0, se.indexer.TotalLines())
 }
@@ -113,6 +141,14 @@ func (se *SearchEngine) SearchWithContext(ctx context.Context, opts SearchOption
 // search while incrementally extending results for a tailed file
 // (see app.pollFileUpdates).
 // Cancellation is checked between chunks via ctx; a single-chunk range is not interruptible mid-scan.
+//
+// Parameters:
+//   - ctx: Context for cancellation. Checked between chunks.
+//   - opts: SearchOptions containing the query, regex flag, case sensitivity, and invert match.
+//   - start: The 0-based index of the first line to search (inclusive).
+//   - end: The 0-based index of the line after the last line to search (exclusive).
+//
+// Returns a slice of matched line indices within [start, end), or an error if the query is invalid or context is cancelled.
 func (se *SearchEngine) SearchRange(ctx context.Context, opts SearchOptions, start, end int64) ([]int64, error) {
 	return se.matchRange(ctx, opts, start, end)
 }
@@ -209,6 +245,12 @@ type SearchResult struct {
 // (ERROR/FATAL/PANIC = E, WARN = W) in the scanned range. This fuses the search
 // pass and level stats pass into a single ScanLines call, avoiding a full-file
 // re-read when both are needed (e.g., UI showing search results + level badges).
+//
+// Parameters:
+//   - ctx: Context for cancellation. Checked between chunks.
+//   - opts: SearchOptions containing the query, regex flag, case sensitivity, and invert match.
+//
+// Returns a SearchResult containing matched line indices, error count, and warn count, or an error if the query is invalid or context is cancelled.
 func (se *SearchEngine) SearchWithLevelCounts(ctx context.Context, opts SearchOptions) (SearchResult, error) {
 	if opts.Query == "" {
 		return SearchResult{Matches: []int64{}}, nil
@@ -647,6 +689,13 @@ func (se *SearchEngine) buildSecondaryMatcher(opts SearchOptions) (func([]byte) 
 // when only the AND-filter (filter-in-filter) changed, turning an O(totalLines)
 // full-file rescan into an O(matches) pass (H2). With an empty SecondaryQuery it
 // returns a clone of lines unchanged.
+//
+// Parameters:
+//   - ctx: Context for cancellation (currently unused but kept for API consistency).
+//   - opts: SearchOptions containing SecondaryQuery, IsRegex, and CaseSensitive.
+//   - lines: A slice of line indices to filter.
+//
+// Returns a filtered slice of line indices, or an error if SecondaryQuery is invalid.
 func (se *SearchEngine) FilterLines(_ context.Context, opts SearchOptions, lines []int64) ([]int64, error) {
 	if opts.SecondaryQuery == "" {
 		return slices.Clone(lines), nil

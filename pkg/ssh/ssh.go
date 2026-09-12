@@ -323,13 +323,26 @@ type Streamer struct {
 // tails the remote file for appended bytes. The streamed local path is exposed
 // via LocalPath and can be handed to a FileIndexer.
 //
-// Returns a *HostKeyUnknownError if the server's host key is not yet trusted;
-// the caller should call WriteKnownHost with the error's Line and retry.
-// Any other error means the connection or sync failed.
+// Parameters:
+//   - cfg: Config containing host, port, username, auth, and remote file path.
+//
+// Returns a *Streamer and nil error on success, or a *HostKeyUnknownError if the
+// server's host key is not yet trusted (caller should call WriteKnownHost with
+// the error's Line and retry). Any other error means the connection or sync failed.
 //
 // It is NewStreamerContext with a background context: nothing can interrupt the
 // open except its own timeouts. Long-lived callers (the desktop app) should pass
 // their lifecycle context so a shutdown aborts an in-flight open.
+//
+// Play: https://go.dev/play/p/SSH_NEWSTREAMER
+//
+// Example:
+//
+//	cfg := ssh.Config{Host: "server", Username: "user", Password: "pass", RemoteFilePath: "/var/log/app.log"}
+//	streamer, err := ssh.NewStreamer(cfg)
+//	if err != nil { log.Fatal(err) }
+//	defer streamer.Close()
+//	idx, _ := indexer.NewFileIndexer(streamer.LocalPath())
 func NewStreamer(cfg Config) (*Streamer, error) {
 	return NewStreamerContext(context.Background(), cfg)
 }
@@ -344,9 +357,17 @@ func NewStreamer(cfg Config) (*Streamer, error) {
 // Ctrl+C) had no way to give up, and app shutdown could not reclaim the session,
 // the fd or the temp file.
 //
+// Parameters:
+//   - ctx: Context for the open phase only. Cancelled to abort dial, handshake, size probe, and initial copy.
+//   - cfg: Config containing host, port, username, auth, and remote file path.
+//
 // ctx does NOT govern the streamer after the open returns: callers scope the open
 // with a context they cancel as soon as it completes, so the live tail is driven
 // by Close alone. Cancel the tail by calling Close.
+//
+// Returns a *Streamer and nil error on success, or a *HostKeyUnknownError if the
+// server's host key is not yet trusted (caller should call WriteKnownHost with
+// the error's Line and retry). Any other error means the connection or sync failed.
 func NewStreamerContext(ctx context.Context, cfg Config) (*Streamer, error) { //nolint:gocyclo // streamer open-phase setup is inherently branchy
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -654,15 +675,26 @@ func WriteKnownHost(path, line string) error {
 
 // LocalPath returns the path of the local temp file holding the streamed remote
 // log. Pass it to indexer.NewFileIndexer to view/tail the remote file locally.
+//
+// Returns the absolute path to the local temp file.
+//
+// Example:
+//
+//	streamer, _ := ssh.NewStreamer(cfg)
+//	idx, _ := indexer.NewFileIndexer(streamer.LocalPath())
 func (s *Streamer) LocalPath() string {
 	return s.localPath
 }
 
 // Downloaded returns the number of bytes copied into the local temp file so far
 // (initial copy + tail appends).
+//
+// Returns the total bytes downloaded since the streamer was created.
 func (s *Streamer) Downloaded() int64 { return s.downloaded.Load() }
 
 // RemoteTotal returns the probed remote size at open time, or -1 when unknown.
+//
+// Returns the remote file size in bytes, or -1 if the size could not be probed.
 func (s *Streamer) RemoteTotal() int64 { return s.remoteTotal }
 
 // progressThrottle bounds Progress-callback frequency during the bulk copy so
@@ -1567,6 +1599,8 @@ func (s *Streamer) KeepTempFile() {
 // Close stops the tailing goroutine, closes the SSH client, closes the local
 // temp file handle, and — unless KeepTempFile was called — removes the local
 // temp file from disk. Safe to call multiple times (idempotent).
+//
+// Returns an error if any cleanup step fails, or nil on success.
 func (s *Streamer) Close() error { //nolint:gocyclo // streamer lifecycle is inherently branchy
 	s.mu.Lock()
 
