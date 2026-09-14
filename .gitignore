@@ -16,7 +16,6 @@ nbproject
 
 .git/*
 .kilo/*
-GoFLE
 test_results.log
 
 # Frontend build output and dependencies

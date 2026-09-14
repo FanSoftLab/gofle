@@ -16,7 +16,6 @@ nbproject
 
 .git/*
 .kilo/*
-glogg-go
 test_results.log
 
 # Build outputs (only for final stage)

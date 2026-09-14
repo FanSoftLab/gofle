@@ -24,6 +24,13 @@ Usage: $0 [options]
   -target <target>    cli | gui | all               (default: all)
   -cli-name <name>    CLI binary name (default: gofle)
   -h, --help          Show this help
+
+Notes:
+  • CLI is fully cross-compiled (linux/windows/darwin × amd64/arm64).
+  • GUI Linux  — native (webkit2gtk).
+  • GUI Windows — cross-compiled via MinGW.
+  • GUI macOS  — NOT supported from Linux (Wails v2 limitation).
+    Use a real Mac or Wails v3 for macOS GUI.
 EOF
 }
 
@@ -69,7 +76,7 @@ case "$TARGET_ARCH" in
     *) echo "Invalid -arch: $TARGET_ARCH (use amd64|arm64|all)"; exit 1;;
 esac
 
-# Build the GOOS/GOARCH platform list (comma-separated for wails build -platform)
+# Build the GOOS/GOARCH platform list (comma-separated)
 PLATFORMS=""
 for os in "${OS_LIST[@]}"; do
     for arch in "${ARCH_LIST[@]}"; do
@@ -81,9 +88,15 @@ for os in "${OS_LIST[@]}"; do
     done
 done
 
-# Legacy single-binary behaviour only when building the native prod linux/amd64.
-# Anything else (dev, multiple OSes, multiple arches) is treated as a multi-build
-# and its artifacts are placed under ./dist.
+# Warn early about macOS GUI
+if [[ "$BUILD_TARGET" == "gui" || "$BUILD_TARGET" == "all" ]]; then
+    if [[ "$PLATFORMS" == *darwin* ]]; then
+        echo "⚠  GUI for macOS (darwin) will be SKIPPED — Wails v2 cannot cross-compile GUI from Linux."
+        echo "   CLI for darwin will still be built."
+    fi
+fi
+
+# Single-binary behaviour only for native prod linux/amd64
 if [ "$PLATFORMS" = "linux/amd64" ] && [ "$MODE" = "prod" ]; then
     MULTI=false
 else
@@ -92,9 +105,6 @@ fi
 
 CDPATH= cd -- "$(dirname -- "$0")" && pwd > /dev/null
 
-# Drop the orphaned scratch dir left behind by a previously interrupted run.
-# `dist` is intentionally NOT touched here: it holds the user's previous binaries
-# and is only replaced once a new multi-target build has actually succeeded.
 rm -rf .buildout 2>/dev/null || true
 
 echo "──────────────────────────────────────────────────"
@@ -104,40 +114,31 @@ echo "  targets: $PLATFORMS"
 echo "  target:  $BUILD_TARGET"
 echo "  cli:     $CLI_APP_NAME"
 echo "  tests:   $RUN_TESTS"
+echo "  multi:   $MULTI"
 echo "──────────────────────────────────────────────────"
 
 INTERRUPTED=0
 BUILD_PID=""
-# OUT_DIR must exist before the traps are installed so cleanup never runs with an
-# empty path.
 OUT_DIR=".buildout"
-# CLEANED guards cleanup so a single interrupt (INT→EXIT) does not run the
-# Docker builder prune twice.
 CLEANED=0
+
 cleanup() {
     if [ "$CLEANED" = "1" ]; then
         return
     fi
     CLEANED=1
 
-    # Guarantee the in-flight docker build is killed, even if SIGINT never
-    # reached docker directly (e.g. launched through an IDE wrapper).
     if [ -n "$BUILD_PID" ] && kill -0 "$BUILD_PID" 2>/dev/null; then
         kill "$BUILD_PID" 2>/dev/null || true
         wait "$BUILD_PID" 2>/dev/null || true
     fi
 
-    # Always drop our own temporary scratch dir so an interrupted or failed build
-    # does NOT litter the working tree, regardless of how the script ends.
     rm -rf "$OUT_DIR" 2>/dev/null || true
 
-    # Prune Docker builder artifacts on any exit. The --label filter only removes
-    # our own dangling builder stages, so this is cheap and safe.
     docker image prune -f --label=stage=builder > /dev/null 2>&1 || true
     docker builder prune -f > /dev/null 2>&1 || true
 }
 
-# Run cleanup on every exit path (normal, error under set -e, INT/TERM).
 trap 'INTERRUPTED=1; cleanup' INT TERM
 trap 'cleanup' EXIT
 
@@ -145,7 +146,6 @@ OUT_DIR=".buildout"
 rm -rf "$OUT_DIR" 2>/dev/null || true
 
 export DOCKER_BUILDKIT=1
-# Stamp the gofle CLI version from git (falls back to "dev" outside a repo).
 CLI_VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 
 docker build \
@@ -169,30 +169,31 @@ if [ "${BUILD_RC:-0}" -ne 0 ]; then
 fi
 BUILD_PID=""
 
-
 chown -R "${TARGET_UID}:${TARGET_GID}" . 2>/dev/null || true
 
-# The docker export placed the whole container tree in $OUT_DIR (.buildout).
-# Move the actual build products out before cleanup removes $OUT_DIR on exit, so
-# the generated binary actually reaches the host (it used to be deleted with the
-# scratch dir). Single-target builds emit build/bin/<app> at the repo root;
-# multi-target (wails -platform) builds emit platform binaries under dist/.
+# Collect artefacts
 if [ -d "$OUT_DIR/build/bin" ]; then
     if [ "$MULTI" = "false" ]; then
-        # A failing cp MUST abort the script: silently keeping the previous
-        # binary (e.g. ETXTBSY because the app is still running) makes a stale
-        # build look freshly shipped.
+        # Single linux/amd64 prod → place binaries in project root
         if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then
-            cp -r "$OUT_DIR/build/bin/$APP_NAME" "./$APP_NAME" || {
-                echo "ERROR: failed to install ./$APP_NAME — close the running GoFLE and re-run."
-                exit 1
-            }
-            chmod +x "./$APP_NAME" 2>/dev/null || true
+            # Prefer the normalised name, fall back to plain name
+            src=""
+            if [ -f "$OUT_DIR/build/bin/${APP_NAME}-linux-amd64" ]; then
+                src="$OUT_DIR/build/bin/${APP_NAME}-linux-amd64"
+            elif [ -f "$OUT_DIR/build/bin/$APP_NAME" ]; then
+                src="$OUT_DIR/build/bin/$APP_NAME"
+            fi
+            if [ -n "$src" ]; then
+                cp -f "$src" "./$APP_NAME" || {
+                    echo "ERROR: failed to install ./$APP_NAME — close the running instance and re-run."
+                    exit 1
+                }
+                chmod +x "./$APP_NAME" 2>/dev/null || true
+            fi
         fi
-        # GoFLE-CLI: a plain `$CLI_APP_NAME` is emitted for single-target builds.
         if [ "$BUILD_TARGET" = "cli" ] || [ "$BUILD_TARGET" = "all" ]; then
             if [ -f "$OUT_DIR/build/bin/$CLI_APP_NAME" ]; then
-                cp -r "$OUT_DIR/build/bin/$CLI_APP_NAME" "./$CLI_APP_NAME" || {
+                cp -f "$OUT_DIR/build/bin/$CLI_APP_NAME" "./$CLI_APP_NAME" || {
                     echo "ERROR: failed to install ./$CLI_APP_NAME — close the running instance and re-run."
                     exit 1
                 }
@@ -200,17 +201,22 @@ if [ -d "$OUT_DIR/build/bin" ]; then
             fi
         fi
     else
+        # Multi-target → everything goes under dist/
         mkdir -p dist
-        if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then
-            cp -r "$OUT_DIR/build/bin/." dist/ 2>/dev/null || true
-        fi
-        if [ "$BUILD_TARGET" = "cli" ] || [ "$BUILD_TARGET" = "all" ]; then
-            cp -r "$OUT_DIR/build/bin/." dist/ 2>/dev/null || true
-        fi
+        cp -f "$OUT_DIR/build/bin/"* dist/ 2>/dev/null || true
+        echo ""
+        echo "Artefacts placed in ./dist/ :"
+        ls -la dist/ 2>/dev/null || true
     fi
 fi
+
 [ -f "$OUT_DIR/test_results.log" ] && cp "$OUT_DIR/test_results.log" ./test_results.log 2>/dev/null || true
 
 echo "──────────────────────────────────────────────────"
-echo "Build complete. Container working tree synced to: $(pwd)"
+echo "Build complete. Working directory: $(pwd)"
+if [ "$MULTI" = "true" ]; then
+    echo "Binaries are in ./dist/"
+else
+    echo "Binaries are in the project root."
+fi
 echo "──────────────────────────────────────────────────"
