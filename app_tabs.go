@@ -88,8 +88,9 @@ func (a *App) openFileWithID(filePath, tabID string) (*FileStatsResponse, error)
 		FileName:     fileName,
 		Indexer:      idx,
 		Searcher:     search.NewSearchEngine(idx),
-		MatchedLines: make([]int64, 0),
-		AutoScroll:   true,
+		MatchedLines:    make([]int64, 0),
+		PrimaryMatches:  make([]int64, 0),
+		AutoScroll:      true,
 	}
 
 	a.mu.Lock()
@@ -272,9 +273,29 @@ func (a *App) GetLogLines(tabID string, start, count int64) ([]LogLineResponse, 
 	return resp, nil
 }
 
+// looksLikeRegex reports whether q contains characters that only make sense in
+// a regular expression. When the Regex toggle is on but the query is a plain
+// literal, we demote to substring search (~20× faster on large files).
+func looksLikeRegex(q string) bool {
+	for i := 0; i < len(q); i++ {
+		switch q[i] {
+		case '.', '*', '+', '?', '|', '(', ')', '[', ']', '{', '}', '^', '$', '\\':
+			return true
+		}
+	}
+	return false
+}
+
 // SearchLines runs a search over a tab and stores the matched-line indices. An
 // empty query clears the current matches. Regex longer than 256 chars is rejected
 // (ReDoS hardening). Returns the match count; unknown tabs yield 0.
+//
+// Optimisations:
+//   - literal queries with Regex enabled are demoted to substring matching;
+//   - an in-flight search for the same tab is cancelled when a new one starts;
+//   - changing only SecondaryQuery refines PrimaryMatches via FilterLines
+//     (O(matches) instead of a full-file rescan);
+//   - search_progress events stream partial counts to the UI while scanning.
 func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMatch bool, secondaryQuery string) (int64, error) {
 	a.mu.RLock()
 	tab, exists := a.tabs[tabID]
@@ -284,53 +305,141 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 		return 0, nil
 	}
 
+	// Demote regex → substring when the pattern has no metacharacters.
+	primaryRegex := isRegex && looksLikeRegex(query)
+	// Secondary inherits the toggle but is demoted independently so a literal
+	// AND-filter stays on the fast path even when primary is a real regex.
+	secondaryRegex := isRegex && secondaryQuery != "" && looksLikeRegex(secondaryQuery)
+
 	opts := search.SearchOptions{
 		Query:          query,
 		SecondaryQuery: secondaryQuery,
-		IsRegex:        isRegex,
+		IsRegex:        primaryRegex,
 		CaseSensitive:  caseSensitive,
 		InvertMatch:    invertMatch,
 	}
 
 	// security: bound regex complexity (ReDoS hardening).
-	if opts.IsRegex && len(opts.Query) > maxRegexLen {
+	if primaryRegex && len(opts.Query) > maxRegexLen {
 		return 0, fmt.Errorf("regular expression too long (max %d characters)", maxRegexLen)
 	}
 
-	if opts.SecondaryQuery != "" && len(opts.SecondaryQuery) > maxRegexLen {
+	if secondaryQuery != "" && secondaryRegex && len(secondaryQuery) > maxRegexLen {
 		return 0, fmt.Errorf("secondary regular expression too long (max %d characters)", maxRegexLen)
 	}
 
-	tab.mu.Lock()
+	// Cancel any in-flight search for this tab (typing / debounce).
+	tab.searchCancelMu.Lock()
+	if tab.searchCancel != nil {
+		tab.searchCancel()
+		tab.searchCancel = nil
+	}
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	tab.searchCancel = cancel
+	tab.searchCancelMu.Unlock()
 
+	tab.mu.Lock()
+	prev := tab.LastSearchOpts
 	tab.LastSearchOpts = opts
+	// Preserve the caller's secondary in LastSearchOpts for refine detection even
+	// though primary scans run without SecondaryQuery (applied via FilterLines).
+	tab.LastSearchOpts.SecondaryQuery = secondaryQuery
 	if query == "" {
 		tab.MatchedLines = make([]int64, 0)
+		tab.PrimaryMatches = make([]int64, 0)
+		tab.searchGen++
+		gen := tab.searchGen
 		tab.mu.Unlock()
-
+		cancel()
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "search_progress", map[string]any{
+				"tabId": tabID, "gen": gen, "count": int64(0), "done": true,
+			})
+		}
 		return 0, nil
 	}
 
+	// Secondary-only change: refine cached primary hits in O(matches).
+	onlySecondary := prev.Query == query &&
+		prev.IsRegex == primaryRegex &&
+		prev.CaseSensitive == caseSensitive &&
+		prev.InvertMatch == invertMatch &&
+		prev.SecondaryQuery != secondaryQuery &&
+		len(tab.PrimaryMatches) > 0
+	primarySnap := slices.Clone(tab.PrimaryMatches)
+	gen := tab.searchGen + 1
+	tab.searchGen = gen
 	tab.mu.Unlock()
 
-	// Run the (potentially expensive) search WITHOUT holding tab.mu so that the
-	// 500ms tail-poll, save-dialogs and tab closing are not starved by a big
-	// search (B6). The engine has its own mutex for its matched-line state.
-	matches, err := tab.Searcher.SearchWithContext(a.ctx, opts)
-	if err != nil {
-		return 0, err
+	emit := func(count int64, done bool) {
+		if a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, "search_progress", map[string]any{
+			"tabId": tabID,
+			"gen":   gen,
+			"count": count,
+			"done":  done,
+		})
+	}
+
+	var matches []int64
+	var err error
+
+	if onlySecondary {
+		// FilterLines honors SecondaryQuery; force its regex flag independently.
+		fopts := opts
+		fopts.SecondaryQuery = secondaryQuery
+		fopts.IsRegex = secondaryRegex
+		matches, err = tab.Searcher.FilterLines(ctx, fopts, primarySnap)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return 0, err
+			}
+			return 0, err
+		}
+	} else {
+		// Full primary scan without secondary (one fast pass), then optional refine.
+		popts := opts
+		popts.SecondaryQuery = ""
+		popts.IsRegex = primaryRegex
+		matches, err = tab.Searcher.SearchWithProgress(ctx, popts, func(partial int64) {
+			emit(partial, false)
+		})
+		if err != nil {
+			return 0, err
+		}
+
+		tab.mu.Lock()
+		tab.PrimaryMatches = slices.Clone(matches)
+		tab.mu.Unlock()
+
+		if secondaryQuery != "" {
+			fopts := opts
+			fopts.SecondaryQuery = secondaryQuery
+			fopts.IsRegex = secondaryRegex
+			matches, err = tab.Searcher.FilterLines(ctx, fopts, matches)
+			if err != nil {
+				return 0, err
+			}
+		}
 	}
 
 	tab.mu.Lock()
-	// Copy the engine's slice so tab.MatchedLines owns its backing array. The
-	// live-tail poll later does `append(tab.MatchedLines, ...)`; without the
-	// copy it could grow into (and corrupt) the engine's stored matchedLines.
+	// Ignore stale results if a newer search already started.
+	if tab.searchGen != gen {
+		tab.mu.Unlock()
+		return 0, context.Canceled
+	}
 	tab.MatchedLines = slices.Clone(matches)
-	tab.searchGen++
 	matchCount := int64(len(matches))
-
 	tab.mu.Unlock()
 
+	emit(matchCount, true)
 	return matchCount, nil
 }
 

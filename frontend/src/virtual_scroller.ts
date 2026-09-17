@@ -20,7 +20,7 @@ export class VirtualScroller {
   private lineHeight = 20;
   private totalLines = 0;
   private visibleCount = 0;
-  private bufferCount = 15;
+  private bufferCount = 25;
   private fetchCallback: FetchLinesCallback;
 
   private scrollSpacerHeight = 0;
@@ -53,6 +53,12 @@ export class VirtualScroller {
   private selectionEnd: number | null = null;
   private isSelecting = false;
   private selectionAnchor: number | null = null;
+
+  // Raw line text per row node so search-query changes can re-highlight in place
+  // without a full recycle/refetch (which was the main source of flicker).
+  private rowRawContent = new WeakMap<HTMLElement, string>();
+  // Last highlight key applied to a row: `${sourceIndex}\0${searchQuery}`.
+  private rowHighlightKey = new WeakMap<HTMLElement, string>();
 
   constructor(viewportId: string, fetchCallback: FetchLinesCallback) {
     this.viewport = document.getElementById(viewportId)!;
@@ -141,6 +147,13 @@ export class VirtualScroller {
   }
 
   public setTotalLines(total: number) {
+    // Same length (e.g. search re-run with identical match count): keep mounted
+    // rows and only refresh what's missing — avoids a full blank flash.
+    if (total === this.totalLines && total > 0) {
+      this.updateLayout();
+      this.render();
+      return;
+    }
     this.totalLines = total;
     this.measureLineHeight();
     // Drop previous tab's width/scroll before loading new rows.
@@ -151,9 +164,28 @@ export class VirtualScroller {
   }
 
   public setSearchQuery(query: string) {
+    if (this.currentSearchQuery === query) return;
     this.currentSearchQuery = query;
-    // Query change rewrites row HTML widths — remeasure after paint.
-    this.render(true);
+    // Re-highlight currently mounted rows in place. A force recycle + refetch
+    // used to blank the viewport on every keystroke / search update.
+    this.rehighlightVisibleRows();
+    requestAnimationFrame(() => this.measureContentWidth());
+  }
+
+  /** Update .log-text HTML for every mounted row from cached raw content. */
+  private rehighlightVisibleRows() {
+    const q = this.currentSearchQuery;
+    for (const [, node] of this.renderedNodes) {
+      const raw = this.rowRawContent.get(node);
+      if (raw === undefined) continue;
+      const textEl = node.children[1] as HTMLElement | undefined;
+      if (!textEl) continue;
+      const sourceIndex = node.dataset.sourceIndex || '';
+      const key = `${sourceIndex}\0${q}`;
+      if (this.rowHighlightKey.get(node) === key) continue;
+      textEl.innerHTML = LogHighlighter.highlightLine(raw, q);
+      this.rowHighlightKey.set(node, key);
+    }
   }
 
   public setHighlightedLine(index: number | null) {
@@ -288,13 +320,25 @@ export class VirtualScroller {
         const numEl = rowNode.children[0] as HTMLElement;
         const textEl = rowNode.children[1] as HTMLElement;
 
-        numEl.textContent = (line.index + 1).toString();
-        textEl.innerHTML = LogHighlighter.highlightLine(line.content, this.currentSearchQuery);
+        const lineNo = (line.index + 1).toString();
+        if (numEl.textContent !== lineNo) numEl.textContent = lineNo;
+
+        // Skip expensive highlight + innerHTML when this node already shows the
+        // same source line under the same search query (common when scrolling
+        // back over a recently recycled buffer).
+        const highlightKey = `${line.index}\0${this.currentSearchQuery}`;
+        const prevKey = this.rowHighlightKey.get(rowNode);
+        if (prevKey !== highlightKey) {
+          textEl.innerHTML = LogHighlighter.highlightLine(line.content, this.currentSearchQuery);
+          this.rowHighlightKey.set(rowNode, highlightKey);
+        }
+        this.rowRawContent.set(rowNode, line.content);
 
         // Logical index for selection / context menu (NOT line.index — on the
         // filter pane line.index is the source log line, while the virtual
         // position is the match ordinal).
         rowNode.dataset.index = String(logicalIndex);
+        rowNode.dataset.sourceIndex = String(line.index);
 
         const range = this.getSelectedRange();
         if (range && logicalIndex >= range.start && logicalIndex <= range.end) {
@@ -393,6 +437,10 @@ export class VirtualScroller {
   }
 
   private recycleRowNode(idx: number, node: HTMLElement) {
+    // Detach without destroying — pool reuses the element. Removing from the
+    // sticky layer is still required so absolute positions don't stack, but we
+    // never wipe textContent here so a recycled node can skip identical HTML
+    // writes when rebound to the same line.
     node.remove();
     this.renderedNodes.delete(idx);
     this.poolNodes.push(node);

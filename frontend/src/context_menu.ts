@@ -6,6 +6,7 @@ export class ContextMenu {
     private ctx: AppContext;
     private selectedLineText: string = '';
     private selectedLineIndex: number = -1;
+    private selectedSourceIndex: number = -1;
 
     constructor(ctx: AppContext) {
         this.ctx = ctx;
@@ -31,6 +32,7 @@ export class ContextMenu {
             if (rowEl) {
                 this.selectedLineText = rowEl.querySelector('.log-text')?.textContent || '';
                 this.selectedLineIndex = parseInt(rowEl.dataset.index || '-1', 10);
+                this.selectedSourceIndex = parseInt(rowEl.dataset.sourceIndex || String(this.selectedLineIndex), 10);
                 // If the scroller has an active range, use it for copy (single or multi).
                 // Otherwise treat the right-clicked row as a one-line selection.
                 const sel = mainScroller.getSelectedRange();
@@ -63,6 +65,7 @@ export class ContextMenu {
             if (rowEl) {
                 this.selectedLineText = rowEl.querySelector('.log-text')?.textContent || '';
                 this.selectedLineIndex = parseInt(rowEl.dataset.index || '-1', 10);
+                this.selectedSourceIndex = parseInt(rowEl.dataset.sourceIndex || '-1', 10);
                 if (!isNaN(this.selectedLineIndex) && this.selectedLineIndex >= 0) {
                     const sel = filterScroller.getSelectedRange();
                     if (sel) {
@@ -85,13 +88,23 @@ export class ContextMenu {
 
         // Use pointerdown (not click): on some platforms a right-click also
         // synthesizes a click that would close the menu in the same gesture.
-        // Ignore right-button and clicks inside any open context menu.
+        // Ignore right-button and clicks inside any open context menu — item
+        // handlers (and the delegated .ctx-item listener below) close the menu.
         document.addEventListener('pointerdown', (e) => {
             if (e.button === 2) return;
             const t = e.target as HTMLElement | null;
             if (t?.closest('.context-menu')) return;
             this.hideContextMenus();
         });
+
+        // Close the menu when any item is activated. Item actions are bound
+        // separately; this only handles visibility so we never leave a stale menu.
+        const hideOnItemClick = (e: Event) => {
+            const el = e.target as HTMLElement | null;
+            if (el?.closest('.ctx-item')) this.hideContextMenus();
+        };
+        ctxMenuMain.addEventListener('click', hideOnItemClick);
+        ctxMenuFilter.addEventListener('click', hideOnItemClick);
 
         document.getElementById('ctx-main-copy')?.addEventListener('click', async () => {
             const scroller = ((this as any)._selScroller as typeof mainScroller) || mainScroller;
@@ -163,8 +176,9 @@ export class ContextMenu {
         });
 
         document.getElementById('ctx-filter-goto')?.addEventListener('click', () => {
-            if (this.selectedLineIndex >= 0) {
-                mainScroller.scrollToIndex(this.selectedLineIndex);
+            const src = this.selectedSourceIndex >= 0 ? this.selectedSourceIndex : this.selectedLineIndex;
+            if (src >= 0) {
+                mainScroller.scrollToIndex(src);
             }
         });
 

@@ -617,6 +617,7 @@ body.theme-light select option {
 }
 
 .log-content-container {
+    pointer-events: auto;
     position: sticky;
     top: 0;
     width: max-content;
@@ -631,6 +632,7 @@ body.theme-light select option {
    range. Width is driven by VirtualScroller from measured line widths so
    horizontal overflow is scrollable. */
 .log-scroll-spacer {
+    pointer-events: none;
     position: relative;
     width: 1px;
     min-width: 100%;
@@ -651,6 +653,9 @@ body.theme-light select option {
     width: max-content;
     min-width: 100%;
     overflow: visible;
+    /* Isolate each row's paint so highlight/selection class toggles and
+       innerHTML updates don't force a full sticky-layer repaint (reduces flicker). */
+    contain: layout style;
 }
 
 .log-row:hover {
@@ -819,6 +824,7 @@ mark.search-highlight-active {
     list-style: none;
     margin: 0;
     padding: 0;
+    height: 320px;
     max-height: 320px;
     overflow-y: auto;
     border: 1px solid var(--border-color);

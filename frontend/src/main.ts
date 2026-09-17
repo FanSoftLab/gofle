@@ -262,11 +262,42 @@ document.addEventListener('DOMContentLoaded', async () => {
         return true;
     };
 
-    let searchDebounce: any;
+    let searchDebounce: ReturnType<typeof setTimeout> | undefined;
+    // Per-tab generation: ignore stale SearchLines responses and progress events
+    // when a newer query has already been issued.
+    const searchGenByTab = new Map<string, number>();
+
+    const applySearchResults = (tabId: string, matches: number, query: string, done: boolean) => {
+        if (ctx.activeTabId !== tabId || !ctx.tabs.has(tabId)) return;
+        const tab = ctx.tabs.get(tabId)!;
+        tab.matchedLines = matches;
+        if (done) {
+            tab.currentMatchIndex = matches > 0 ? 0 : -1;
+        }
+        const counter = document.getElementById('match-counter-text');
+        if (counter) {
+            const suffix = done ? '' : '…';
+            counter.textContent = `${matches} / ${tab.totalLines}${t('match_counter_suffix')}${suffix}`;
+        }
+        if (done) {
+            filterScroller.setTotalLines(matches);
+            filterScroller.setHighlightedLine(null);
+            mainScroller.setSearchQuery(query);
+            updateSearchNavState();
+            syncSearchClearBtn();
+        } else {
+            // Progressive: grow the filter pane as counts arrive without a full reset flash.
+            filterScroller.setTotalLines(matches);
+        }
+    };
+
     const triggerSearch = async () => {
         if (!ctx.activeTabId) return;
         const tab = ctx.tabs.get(ctx.activeTabId)!;
         tab.searchQuery = ctx.searchInput.value;
+        tab.secondaryQuery = (document.getElementById('secondary-search-input') as HTMLInputElement | null)?.value
+            ?? tab.secondaryQuery
+            ?? '';
 
         const isValid = await validateRegexUI();
         if (!isValid) return;
@@ -274,21 +305,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         clearTimeout(searchDebounce);
         searchDebounce = setTimeout(async () => {
             const api = getApi();
-            if (!api || !ctx.activeTabId) return;
+            const tabId = ctx.activeTabId;
+            if (!api || !tabId || !ctx.tabs.has(tabId)) return;
+            const tabNow = ctx.tabs.get(tabId)!;
+            const gen = (searchGenByTab.get(tabId) ?? 0) + 1;
+            searchGenByTab.set(tabId, gen);
             try {
-                const matches = await api.SearchLines(ctx.activeTabId, tab.searchQuery, tab.isRegex, tab.caseSensitive, tab.invertMatch, tab.secondaryQuery);
-                tab.matchedLines = matches;
-                tab.currentMatchIndex = matches > 0 ? 0 : -1;
-                document.getElementById('match-counter-text')!.textContent = `${matches} / ${tab.totalLines}${t('match_counter_suffix')}`;
-                filterScroller.setTotalLines(matches);
-                filterScroller.setHighlightedLine(null);
-                mainScroller.setSearchQuery(tab.searchQuery);
-                updateSearchNavState();
-                syncSearchClearBtn();
+                const matches = await api.SearchLines(
+                    tabId,
+                    tabNow.searchQuery,
+                    tabNow.isRegex,
+                    tabNow.caseSensitive,
+                    tabNow.invertMatch,
+                    tabNow.secondaryQuery || '',
+                );
+                // Drop stale response (a newer search was started).
+                if (searchGenByTab.get(tabId) !== gen) return;
+                applySearchResults(tabId, matches, tabNow.searchQuery, true);
             } catch (err) {
-                // On-change typing makes backend search errors user-triggerable
-                // (invalid secondary regex): surface them, not just log.
+                if (searchGenByTab.get(tabId) !== gen) return;
                 const msg = String((err as any)?.message ?? err);
+                // Cancellation from debounce supersede is expected — stay quiet.
+                if (/cancel/i.test(msg)) return;
                 showToast(msg.includes('secondary') ? 'secondary: ' + msg.split(': ').pop() : msg, 'error');
             }
         }, 200);
@@ -307,19 +345,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         clearTimeout(searchDebounce);
         const api = getApi();
-        if (!api || !ctx.activeTabId) return;
+        const tabId = ctx.activeTabId;
+        if (!api || !tabId) return;
+        const gen = (searchGenByTab.get(tabId) ?? 0) + 1;
+        searchGenByTab.set(tabId, gen);
         try {
-            const matches = await api.SearchLines(ctx.activeTabId, tab.searchQuery, tab.isRegex, tab.caseSensitive, tab.invertMatch, tab.secondaryQuery);
-            tab.matchedLines = matches;
-            tab.currentMatchIndex = matches > 0 ? 0 : -1;
-            document.getElementById('match-counter-text')!.textContent = `${matches} / ${tab.totalLines}${t('match_counter_suffix')}`;
-            filterScroller.setTotalLines(matches);
-            filterScroller.setHighlightedLine(null);
-            mainScroller.setSearchQuery(tab.searchQuery);
-            updateSearchNavState();
+            const matches = await api.SearchLines(
+                tabId,
+                tab.searchQuery,
+                tab.isRegex,
+                tab.caseSensitive,
+                tab.invertMatch,
+                tab.secondaryQuery || '',
+            );
+            if (searchGenByTab.get(tabId) !== gen) return;
+            applySearchResults(tabId, matches, tab.searchQuery, true);
         } catch (err) {
+            if (searchGenByTab.get(tabId) !== gen) return;
+            const msg = String((err as any)?.message ?? err);
+            if (/cancel/i.test(msg)) return;
             console.error('Search error:', err);
-            showToast(String((err as any)?.message ?? err), 'error');
+            showToast(msg, 'error');
         }
     };
 
@@ -818,6 +864,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
     if ((window as any).runtime?.EventsOn) {
+        (window as any).runtime.EventsOn('search_progress', (data: any) => {
+            if (!data || !data.tabId) return;
+            const tabId = String(data.tabId);
+            if (ctx.activeTabId !== tabId || !ctx.tabs.has(tabId)) return;
+            // Final results are applied by the SearchLines await path; only stream
+            // intermediate counts here so the counter moves during long scans.
+            if (data.done) return;
+            const tab = ctx.tabs.get(tabId)!;
+            const count = Number(data.count) || 0;
+            applySearchResults(tabId, count, tab.searchQuery, false);
+        });
         (window as any).runtime.EventsOn('file_updated', (data: any) => {
             if (data && data.tab_id && ctx.tabs.has(data.tab_id)) {
                 const tab = ctx.tabs.get(data.tab_id)!;

@@ -132,7 +132,14 @@ func (se *SearchEngine) Search(opts SearchOptions) ([]int64, error) {
 //	defer cancel()
 //	matches, _ := se.SearchWithContext(ctx, search.SearchOptions{Query: "ERROR", CaseSensitive: true})
 func (se *SearchEngine) SearchWithContext(ctx context.Context, opts SearchOptions) ([]int64, error) {
-	return se.matchRange(ctx, opts, 0, se.indexer.TotalLines())
+	return se.matchRange(ctx, opts, 0, se.indexer.TotalLines(), nil)
+}
+
+// SearchWithProgress is SearchWithContext plus an optional progress callback
+// invoked with the running match count as each chunk completes (unordered
+// arrival; count is cumulative over finished chunks). onProgress may be nil.
+func (se *SearchEngine) SearchWithProgress(ctx context.Context, opts SearchOptions, onProgress func(int64)) ([]int64, error) {
+	return se.matchRange(ctx, opts, 0, se.indexer.TotalLines(), onProgress)
 }
 
 // SearchRange searches only the half-open line range [start, end) and returns
@@ -150,7 +157,7 @@ func (se *SearchEngine) SearchWithContext(ctx context.Context, opts SearchOption
 //
 // Returns a slice of matched line indices within [start, end), or an error if the query is invalid or context is cancelled.
 func (se *SearchEngine) SearchRange(ctx context.Context, opts SearchOptions, start, end int64) ([]int64, error) {
-	return se.matchRange(ctx, opts, start, end)
+	return se.matchRange(ctx, opts, start, end, nil)
 }
 
 // regexPattern turns a user query into the pattern that is actually compiled:
@@ -454,7 +461,7 @@ func (se *SearchEngine) matchRangeWithLevels(ctx context.Context, opts SearchOpt
 }
 
 // matchRange runs a goroutine-pooled, chunked scan over [start, end) of the indexer, applies opts, and returns matched indices in ascending order. It honors ctx cancellation between chunks (not mid-chunk), caches compiled regexes, and does not store the result on the engine.
-func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, start, end int64) ([]int64, error) { //nolint:gocyclo,funlen // chunked pooled scan over the index is inherently branchy
+func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, start, end int64, onProgress func(int64)) ([]int64, error) { //nolint:gocyclo,funlen // chunked pooled scan over the index is inherently branchy
 	if opts.Query == "" {
 		return []int64{}, nil
 	}
@@ -631,6 +638,9 @@ func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, star
 
 		ordered[res.seq] = res.matches
 		totalMatches += len(res.matches)
+		if onProgress != nil {
+			onProgress(int64(totalMatches))
+		}
 	}
 
 	// A canceled search must not masquerade as a completed partial result:
@@ -696,7 +706,7 @@ func (se *SearchEngine) buildSecondaryMatcher(opts SearchOptions) (func([]byte) 
 //   - lines: A slice of line indices to filter.
 //
 // Returns a filtered slice of line indices, or an error if SecondaryQuery is invalid.
-func (se *SearchEngine) FilterLines(_ context.Context, opts SearchOptions, lines []int64) ([]int64, error) {
+func (se *SearchEngine) FilterLines(ctx context.Context, opts SearchOptions, lines []int64) ([]int64, error) {
 	if opts.SecondaryQuery == "" {
 		return slices.Clone(lines), nil
 	}
@@ -707,7 +717,14 @@ func (se *SearchEngine) FilterLines(_ context.Context, opts SearchOptions, lines
 	}
 
 	out := make([]int64, 0, len(lines))
-	for _, ln := range lines {
+	for i, ln := range lines {
+		if i&0xff == 0 { // every 256 lines
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
 		content, e := se.indexer.GetLine(ln)
 		if e != nil {
 			return nil, e

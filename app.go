@@ -68,8 +68,16 @@ type TabState struct {
 	Indexer          *indexer.FileIndexer
 	Searcher         *search.SearchEngine
 	MatchedLines     []int64
+	// PrimaryMatches is the last full-file (primary) result before SecondaryQuery
+	// was applied. Used to refine the AND-filter in O(matches) via FilterLines
+	// instead of rescanning the whole file.
+	PrimaryMatches []int64
 	AutoScroll       bool
 	LastSearchOpts   search.SearchOptions
+	// searchCancel cancels an in-flight SearchLines for this tab when the user
+	// types a new query (debounce fires again). Guarded by searchCancelMu.
+	searchCancel   context.CancelFunc
+	searchCancelMu sync.Mutex
 	IsSSH            bool
 	IsFTP            bool
 	TempFile         string

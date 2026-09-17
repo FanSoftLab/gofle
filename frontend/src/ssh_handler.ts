@@ -34,6 +34,7 @@ export class SSHHandler {
     private browseEntries: any[] = [];
     private browseCursor: number = 0;
     private browseLoading: boolean = false;
+    private browseFilter: string = "";
     // browseAfterTrust re-opens the browser (instead of opening the file) once
     // the user trusts an unknown host key encountered during listing.
     private browseAfterTrust: boolean = false;
@@ -245,6 +246,12 @@ export class SSHHandler {
                 e.preventDefault();
                 this.browseGotoPath();
             }
+        });
+        const filterInput = document.getElementById('ssh-browse-filter') as HTMLInputElement | null;
+        filterInput?.addEventListener('input', () => {
+            this.browseFilter = (filterInput.value || '').trim().toLowerCase();
+            this.browseCursor = 0;
+            this.renderBrowse();
         });
         const listEl = document.getElementById('ssh-browse-list');
         listEl?.addEventListener('keydown', (e) => this.browseKeyDown(e));
@@ -586,6 +593,9 @@ export class SSHHandler {
         this.browseCursor = 0;
         this.browseEntries = [];
         this.browseLoading = false;
+        this.browseFilter = "";
+        const filterEl = document.getElementById('ssh-browse-filter') as HTMLInputElement | null;
+        if (filterEl) filterEl.value = "";
         document.getElementById('ssh-browse-modal')?.classList.remove('hidden');
         await this.listRemoteDir();
     };
@@ -675,18 +685,25 @@ export class SSHHandler {
         this.listRemoteDir();
     };
 
-    // browseOpenSelected opens the highlighted entry: a dir navigates into it, a
-    // file fills the remote-path field and closes the browser.
+    // browseOpenSelected opens the highlighted entry: a dir or symlink navigates
+    // into it, a plain file fills the remote-path field and closes the browser.
     private browseOpenSelected = () => {
-        const entry = this.browseEntries[this.browseCursor];
+        const visible = this.getVisibleBrowseEntries();
+        const entry = visible[this.browseCursor];
         if (!entry) return;
-        if (entry.kind === 'dir') {
+        if (entry.kind === 'dir' || entry.kind === 'symlink') {
             this.browsePath = entry.path;
             this.browseCursor = 0;
             this.listRemoteDir();
             return;
         }
         this.selectRemoteFile(entry.path);
+    };
+
+    private getVisibleBrowseEntries(): any[] {
+        const filter = this.browseFilter;
+        if (!filter) return this.browseEntries;
+        return this.browseEntries.filter((e: any) => (e.name || '').toLowerCase().includes(filter));
     };
 
     private selectRemoteFile(path: string) {
@@ -702,17 +719,23 @@ export class SSHHandler {
         switch (e.key) {
             case 'ArrowUp':
                 e.preventDefault();
-                if (this.browseEntries.length === 0) return;
-                this.browseCursor = (this.browseCursor + this.browseEntries.length - 1) % this.browseEntries.length;
-                this.renderBrowse();
-                this.scrollBrowseCursorIntoView();
+                {
+                    const vis = this.getVisibleBrowseEntries();
+                    if (vis.length === 0) return;
+                    this.browseCursor = (this.browseCursor + vis.length - 1) % vis.length;
+                    this.renderBrowse();
+                    this.scrollBrowseCursorIntoView();
+                }
                 break;
             case 'ArrowDown':
                 e.preventDefault();
-                if (this.browseEntries.length === 0) return;
-                this.browseCursor = (this.browseCursor + 1) % this.browseEntries.length;
-                this.renderBrowse();
-                this.scrollBrowseCursorIntoView();
+                {
+                    const vis = this.getVisibleBrowseEntries();
+                    if (vis.length === 0) return;
+                    this.browseCursor = (this.browseCursor + 1) % vis.length;
+                    this.renderBrowse();
+                    this.scrollBrowseCursorIntoView();
+                }
                 break;
             case 'Enter':
                 e.preventDefault();
@@ -764,33 +787,44 @@ export class SSHHandler {
             li.className = 'ssh-browse-loading';
             li.textContent = t('ssh_browse_loading');
             frag.appendChild(li);
-        } else if (this.browseEntries.length === 0) {
-            const li = document.createElement('li');
-            li.className = 'ssh-browse-empty';
-            li.textContent = t('ssh_browse_empty');
-            frag.appendChild(li);
         } else {
-            this.browseEntries.forEach((e, i) => {
+            const filter = this.browseFilter;
+            const visible = filter
+                ? this.browseEntries.filter((e: any) => (e.name || '').toLowerCase().includes(filter))
+                : this.browseEntries;
+            if (visible.length === 0) {
                 const li = document.createElement('li');
-                const icon = e.kind === 'dir' ? '▸' : (e.kind === 'symlink' ? '→' : '·');
-                li.textContent = `${icon} ${e.name}` + (e.kind === 'file' ? `  (${fmtBytes(e.size)})` : '');
-                if (i === this.browseCursor) li.classList.add('ssh-browse-selected');
-                // A single click both records the cursor (so "Open selected"
-                // acts on the right entry) and performs the action. We do NOT
-                // re-render on mouseenter: rebuilding the list on every hover
-                // made the app sluggish and replaced the node under the cursor
-                // so clicks frequently failed to register.
-                li.addEventListener('click', () => {
-                    this.browseCursor = i;
-                    if (e.kind === 'dir') {
-                        this.browsePath = e.path;
-                        this.listRemoteDir();
-                    } else {
-                        this.selectRemoteFile(e.path);
-                    }
-                });
+                li.className = 'ssh-browse-empty';
+                li.textContent = t('ssh_browse_empty');
                 frag.appendChild(li);
-            });
+            } else {
+                // Clamp cursor into visible range after filtering.
+                if (this.browseCursor >= visible.length) this.browseCursor = Math.max(0, visible.length - 1);
+                visible.forEach((e: any, i: number) => {
+                    const li = document.createElement('li');
+                    const icon = e.kind === 'dir' ? '▸' : (e.kind === 'symlink' ? '→' : '·');
+                    li.textContent = `${icon} ${e.name}` + (e.kind === 'file' ? `  (${fmtBytes(e.size)})` : '');
+                    if (i === this.browseCursor) li.classList.add('ssh-browse-selected');
+                    // A single click both records the cursor (so "Open selected"
+                    // acts on the right entry) and performs the action. We do NOT
+                    // re-render on mouseenter: rebuilding the list on every hover
+                    // made the app sluggish and replaced the node under the cursor
+                    // so clicks frequently failed to register.
+                    // Symlinks are treated as navigable (enter): if the target is a
+                    // directory the listing succeeds; if it is a file the list will
+                    // error and the user can still open via "Open selected".
+                    li.addEventListener('click', () => {
+                        this.browseCursor = i;
+                        if (e.kind === 'dir' || e.kind === 'symlink') {
+                            this.browsePath = e.path;
+                            this.listRemoteDir();
+                        } else {
+                            this.selectRemoteFile(e.path);
+                        }
+                    });
+                    frag.appendChild(li);
+                });
+            }
         }
 
         listEl.innerHTML = '';
@@ -854,6 +888,9 @@ export class SSHHandler {
         this.browseCursor = 0;
         this.browseEntries = [];
         this.browseLoading = false;
+        this.browseFilter = "";
+        const filterEl = document.getElementById('ssh-browse-filter') as HTMLInputElement | null;
+        if (filterEl) filterEl.value = "";
         document.getElementById('ssh-browse-modal')?.classList.remove('hidden');
         await this.listRemoteDir();
     };
