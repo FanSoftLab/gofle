@@ -112,6 +112,14 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// zeroBytes overwrites a byte slice with zeros to remove sensitive data from memory.
+// This is a best-effort defense-in-depth measure; Go's GC may have already copied the data.
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 // expandPath resolves a leading "~" in a local file path. Go's os.ReadFile does
 // not understand "~", so a config like "~/.ssh/id_rsa" would fail with
 // "no such file". Only the local KeyPath needs expansion — RemoteFilePath is
@@ -411,7 +419,9 @@ func NewStreamerContext(ctx context.Context, cfg Config) (*Streamer, error) { //
 
 		var signer ssh.Signer
 		if cfg.KeyPassphrase != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(cfg.KeyPassphrase))
+			passphrase := []byte(cfg.KeyPassphrase)
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, passphrase)
+			zeroBytes(passphrase)
 		} else {
 			signer, err = ssh.ParsePrivateKey(keyBytes)
 		}
@@ -606,21 +616,29 @@ func dialContext(ctx context.Context, address string, sshConfig *ssh.ClientConfi
 // to append on user acceptance); a mismatch with a known host is treated as a
 // potential MITM and returns a hard error. A missing known_hosts file is not an
 // error: it simply means every host starts out unknown.
+// The returned callback re-reads the known_hosts file on each verification to
+// avoid TOCTOU issues where the file is modified between connections.
 func newHostKeyCallback(path string) (ssh.HostKeyCallback, error) {
-	base, err := knownhosts.New(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			// No known_hosts yet — start from an empty database so unknown hosts
-			// are detected (and surfaced) rather than silently accepted.
-			base = func(_ string, _ net.Addr, _ ssh.PublicKey) error {
-				return &knownhosts.KeyError{}
-			}
-		} else {
-			return nil, fmt.Errorf("failed to read known_hosts: %w", err)
-		}
+	// Verify the path exists and is readable at startup, but defer actual
+	// parsing to each verification call so we pick up changes.
+	if _, err := os.Stat(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("failed to access known_hosts: %w", err)
 	}
 
 	return func(host string, addr net.Addr, key ssh.PublicKey) error {
+		// Re-read known_hosts on each verification to avoid stale cache.
+		base, err := knownhosts.New(path)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// No known_hosts yet — treat as unknown host.
+				base = func(_ string, _ net.Addr, _ ssh.PublicKey) error {
+					return &knownhosts.KeyError{}
+				}
+			} else {
+				return fmt.Errorf("failed to read known_hosts: %w", err)
+			}
+		}
+
 		if err := base(host, addr, key); err != nil {
 			var ke *knownhosts.KeyError
 			if errors.As(err, &ke) && len(ke.Want) == 0 {
@@ -1043,10 +1061,38 @@ func stderrTailOf(ch <-chan string, grace time.Duration) string {
 			t = t[len(t)-200:]
 		}
 
-		return t
+		return sanitizeStderr(t)
 	case <-time.After(grace):
 		return ""
 	}
+}
+
+// sanitizeStderr removes potentially sensitive information from remote stderr
+// before including it in error messages. This prevents leaking passwords,
+// private keys, or internal paths that could aid an attacker.
+func sanitizeStderr(s string) string {
+	// Remove lines containing common sensitive patterns
+	lines := strings.Split(s, "\n")
+	var clean []string
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		// Skip lines that might contain credentials
+		if strings.Contains(lower, "password") ||
+			strings.Contains(lower, "passphrase") ||
+			strings.Contains(lower, "private key") ||
+			strings.Contains(lower, "secret") ||
+			strings.Contains(lower, "token") {
+			continue
+		}
+		clean = append(clean, line)
+	}
+
+	result := strings.Join(clean, "\n")
+	// Limit total length
+	if len(result) > 500 {
+		result = result[:500] + "... [truncated]"
+	}
+	return result
 }
 
 // watchInitialCopy aborts the initial copy when the caller cancels ctx, when
@@ -1745,7 +1791,9 @@ func NewLister(cfg Config) (*Lister, error) {
 
 		var signer ssh.Signer
 		if cfg.KeyPassphrase != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(cfg.KeyPassphrase))
+			passphrase := []byte(cfg.KeyPassphrase)
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, passphrase)
+			zeroBytes(passphrase)
 		} else {
 			signer, err = ssh.ParsePrivateKey(keyBytes)
 		}

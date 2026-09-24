@@ -10,7 +10,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,6 +24,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/argon2"
 )
 
 // SSHConfigSummary is a lightweight, serializable summary of a remote (SSH or
@@ -110,8 +111,9 @@ type SavedSession struct {
 // the RecentFiles slice / SavedSession; the package methods lock internally for
 // writes.
 type AppConfig struct {
-	configDir string
-	SecretKey string
+	configDir  string
+	SecretKey  string
+	SecretSalt string // hex-encoded salt for Argon2id key derivation
 
 	Theme             string `json:"theme"`
 	Language          string `json:"language"`
@@ -178,8 +180,16 @@ const (
 	// It lives in its own 0600 file, separate from settings.json, so the key is
 	// not co-mingled with general config and the blast radius of a settings
 	// file read is reduced (B7).
+	// Format: JSON with "key" (hex-encoded 32-byte key) and "salt" (hex-encoded 16-byte salt).
+	// Legacy format: raw hex-encoded 32-byte key (for backward compatibility).
 	secretKeyFile = "secret.key"
 )
+
+// secretKeyData represents the on-disk format of the secret key file.
+type secretKeyData struct {
+	Key  string `json:"key"`  // hex-encoded 32-byte master key
+	Salt string `json:"salt"` // hex-encoded 16-byte salt for Argon2id
+}
 
 // DefaultDir returns the configuration directory used by LoadConfig
 // (<os.UserConfigDir>/GoFLE), falling back to the current directory when the
@@ -628,25 +638,25 @@ func (c *AppConfig) FlushSave() error {
 // KeyPassphrase encrypted at rest via EncryptSecret. The summary is deep-copied
 // so the caller's struct keeps the live (cleartext) credentials. A nil input
 // yields nil. Fields that fail to encrypt are blanked rather than left clear.
-func encryptSSHSecrets(s *SSHConfigSummary, secretKey string) *SSHConfigSummary { //nolint:dupl // symmetric encrypt/decrypt helpers
+func (c *AppConfig) encryptSSHSecrets(s *SSHConfigSummary) *SSHConfigSummary { //nolint:dupl // symmetric encrypt/decrypt helpers
 	if s == nil {
 		return nil
 	}
 
 	cp := *s
-	if enc, err := EncryptSecret(s.Username, secretKey); err == nil {
+	if enc, err := c.EncryptSecret(s.Username); err == nil {
 		cp.Username = enc
 	} else {
 		cp.Username = ""
 	}
 
-	if enc, err := EncryptSecret(s.Password, secretKey); err == nil {
+	if enc, err := c.EncryptSecret(s.Password); err == nil {
 		cp.Password = enc
 	} else {
 		cp.Password = ""
 	}
 
-	if enc, err := EncryptSecret(s.KeyPassphrase, secretKey); err == nil {
+	if enc, err := c.EncryptSecret(s.KeyPassphrase); err == nil {
 		cp.KeyPassphrase = enc
 	} else {
 		cp.KeyPassphrase = ""
@@ -660,25 +670,25 @@ func encryptSSHSecrets(s *SSHConfigSummary, secretKey string) *SSHConfigSummary 
 // that fail to decrypt are left empty so the UI can prompt for re-entry — for
 // every field: leaving the ciphertext in Username would send it to the SSH
 // server as a literal login name.
-func decryptSSHSecrets(s *SSHConfigSummary, secretKey string) *SSHConfigSummary { //nolint:dupl // symmetric encrypt/decrypt helpers
+func (c *AppConfig) decryptSSHSecrets(s *SSHConfigSummary) *SSHConfigSummary { //nolint:dupl // symmetric encrypt/decrypt helpers
 	if s == nil {
 		return nil
 	}
 
 	cp := *s
-	if dec, err := DecryptSecret(s.Username, secretKey); err == nil {
+	if dec, err := c.DecryptSecret(s.Username); err == nil {
 		cp.Username = dec
 	} else {
 		cp.Username = ""
 	}
 
-	if dec, err := DecryptSecret(s.Password, secretKey); err == nil {
+	if dec, err := c.DecryptSecret(s.Password); err == nil {
 		cp.Password = dec
 	} else {
 		cp.Password = ""
 	}
 
-	if dec, err := DecryptSecret(s.KeyPassphrase, secretKey); err == nil {
+	if dec, err := c.DecryptSecret(s.KeyPassphrase); err == nil {
 		cp.KeyPassphrase = dec
 	} else {
 		cp.KeyPassphrase = ""
@@ -711,7 +721,7 @@ func (c *AppConfig) AddRecentFile(path string, size int64, isSSH bool, ssh *SSHC
 	// keep the real credentials.
 	var sshEnc *SSHConfigSummary
 	if ssh != nil {
-		sshEnc = encryptSSHSecrets(ssh, c.SecretKey)
+		sshEnc = c.encryptSSHSecrets(ssh)
 	} else if isSSH && prevSummary != nil {
 		// A re-open recorded without credentials (e.g. the CLI resolving an
 		// ssh:// URL) must not wipe the stored summary — otherwise the next
@@ -778,7 +788,7 @@ func (c *AppConfig) GetRecentFiles() []RecentFileItem {
 	copy(res, c.RecentFiles)
 
 	for i := range res {
-		res[i].SSH = decryptSSHSecrets(res[i].SSH, c.SecretKey)
+		res[i].SSH = c.decryptSSHSecrets(res[i].SSH)
 	}
 
 	c.recentFileCache = make([]RecentFileItem, len(res))
@@ -896,7 +906,7 @@ func (c *AppConfig) migrateLegacySavedTabs() {
 		}
 
 		item.GroupID = ""
-		item.SSH = encryptSSHSecrets(item.SSH, c.SecretKey)
+		item.SSH = c.encryptSSHSecrets(item.SSH)
 		s.Tabs = append(s.Tabs, item)
 		s.TopLevel = append(s.TopLevel, SavedTopEntry{Type: "tab", ID: item.ID})
 	}
@@ -971,7 +981,7 @@ func (c *AppConfig) GetSavedSession() SavedSession {
 
 	out.Tabs = append(out.Tabs, c.SavedSession.Tabs...)
 	for i := range out.Tabs {
-		out.Tabs[i].SSH = decryptSSHSecrets(out.Tabs[i].SSH, c.SecretKey)
+		out.Tabs[i].SSH = c.decryptSSHSecrets(out.Tabs[i].SSH)
 	}
 
 	for _, g := range c.SavedSession.Groups {
@@ -1012,7 +1022,7 @@ func (c *AppConfig) SaveSession(s SavedSession) error {
 	// security: persist SSH credentials (incl. key passphrase) encrypted at
 	// rest; they are decrypted again on read by GetSavedSession.
 	for i := range cp.Tabs {
-		cp.Tabs[i].SSH = encryptSSHSecrets(cp.Tabs[i].SSH, c.SecretKey)
+		cp.Tabs[i].SSH = c.encryptSSHSecrets(cp.Tabs[i].SSH)
 	}
 
 	cp.Groups = make([]SavedGroupItem, 0, len(s.Groups))
@@ -1062,9 +1072,29 @@ func (c *AppConfig) loadOrCreateSecretKey() error {
 		return fmt.Errorf("failed to read %s: %w", secretKeyFile, err)
 	}
 
-	if k := strings.TrimSpace(string(data)); k != "" {
-		c.SecretKey = k
-		return nil
+	// Try to parse as new JSON format first
+	if len(data) > 0 {
+		var skd secretKeyData
+		if json.Unmarshal(data, &skd) == nil && skd.Key != "" && skd.Salt != "" {
+			c.SecretKey = skd.Key
+			return nil
+		}
+		// Fall back to legacy format (raw hex key)
+		if k := strings.TrimSpace(string(data)); k != "" {
+			c.SecretKey = k
+			// Migrate to new format with a generated salt
+			salt := make([]byte, 16)
+			if _, err := io.ReadFull(rand.Reader, salt); err == nil {
+				skd := secretKeyData{
+					Key:  c.SecretKey,
+					Salt: hex.EncodeToString(salt),
+				}
+				if b, err := json.Marshal(skd); err == nil {
+					_ = os.WriteFile(path, b, 0o600)
+				}
+			}
+			return nil
+		}
 	}
 
 	if len(data) > 0 {
@@ -1074,11 +1104,21 @@ func (c *AppConfig) loadOrCreateSecretKey() error {
 	// credentials stay decryptable across the upgrade.
 	if k := readLegacySecretKey(c.configDir); k != "" {
 		c.SecretKey = k
-		if werr := os.WriteFile(path, []byte(k), 0o600); werr != nil {
-			// The in-memory key keeps this run working; the failure must be
-			// visible because the key would otherwise be re-migrated (and lost)
-			// on every restart.
-			slog.Warn("failed to persist migrated secret key", "err", werr)
+		// Write in new format with generated salt
+		salt := make([]byte, 16)
+		if _, err := io.ReadFull(rand.Reader, salt); err == nil {
+			skd := secretKeyData{
+				Key:  c.SecretKey,
+				Salt: hex.EncodeToString(salt),
+			}
+			if b, err := json.Marshal(skd); err == nil {
+				_ = os.WriteFile(path, b, 0o600)
+			}
+		} else {
+			// Fallback to legacy format
+			if werr := os.WriteFile(path, []byte(k), 0o600); werr != nil {
+				slog.Warn("failed to persist migrated secret key", "err", werr)
+			}
 		}
 
 		return nil
@@ -1091,6 +1131,19 @@ func (c *AppConfig) loadOrCreateSecretKey() error {
 
 	c.SecretKey = k
 
+	// Write in new format with generated salt
+	salt := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, salt); err == nil {
+		skd := secretKeyData{
+			Key:  c.SecretKey,
+			Salt: hex.EncodeToString(salt),
+		}
+		if b, err := json.Marshal(skd); err == nil {
+			return os.WriteFile(path, b, 0o600)
+		}
+	}
+
+	// Fallback to legacy format if JSON marshaling fails
 	return os.WriteFile(path, []byte(c.SecretKey), 0o600)
 }
 
@@ -1126,43 +1179,49 @@ func generateSecretKey() (string, error) {
 }
 
 // cachedAESKey holds a derived AES-GCM key cached by secret key hash.
-// This avoids re-deriving the key (SHA256 + cipher creation) on every
-// encrypt/decrypt call, which is significant when many SSH credentials
-// are stored/loaded frequently.
+// This avoids re-deriving the key (Argon2id) on every encrypt/decrypt call,
+// which is significant when many SSH credentials are stored/loaded frequently.
 var cachedAESKey struct {
 	mu        sync.Mutex
-	key       [32]byte // sha256 of secretKey
+	key       [32]byte // Argon2id derived key
 	cachedRaw string   // raw secret key for quick comparison
+	cachedSalt string  // salt for quick comparison
 }
 
-// getOrCreateAESKey returns the derived AES key for the given secretKey.
-// The key is derived as sha256(secretKey). The raw secret key string is kept
-// for a cheap inequality check, so a cache hit performs no hashing at all.
-func getOrCreateAESKey(secretKey string) [32]byte {
+// getOrCreateAESKey returns the derived AES key for the given secretKey and salt.
+// The key is derived using Argon2id(secretKey, salt). The raw secret key and salt
+// strings are kept for a cheap inequality check, so a cache hit performs no
+// hashing at all.
+func getOrCreateAESKey(secretKey, salt string) [32]byte {
 	cachedAESKey.mu.Lock()
 	defer cachedAESKey.mu.Unlock()
 
-	if cachedAESKey.cachedRaw == secretKey {
+	if cachedAESKey.cachedRaw == secretKey && cachedAESKey.cachedSalt == salt {
 		return cachedAESKey.key
 	}
 
-	h := sha256.Sum256([]byte(secretKey))
-	copy(cachedAESKey.key[:], h[:])
+	// Argon2id parameters: time=3, memory=64MB, parallelism=4, keyLen=32
+	// These are conservative defaults providing good security/performance balance.
+	saltBytes, _ := hex.DecodeString(salt)
+	key := argon2.IDKey([]byte(secretKey), saltBytes, 3, 64*1024, 4, 32)
+	copy(cachedAESKey.key[:], key)
 	cachedAESKey.cachedRaw = secretKey
+	cachedAESKey.cachedSalt = salt
 
 	return cachedAESKey.key
 }
 
 // EncryptSecret encrypts plainText with AES-GCM using a key derived from
-// secretKey. The output is hex-encoded and includes a unique random nonce.
+// the config's secretKey and secretSalt (Argon2id). The output is hex-encoded
+// and includes a unique random nonce.
 // NOTE: AES-GCM only. CFB (or any other non-authenticated mode) must never be
 // used for password material.
-func EncryptSecret(plainText, secretKey string) (string, error) {
+func (c *AppConfig) EncryptSecret(plainText string) (string, error) {
 	if plainText == "" {
 		return "", nil
 	}
 
-	key := getOrCreateAESKey(secretKey)
+	key := getOrCreateAESKey(c.SecretKey, c.SecretSalt)
 
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
@@ -1186,7 +1245,7 @@ func EncryptSecret(plainText, secretKey string) (string, error) {
 
 // DecryptSecret reverses EncryptSecret. It returns an error (never panics) on
 // tampered or otherwise invalid input.
-func DecryptSecret(encryptedHex, secretKey string) (string, error) {
+func (c *AppConfig) DecryptSecret(encryptedHex string) (string, error) {
 	if encryptedHex == "" {
 		return "", nil
 	}
@@ -1196,7 +1255,7 @@ func DecryptSecret(encryptedHex, secretKey string) (string, error) {
 		return "", fmt.Errorf("decrypt: failed to decode hex: %w", err)
 	}
 
-	key := getOrCreateAESKey(secretKey)
+	key := getOrCreateAESKey(c.SecretKey, c.SecretSalt)
 
 	block, err := aes.NewCipher(key[:])
 	if err != nil {

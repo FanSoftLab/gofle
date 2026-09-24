@@ -74,9 +74,10 @@ type Config struct {
 	KeyPath        string `json:"key_path,omitempty"`
 	KeyPassphrase  string `json:"key_passphrase,omitempty"`
 	RemoteFilePath string `json:"remote_file_path"`
-	// TLSMode selects the FTP transport security: "" (or "none") = plain FTP,
-	// "explicit" = FTPS with AUTH TLS on the control connection, "implicit" =
-	// TLS from the first byte of the control connection.
+// TLSMode selects the FTP transport security: "" (default) = "explicit" FTPS,
+// "explicit" = FTPS with AUTH TLS on the control connection, "implicit" =
+// TLS from the first byte of the control connection, "none" = plain FTP
+// (credentials sent in cleartext; not recommended).
 	TLSMode string `json:"tls_mode,omitempty"`
 	// KnownHostsPath points at the FTPS certificate trust store (one
 	// "host:port <sha256-fingerprint>" line per host). Defaults to
@@ -273,6 +274,8 @@ func WriteCertTrust(path, line string) error {
 // dialClient connects to the FTP server per cfg: plain, explicit FTPS, or
 // implicit FTPS. For FTPS the control connection uses InsecureSkipVerify with a
 // VerifyPeerCertificate that pins the server certificate (newCertVerifier).
+// Empty TLSMode defaults to "explicit" (FTPS) for security; use "none" to
+// explicitly opt in to plaintext FTP.
 func dialClient(cfg Config) (*ftp.ServerConn, error) {
 	port := cfg.Port
 	if port == 0 {
@@ -282,8 +285,15 @@ func dialClient(cfg Config) (*ftp.ServerConn, error) {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, port)
 	timeout := 30 * time.Second
 
-	switch cfg.TLSMode {
-	case "", "none":
+	tlsMode := cfg.TLSMode
+	if tlsMode == "" {
+		tlsMode = "explicit" // default to FTPS for security
+	}
+
+	switch tlsMode {
+	case "none":
+		slog.Warn("ftp: using plaintext FTP (no TLS); credentials sent in cleartext",
+			"host", cfg.Host, "port", port)
 		return ftp.Dial(addr, ftp.DialWithTimeout(timeout))
 	case "explicit", "implicit":
 		store := resolveCertStore(cfg)

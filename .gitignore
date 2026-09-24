@@ -14,8 +14,9 @@ nbproject
 .project
 .settings
 
-.git/*
-.kilo/*
+.git
+.kilo
+.gocache
 test_results.log
 
 # Frontend build output and dependencies

@@ -56,6 +56,11 @@ func newSSHSummary(cfg SSHConfig) *config.SSHConfigSummary {
 // connection so AcceptSSHHost can complete it after the user trusts the host.
 // The recent entry is only recorded after a successful open.
 func (a *App) OpenSSHFile(sshCfg SSHConfig) (*FileStatsResponse, error) {
+	// Rate limiting check
+	if err := a.checkConnRateLimit(sshCfg.Host, sshCfg.Port); err != nil {
+		return nil, fmt.Errorf("ssh connection rate limited: %w", err)
+	}
+
 	sshPathDisplay := fmt.Sprintf("ssh://%s:%d%s", sshCfg.Host, sshCfg.Port, sshCfg.RemoteFilePath)
 
 	// 1 tab = 1 file: reopening the same remote file focuses the existing tab
@@ -68,6 +73,7 @@ func (a *App) OpenSSHFile(sshCfg SSHConfig) (*FileStatsResponse, error) {
 
 	stats, err := a.openSSHStream(sshCfg, sshPathDisplay, sshSummary, "")
 	if err != nil {
+		a.recordConnFailure(sshCfg.Host, sshCfg.Port)
 		if hkErr, ok := errors.AsType[*ssh.HostKeyUnknownError](err); ok {
 			// Stash the connection + the known_hosts line so AcceptSSHHost can
 			// persist the host and retry once the user trusts it.
@@ -79,6 +85,8 @@ func (a *App) OpenSSHFile(sshCfg SSHConfig) (*FileStatsResponse, error) {
 		// Failures are already logged inside openSSHStream.
 		return nil, err
 	}
+
+	a.recordConnSuccess(sshCfg.Host, sshCfg.Port)
 
 	// Only record the entry in the recent list after a real, successful open.
 	// This avoids persisting connections that failed (e.g. an unknown host the
@@ -114,6 +122,11 @@ func (a *App) AcceptSSHHost(host string) (*FileStatsResponse, error) {
 		return nil, fmt.Errorf("no pending SSH host to accept: %s", host)
 	}
 
+	// Rate limiting check (use host from config which includes port)
+	if err := a.checkConnRateLimit(cfg.Host, cfg.Port); err != nil {
+		return nil, fmt.Errorf("ssh connection rate limited: %w", err)
+	}
+
 	if err := ssh.WriteKnownHost(a.cfg.KnownHostsPath(), line); err != nil {
 		return nil, fmt.Errorf("failed to persist trusted host key: %w", err)
 	}
@@ -125,8 +138,11 @@ func (a *App) AcceptSSHHost(host string) (*FileStatsResponse, error) {
 
 	stats, err := a.openSSHStream(cfg, sshPathDisplay, sshSummary, "")
 	if err != nil {
+		a.recordConnFailure(cfg.Host, cfg.Port)
 		return nil, fmt.Errorf("failed to reopen %s after trusting host key: %w", sshPathDisplay, err)
 	}
+
+	a.recordConnSuccess(cfg.Host, cfg.Port)
 
 	// Persist only after a successful open (B4). AddRecentFile already writes
 	// recent.json, so the redundant full Save() is dropped. A failed recent-list
@@ -146,6 +162,11 @@ func (a *App) AcceptSSHHost(host string) (*FileStatsResponse, error) {
 // pendingSSH* maps OpenSSHFile uses, so AckSSHHost can persist the key and the
 // frontend can re-list afterwards.
 func (a *App) ListSSHFiles(sshCfg SSHConfig, path string) ([]ssh.DirEntry, error) {
+	// Rate limiting check
+	if err := a.checkConnRateLimit(sshCfg.Host, sshCfg.Port); err != nil {
+		return nil, fmt.Errorf("ssh connection rate limited: %w", err)
+	}
+
 	cfg := ssh.Config{
 		Host:           sshCfg.Host,
 		Port:           sshCfg.Port,

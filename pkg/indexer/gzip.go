@@ -10,6 +10,11 @@ import (
 // isGzipMagic reports whether the file starts with the gzip magic bytes
 // (0x1f 0x8b).
 func isGzipMagic(path string) (bool, error) {
+	// Validate path to prevent path traversal via symlinks
+	if err := validateFilePath(path); err != nil {
+		return false, err
+	}
+
 	f, err := os.Open(path) //nolint:gosec // user-provided path is intended
 	if err != nil {
 		return false, err
@@ -33,6 +38,11 @@ func isGzipMagic(path string) (bool, error) {
 // no-op cleanup. The caller owns cleanup and must invoke it when the indexed
 // view is closed; it removes the temp file only for decompressed inputs.
 func EnsureDecompressed(path string) (indexedPath string, cleanup func(), err error) {
+	// Validate path to prevent path traversal via symlinks
+	if err := validateFilePath(path); err != nil {
+		return "", nil, err
+	}
+
 	gz, err := isGzipMagic(path)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to probe %s: %w", path, err)
@@ -59,8 +69,12 @@ func EnsureDecompressed(path string) (indexedPath string, cleanup func(), err er
 		return "", nil, fmt.Errorf("failed to create temp file for decompression: %w", err)
 	}
 
+	// Limit decompression to 10GB to prevent zip bombs
+	const maxDecompressedSize = 10 * 1024 * 1024 * 1024
+	limitedReader := io.LimitReader(zr, maxDecompressedSize)
+
 	buf := make([]byte, 1024*1024)
-	if _, err := io.CopyBuffer(tmp, zr, buf); err != nil { //nolint:gosec // decompression is bounded by the caller on trusted log files
+	if _, err := io.CopyBuffer(tmp, limitedReader, buf); err != nil { //nolint:gosec // decompression is bounded by the caller on trusted log files
 		_ = tmp.Close()
 		_ = os.Remove(tmp.Name())
 

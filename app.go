@@ -159,8 +159,28 @@ type App struct {
 	// ftpInflight collapses concurrent ftp opens of the SAME remote target into
 	// one connection, exactly like sshInflight does for ssh.
 	ftpInflight singleflight.Group
-	version     string
+	// connAttempts tracks failed connection attempts per host for rate limiting.
+	// Key is "host:port", value is attempt info.
+	connAttemptsMu sync.Mutex
+	connAttempts   map[string]*connAttemptInfo
+	version        string
 }
+
+// connAttemptInfo tracks connection attempts for rate limiting.
+type connAttemptInfo struct {
+	count     int
+	lastAttempt time.Time
+	lockedUntil time.Time
+}
+
+const (
+	// maxConnAttempts is the maximum number of failed attempts before rate limiting kicks in.
+	maxConnAttempts = 5
+	// connAttemptWindow is the time window for counting attempts.
+	connAttemptWindow = 15 * time.Minute
+	// connLockoutDuration is how long to lock out after max attempts exceeded.
+	connLockoutDuration = 5 * time.Minute
+)
 
 // NewApp constructs the application, loading persisted configuration. Returns
 // an error if the config directory or secret key cannot be initialized.
@@ -178,6 +198,7 @@ func NewApp() (*App, error) {
 		pendingSSHConfig: make(map[string]SSHConfig),
 		pendingFTPHost:   make(map[string]string),
 		pendingFTPConfig: make(map[string]remote.Config),
+		connAttempts:     make(map[string]*connAttemptInfo),
 		version:          "dev",
 	}, nil
 }
@@ -236,6 +257,85 @@ func closeRemoteStreamerAsync(s remote.Streamer) {
 // GetVersion returns the application version.
 func (a *App) GetVersion() string {
 	return a.version
+}
+
+// checkConnRateLimit checks if a connection to the given host:port is allowed.
+// Returns an error if rate limited, otherwise returns nil and records the attempt start.
+func (a *App) checkConnRateLimit(host string, port int) error {
+	key := fmt.Sprintf("%s:%d", host, port)
+	now := time.Now()
+
+	a.connAttemptsMu.Lock()
+	defer a.connAttemptsMu.Unlock()
+
+	info, exists := a.connAttempts[key]
+	if !exists {
+		a.connAttempts[key] = &connAttemptInfo{
+			count:       1,
+			lastAttempt: now,
+		}
+		return nil
+	}
+
+	// Check if locked out
+	if now.Before(info.lockedUntil) {
+		return fmt.Errorf("connection to %s rate limited: try again after %v",
+			key, time.Until(info.lockedUntil).Round(time.Second))
+	}
+
+	// Reset count if outside the window
+	if now.Sub(info.lastAttempt) > connAttemptWindow {
+		info.count = 1
+		info.lastAttempt = now
+		return nil
+	}
+
+	// Increment count
+	info.count++
+	info.lastAttempt = now
+
+	if info.count > maxConnAttempts {
+		info.lockedUntil = now.Add(connLockoutDuration)
+		return fmt.Errorf("too many failed connection attempts to %s: locked for %v",
+			key, connLockoutDuration)
+	}
+
+	return nil
+}
+
+// recordConnFailure records a failed connection attempt for rate limiting.
+func (a *App) recordConnFailure(host string, port int) {
+	key := fmt.Sprintf("%s:%d", host, port)
+	now := time.Now()
+
+	a.connAttemptsMu.Lock()
+	defer a.connAttemptsMu.Unlock()
+
+	info, exists := a.connAttempts[key]
+	if !exists {
+		a.connAttempts[key] = &connAttemptInfo{
+			count:       1,
+			lastAttempt: now,
+			lockedUntil: now.Add(connLockoutDuration),
+		}
+		return
+	}
+
+	info.count++
+	info.lastAttempt = now
+	if info.count > maxConnAttempts {
+		info.lockedUntil = now.Add(connLockoutDuration)
+	}
+}
+
+// recordConnSuccess resets the attempt count on successful connection.
+func (a *App) recordConnSuccess(host string, port int) {
+	key := fmt.Sprintf("%s:%d", host, port)
+
+	a.connAttemptsMu.Lock()
+	defer a.connAttemptsMu.Unlock()
+
+	delete(a.connAttempts, key)
 }
 
 // Shutdown is the Wails lifecycle hook: it stops the tail poller (idempotent via

@@ -28,7 +28,7 @@ func (a *App) GetRecentFiles() ([]config.RecentFileItem, error) {
 			// can be reopened. If decryption fails the field is left empty and the
 			// UI prompts the user to re-enter it.
 			sshCopy := *cp.SSH
-			if dec, err := config.DecryptSecret(sshCopy.Username, a.cfg.SecretKey); err == nil {
+			if dec, err := a.cfg.DecryptSecret(sshCopy.Username); err == nil {
 				sshCopy.Username = dec
 			} else {
 				// Leaving the ciphertext here would send it to the SSH server
@@ -36,13 +36,13 @@ func (a *App) GetRecentFiles() ([]config.RecentFileItem, error) {
 				sshCopy.Username = ""
 			}
 
-			if dec, err := config.DecryptSecret(sshCopy.Password, a.cfg.SecretKey); err == nil {
+			if dec, err := a.cfg.DecryptSecret(sshCopy.Password); err == nil {
 				sshCopy.Password = dec
 			} else {
 				sshCopy.Password = ""
 			}
 
-			if dec, err := config.DecryptSecret(sshCopy.KeyPassphrase, a.cfg.SecretKey); err == nil {
+			if dec, err := a.cfg.DecryptSecret(sshCopy.KeyPassphrase); err == nil {
 				sshCopy.KeyPassphrase = dec
 			} else {
 				sshCopy.KeyPassphrase = ""

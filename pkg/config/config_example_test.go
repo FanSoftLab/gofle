@@ -98,11 +98,11 @@ func ExampleAppConfig_SaveSession() {
 }
 
 func Example_encryptDecryptSecret() {
-	key := "my-secret-key-32-bytes-long!!"
+	cfg := &AppConfig{SecretKey: "my-secret-key-32-bytes-long!!", SecretSalt: "00000000000000000000000000000000"}
 	plain := "super-secret-password"
 
-	enc, _ := EncryptSecret(plain, key)
-	dec, _ := DecryptSecret(enc, key)
+	enc, _ := cfg.EncryptSecret(plain)
+	dec, _ := cfg.DecryptSecret(enc)
 
 	fmt.Printf("Encrypted: [varies]...\n")
 	fmt.Printf("Decrypted: %s\n", dec)

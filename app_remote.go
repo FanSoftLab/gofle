@@ -84,6 +84,11 @@ func (a *App) OpenRemoteFile(cfg remote.Config) (*FileStatsResponse, error) {
 			RemoteFilePath: cfg.RemoteFilePath,
 		})
 	case remote.ProtocolFTP:
+		// Rate limiting check
+		if err := a.checkConnRateLimit(cfg.Host, cfg.Port); err != nil {
+			return nil, fmt.Errorf("ftp connection rate limited: %w", err)
+		}
+
 		displayPath := remotePathDisplay(remote.ProtocolFTP, cfg.Host, cfg.Port, cfg.RemoteFilePath)
 		if existing := a.findOpenTab(displayPath); existing != nil {
 			return a.reuseOpenTab(existing)
@@ -116,23 +121,26 @@ func (a *App) OpenRemoteFile(cfg remote.Config) (*FileStatsResponse, error) {
 			TLSMode:        cfg.TLSMode,
 		}
 
-		stats, err := a.openFTPStream(ftpCfg, displayPath, summary, "")
-		if err != nil {
-			var certErr *ftp.CertUnknownError
-			if errors.As(err, &certErr) {
-				// Stash the connection + the cert store line so AckFTPCert can
-				// persist the certificate and the frontend can re-open/re-list.
-				a.mu.Lock()
-				a.pendingFTPHost[certErr.Host] = certErr.Line
-				a.pendingFTPConfig[certErr.Host] = cfg
-				a.mu.Unlock()
-			}
-
-			return nil, err
+stats, err := a.openFTPStream(ftpCfg, displayPath, summary, "")
+	if err != nil {
+		a.recordConnFailure(cfg.Host, cfg.Port)
+		var certErr *ftp.CertUnknownError
+		if errors.As(err, &certErr) {
+			// Stash the connection + the cert store line so AckFTPCert can
+			// persist the certificate and the frontend can re-open/re-list.
+			a.mu.Lock()
+			a.pendingFTPHost[certErr.Host] = certErr.Line
+			a.pendingFTPConfig[certErr.Host] = cfg
+			a.mu.Unlock()
 		}
 
-		// Only record the entry in the recent list after a real, successful
-		// open (same policy as OpenSSHFile).
+		return nil, err
+	}
+
+	a.recordConnSuccess(cfg.Host, cfg.Port)
+
+	// Only record the entry in the recent list after a real, successful
+	// open (same policy as OpenSSHFile).
 		if err := a.cfg.AddRecentFile(displayPath, 0, true, summary); err != nil {
 			slog.Warn("failed to persist recent FTP entry", "path", displayPath, "err", err)
 		}
@@ -336,6 +344,11 @@ func (a *App) ListRemoteFiles(cfg remote.Config, path string) ([]remote.DirEntry
 			RemoteFilePath: cfg.RemoteFilePath,
 		}, path)
 	case remote.ProtocolFTP:
+		// Rate limiting check
+		if err := a.checkConnRateLimit(cfg.Host, cfg.Port); err != nil {
+			return nil, fmt.Errorf("ftp connection rate limited: %w", err)
+		}
+
 		ftpCfg := ftp.Config{
 			Host:           cfg.Host,
 			Port:           cfg.Port,

@@ -11,10 +11,10 @@ import (
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
-	key := "test-secret-key-123"
+	cfg := &AppConfig{SecretKey: "test-secret-key-123", SecretSalt: "00000000000000000000000000000000"}
 	plain := "my-super-secret-password"
 
-	enc, err := EncryptSecret(plain, key)
+	enc, err := cfg.EncryptSecret(plain)
 	if err != nil {
 		t.Fatalf("EncryptSecret returned error: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		t.Fatal("ciphertext must not equal plaintext")
 	}
 
-	dec, err := DecryptSecret(enc, key)
+	dec, err := cfg.DecryptSecret(enc)
 	if err != nil {
 		t.Fatalf("DecryptSecret returned error: %v", err)
 	}
@@ -34,21 +34,23 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 }
 
 func TestDecryptTamperedFails(t *testing.T) {
-	key := "key"
+	cfg := &AppConfig{SecretKey: "key", SecretSalt: "00000000000000000000000000000000"}
 
-	enc, _ := EncryptSecret("hello", key)
-	if _, err := DecryptSecret(enc+"ff", key); err == nil {
+	enc, _ := cfg.EncryptSecret("hello")
+	if _, err := cfg.DecryptSecret(enc + "ff"); err == nil {
 		t.Fatal("expected error when decrypting tampered ciphertext")
 	}
 }
 
 func TestEmptySecret(t *testing.T) {
-	enc, _ := EncryptSecret("", "key")
+	cfg := &AppConfig{SecretKey: "key", SecretSalt: "00000000000000000000000000000000"}
+
+	enc, _ := cfg.EncryptSecret("")
 	if enc != "" {
 		t.Fatalf("empty plaintext should produce empty ciphertext, got %q", enc)
 	}
 
-	dec, _ := DecryptSecret("", "key")
+	dec, _ := cfg.DecryptSecret("")
 	if dec != "" {
 		t.Fatalf("empty ciphertext should produce empty plaintext, got %q", dec)
 	}
@@ -332,7 +334,7 @@ func TestAddRecentFileEncryptsSSHPassword(t *testing.T) {
 		t.Fatal("SSH password must be encrypted at rest, got plaintext")
 	}
 
-	dec, err := DecryptSecret(stored.Password, cfg.SecretKey)
+	dec, err := cfg.DecryptSecret(stored.Password)
 	if err != nil {
 		t.Fatalf("DecryptSecret failed: %v", err)
 	}
@@ -656,15 +658,17 @@ func TestPersistSavedSessionAtomicWrite(t *testing.T) {
 }
 
 func TestEncryptSSHSecretsNilInput(t *testing.T) {
-	result := encryptSSHSecrets(nil, "key")
+	cfg := &AppConfig{SecretKey: "key", SecretSalt: "00000000000000000000000000000000"}
+	result := cfg.encryptSSHSecrets(nil)
 	if result != nil {
 		t.Fatal("expected nil for nil input")
 	}
 }
 
 func TestEncryptSSHSecretsFailureBlanksField(t *testing.T) {
-	// With empty secret key, encryption still works (uses sha256 of empty string)
+	// With empty secret key, encryption still works (uses Argon2id of empty string)
 	// So we test that the function handles the case gracefully
+	cfg := &AppConfig{SecretKey: "", SecretSalt: "00000000000000000000000000000000"}
 	summary := &SSHConfigSummary{
 		Host:     "h",
 		Port:     22,
@@ -672,11 +676,11 @@ func TestEncryptSSHSecretsFailureBlanksField(t *testing.T) {
 		Password: "pass",
 	}
 
-	result := encryptSSHSecrets(summary, "")
+	result := cfg.encryptSSHSecrets(summary)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// With empty key, encryption still succeeds (uses sha256 of "")
+	// With empty key, encryption still succeeds (uses Argon2id of "")
 	// So fields should be encrypted, not blanked
 	if result.Username == "" {
 		t.Fatal("expected encrypted Username")
@@ -688,13 +692,15 @@ func TestEncryptSSHSecretsFailureBlanksField(t *testing.T) {
 }
 
 func TestDecryptSSHSecretsNilInput(t *testing.T) {
-	result := decryptSSHSecrets(nil, "key")
+	cfg := &AppConfig{SecretKey: "key", SecretSalt: "00000000000000000000000000000000"}
+	result := cfg.decryptSSHSecrets(nil)
 	if result != nil {
 		t.Fatal("expected nil for nil input")
 	}
 }
 
 func TestDecryptSSHSecretsFailureLeavesEmpty(t *testing.T) {
+	cfg := &AppConfig{SecretKey: "key", SecretSalt: "00000000000000000000000000000000"}
 	summary := &SSHConfigSummary{
 		Host:     "h",
 		Port:     22,
@@ -702,7 +708,7 @@ func TestDecryptSSHSecretsFailureLeavesEmpty(t *testing.T) {
 		Password: "encrypted",
 	}
 
-	result := decryptSSHSecrets(summary, "wrong-key")
+	result := cfg.decryptSSHSecrets(summary)
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -718,7 +724,7 @@ func TestDecryptSSHSecretsFailureLeavesEmpty(t *testing.T) {
 }
 
 func TestAddRecentFileCapAt20(t *testing.T) {
-	cfg := &AppConfig{configDir: t.TempDir(), SecretKey: "key", RecentFiles: []RecentFileItem{}}
+	cfg := &AppConfig{configDir: t.TempDir(), SecretKey: "key", SecretSalt: "00000000000000000000000000000000", RecentFiles: []RecentFileItem{}}
 	for i := range 25 {
 		cfg.AddRecentFile(fmt.Sprintf("file%d.log", i), int64(i), false, nil)
 	}
