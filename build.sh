@@ -12,6 +12,7 @@ MODE="prod"
 TARGET_OS="linux"
 TARGET_ARCH="amd64"
 BUILD_TARGET="all"
+EXPLICIT_VERSION=""
 
 usage() {
     cat <<EOF
@@ -23,6 +24,8 @@ Usage: $0 [options]
   -arch <target>      amd64 | arm64 | all           (default: amd64)
   -target <target>    cli | gui | all               (default: all)
   -cli-name <name>    CLI binary name (default: gofle)
+  -v, --version <ver> Explicit version string (SemVer, e.g. 2.1.0). If omitted,
+                      derived from git: tag (v2.1.0) or short commit (dev-abc123).
   -h, --help          Show this help
 
 Notes:
@@ -42,6 +45,7 @@ while [[ $# -gt 0 ]]; do
         -arch) TARGET_ARCH="$2"; shift 2;;
         -target) BUILD_TARGET="$2"; shift 2;;
         -cli-name) CLI_APP_NAME="$2"; shift 2;;
+        -v|--version) EXPLICIT_VERSION="$2"; shift 2;;
         -h|--help) usage; exit 0;;
         *) echo "Unknown argument: $1"; usage; exit 1;;
     esac
@@ -103,6 +107,40 @@ else
     MULTI=true
 fi
 
+# ─── Version derivation ────────────────────────────────────────────
+# Priority: 1) explicit -v/--version, 2) git tag (vX.Y.Z), 3) git describe (dev-<commit>)
+# The version is injected via -ldflags into both CLI (main.version) and GUI (GoFLE/pkg/version.Version)
+if [ -n "$EXPLICIT_VERSION" ]; then
+    CLI_VERSION="$EXPLICIT_VERSION"
+    BUILD_SOURCE="release"
+else
+    # Try to get the latest semver tag (vX.Y.Z)
+    TAG=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact-match 2>/dev/null || true)
+    if [ -n "$TAG" ]; then
+        CLI_VERSION="${TAG#v}"  # strip leading 'v'
+        BUILD_SOURCE="tag"
+    else
+        # No exact semver tag: use git describe for dev builds
+        DESCRIBE=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+        if [[ "$DESCRIBE" == v[0-9]*.[0-9]*.[0-9]* ]]; then
+            # It's a tag but not exact match (we're past the tag)
+            CLI_VERSION="dev-${DESCRIBE#v}"
+        else
+            CLI_VERSION="dev-${DESCRIBE}"
+        fi
+        BUILD_SOURCE="local"
+    fi
+fi
+
+# Build metadata
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+echo "  version:   $CLI_VERSION"
+echo "  source:    $BUILD_SOURCE"
+echo "  time:      $BUILD_TIME"
+echo "  commit:    $BUILD_COMMIT"
+
 CDPATH= cd -- "$(dirname -- "$0")" && pwd > /dev/null
 
 rm -rf .buildout 2>/dev/null || true
@@ -146,11 +184,13 @@ OUT_DIR=".buildout"
 rm -rf "$OUT_DIR" 2>/dev/null || true
 
 export DOCKER_BUILDKIT=1
-CLI_VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 
 docker build \
   --build-arg RUN_TESTS="$RUN_TESTS" \
   --build-arg GOFILE_VERSION="$CLI_VERSION" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  --build-arg BUILD_COMMIT="$BUILD_COMMIT" \
+  --build-arg BUILD_SOURCE="$BUILD_SOURCE" \
   --build-arg APP_NAME="$APP_NAME" \
   --build-arg BUILD_MODE="$MODE" \
   --build-arg PLATFORMS="$PLATFORMS" \

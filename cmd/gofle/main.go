@@ -8,6 +8,7 @@ import (
 	"GoFLE/cmd/gofle/internal/shared"
 	"GoFLE/pkg/config"
 	"GoFLE/pkg/logging"
+	"GoFLE/pkg/version"
 	"context"
 	"errors"
 	"fmt"
@@ -17,19 +18,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is injected at build time via
-// -ldflags "-X main.version=<ver>" (see Dockerfile/build.sh); "dev" is the
-// fallback for plain `go build`. Note: the linker matches the main package as
-// "main" here — the full import path does not inject.
-var version = "dev"
-
 var versionCmd = &cobra.Command{
 	Use:          "version",
 	Short:        "Print the gofle version",
 	Args:         cmds.UsageArgs(cobra.NoArgs),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "gofle %s\n", version)
+		info := version.Get()
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "gofle %s\n", info.String())
 		return nil
 	},
 }
@@ -111,13 +107,15 @@ func init() {
 	// Check for --version/-v before command execution
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		if versionFlag, _ := cmd.Flags().GetBool("version"); versionFlag {
-			_, _ = fmt.Fprintf(os.Stdout, "gofle %s\n", version)
+			info := version.Get()
+			_, _ = fmt.Fprintf(os.Stdout, "gofle %s\n", info.String())
 
 			os.Exit(0)
 		}
 
 		if versionShort, _ := cmd.Flags().GetBool("version-short"); versionShort {
-			_, _ = fmt.Fprintf(os.Stdout, "gofle %s\n", version)
+			info := version.Get()
+			_, _ = fmt.Fprintf(os.Stdout, "gofle %s\n", info.String())
 
 			os.Exit(0)
 		}

@@ -9,6 +9,7 @@ import (
 	"GoFLE/pkg/remote"
 	"GoFLE/pkg/search"
 	"GoFLE/pkg/ssh"
+	"GoFLE/pkg/version"
 	"context"
 	"errors"
 	"fmt"
@@ -163,7 +164,6 @@ type App struct {
 	// Key is "host:port", value is attempt info.
 	connAttemptsMu sync.Mutex
 	connAttempts   map[string]*connAttemptInfo
-	version        string
 }
 
 // connAttemptInfo tracks connection attempts for rate limiting.
@@ -199,7 +199,6 @@ func NewApp() (*App, error) {
 		pendingFTPHost:   make(map[string]string),
 		pendingFTPConfig: make(map[string]remote.Config),
 		connAttempts:     make(map[string]*connAttemptInfo),
-		version:          "dev",
 	}, nil
 }
 
@@ -256,7 +255,7 @@ func closeRemoteStreamerAsync(s remote.Streamer) {
 
 // GetVersion returns the application version.
 func (a *App) GetVersion() string {
-	return a.version
+	return version.Get().String()
 }
 
 // checkConnRateLimit checks if a connection to the given host:port is allowed.

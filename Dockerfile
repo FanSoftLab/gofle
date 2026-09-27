@@ -13,6 +13,9 @@ ARG PLATFORMS=linux/amd64
 ARG MULTI=false
 ARG CLI_APP_NAME=gofle
 ARG GOFILE_VERSION=dev
+ARG BUILD_TIME=unknown
+ARG BUILD_COMMIT=unknown
+ARG BUILD_SOURCE=local
 ARG BUILD_TARGET=all
 
 FROM golang:1.26-bookworm AS builder
@@ -24,9 +27,15 @@ ARG PLATFORMS
 ARG MULTI
 ARG CLI_APP_NAME
 ARG GOFILE_VERSION
+ARG BUILD_TIME
+ARG BUILD_COMMIT
+ARG BUILD_SOURCE
 ARG BUILD_TARGET
 ARG TARGET_UID=0
 ARG TARGET_GID=0
+
+# Version ldflags for injection into binaries
+ARG VERSION_LDFLAGS="-X main.version=${GOFILE_VERSION} -X GoFLE/pkg/version.Version=${GOFILE_VERSION} -X GoFLE/pkg/version.BuildTime=${BUILD_TIME} -X GoFLE/pkg/version.BuildCommit=${BUILD_COMMIT} -X GoFLE/pkg/version.BuildSource=${BUILD_SOURCE}"
 
 # ---------- system packages ----------
 # Always install Node + Git.
@@ -128,10 +137,10 @@ RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
                     [ "$BUILD_MODE" = "dev" ] && FLAGS="-debug"; \
                     if [ "$FIRST" = "true" ]; then \
                         wails build $FLAGS -platform "$goos/$goarch" \
-                            -ldflags="-s -w" -tags "$TAGS" -o "$APP_NAME"; \
+                            -ldflags="${VERSION_LDFLAGS} -s -w" -tags "$TAGS" -o "$APP_NAME"; \
                     else \
                         wails build $FLAGS -platform "$goos/$goarch" -skipbindings \
-                            -ldflags="-s -w" -tags "$TAGS" -o "$APP_NAME"; \
+                            -ldflags="${VERSION_LDFLAGS} -s -w" -tags "$TAGS" -o "$APP_NAME"; \
                     fi; \
                     if [ -f "build/bin/$APP_NAME" ]; then \
                         mv "build/bin/$APP_NAME" "build/bin/${APP_NAME}-linux-${goarch}"; \
@@ -155,10 +164,10 @@ RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
                     export CGO_ENABLED=1; \
                     if [ "$FIRST" = "true" ]; then \
                         wails build $FLAGS -platform "$goos/$goarch" \
-                            -ldflags="-s -w -H windowsgui" -tags "$TAGS" -o "$APP_NAME"; \
+                            -ldflags="${VERSION_LDFLAGS} -s -w -H windowsgui" -tags "$TAGS" -o "$APP_NAME"; \
                     else \
                         wails build $FLAGS -platform "$goos/$goarch" -skipbindings \
-                            -ldflags="-s -w -H windowsgui" -tags "$TAGS" -o "$APP_NAME"; \
+                            -ldflags="${VERSION_LDFLAGS} -s -w -H windowsgui" -tags "$TAGS" -o "$APP_NAME"; \
                     fi; \
                     if [ -f "build/bin/${APP_NAME}.exe" ]; then \
                         mv "build/bin/${APP_NAME}.exe" "build/bin/${APP_NAME}-windows-${goarch}.exe"; \
@@ -194,7 +203,7 @@ RUN if [ "$BUILD_TARGET" = "cli" ] || [ "$BUILD_TARGET" = "all" ]; then \
             echo " CLI  →  $goos/$goarch  →  $out"; \
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
                 go build -buildvcs=false \
-                    -ldflags="-s -w -X main.version=${GOFILE_VERSION}" \
+                    -ldflags="${VERSION_LDFLAGS} -s -w" \
                     -o "$out" ./cmd/gofle; \
         done; \
     fi
