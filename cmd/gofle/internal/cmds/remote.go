@@ -113,8 +113,8 @@ func resolveRemoteHost(positional, hostFlag, username string) (host, user string
 // `gofle ftp`. proto is "ssh" or "ftp" (remote.ProtocolSSH / remote.ProtocolFTP).
 // The --remote flag is OPTIONAL: when omitted, an interactive directory browser
 // is launched so the user can pick a file; the chosen path then drives the usual
-// view/dump flow. A password is read interactively (from /dev/tty, no echo) when
-// auth is password-based and --password is empty.
+// view/dump flow. Password auth always prompts interactively on the terminal
+// (no echo, no --password flag) so the secret never appears in shell history.
 func runRemote(cmd *cobra.Command, proto string, args []string) error {
 	flags := cmd.Flags()
 
@@ -139,8 +139,9 @@ func runRemote(cmd *cobra.Command, proto string, args []string) error {
 
 	remotePath, _ := flags.GetString("remote")
 	keyPath, _ := flags.GetString("key")
-	password, _ := flags.GetString("password")
-	view, _ := flags.GetBool("view")
+	dump, _ := flags.GetBool("dump")
+	// --view is the default; --dump opts into printing to stdout instead.
+	view := !dump
 	insecure, _ := flags.GetBool("insecure-accept-host-key")
 	tlsMode, _ := flags.GetString("tls")
 
@@ -165,7 +166,7 @@ func runRemote(cmd *cobra.Command, proto string, args []string) error {
 		Port:           port,
 		Username:       username,
 		AuthType:       authType,
-		Password:       password,
+		Password:       "",
 		KeyPath:        keyPath,
 		KeyPassphrase:  "",
 		RemoteFilePath: remotePath,
@@ -178,10 +179,20 @@ func runRemote(cmd *cobra.Command, proto string, args []string) error {
 		rcfg.KeyPassphrase = ""
 	}
 
+	// Password auth: always prompt interactively on the terminal (no echo).
+	// There is intentionally no --password flag so the secret never appears
+	// in shell history or process listings.
+	if rcfg.AuthType == authTypePassword {
+		pw, err := readPasswordTTY("Password: ")
+		if err != nil {
+			return err
+		}
+		rcfg.Password = pw
+	}
+
 	// Optional interactive directory browser: pick a remote file when --remote
-	// is not given. The browser reuses the resolved credentials (no re-prompt),
-	// so pickRemotePath reads the password first if password auth is in play and
-	// writes it back into rcfg for the streaming connection below.
+	// is not given. The browser reuses the already-resolved credentials
+	// (including any password we just prompted for), so no second prompt.
 	if rcfg.RemoteFilePath == "" {
 		chosen, perr := pickRemotePath(ctx, cmd, &rcfg, insecure, paths)
 		if perr != nil {
@@ -246,19 +257,9 @@ func remoteAuthType(proto, keyPath string) (string, error) {
 }
 
 // pickRemotePath runs the interactive directory browser and returns the selected
-// remote file path. A password needed for the browse connection is prompted for
-// here and written back into rcfg so the subsequent streaming connection reuses
-// it instead of asking twice.
+// remote file path. Password (if needed) has already been prompted for and
+// stored in rcfg by the caller, so the browse connection reuses it.
 func pickRemotePath(ctx context.Context, cmd *cobra.Command, rcfg *remote.Config, insecure bool, paths remotePaths) (string, error) {
-	if rcfg.AuthType == authTypePassword && rcfg.Password == "" {
-		pw, err := readPasswordTTY("Password: ")
-		if err != nil {
-			return "", err
-		}
-
-		rcfg.Password = pw
-	}
-
 	listCfg := *rcfg
 	listCfg.RemoteFilePath = ""
 

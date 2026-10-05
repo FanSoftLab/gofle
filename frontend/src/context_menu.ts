@@ -18,6 +18,28 @@ export class ContextMenu {
         this.ctx.ctxMenuFilter.classList.add('hidden');
     };
 
+    /** Singular/plural labels for copy items based on how many lines are selected. */
+    private updateCopyLabels(count: number) {
+        const plural = count > 1;
+        const lineKey = plural ? 'ctx_copy_line_plural' : 'ctx_copy_line';
+        const numKey = plural ? 'ctx_copy_numbered_plural' : 'ctx_copy_numbered';
+
+        const setLabel = (itemId: string, key: string) => {
+            const item = document.getElementById(itemId);
+            const span = item?.querySelector('span');
+            if (span) span.textContent = t(key);
+        };
+
+        setLabel('ctx-main-copy', lineKey);
+        setLabel('ctx-main-copy-numbered', numKey);
+        setLabel('ctx-filter-copy', lineKey);
+    }
+
+    private selectionCount(range: { start: number; end: number } | null): number {
+        if (!range) return 0;
+        return Math.max(0, range.end - range.start + 1);
+    }
+
     private initHandlers = () => {
         const { ctxMenuMain, ctxMenuFilter, mainScroller, filterScroller, searchInput } = this.ctx;
 
@@ -47,6 +69,7 @@ export class ContextMenu {
                     (this as any)._selRange = null;
                     (this as any)._selScroller = null;
                 }
+                this.updateCopyLabels(this.selectionCount((this as any)._selRange));
                 ctxMenuMain.style.left = `${e.clientX}px`;
                 ctxMenuMain.style.top = `${e.clientY}px`;
                 ctxMenuMain.classList.remove('hidden');
@@ -79,6 +102,7 @@ export class ContextMenu {
                     (this as any)._selRange = null;
                     (this as any)._selScroller = null;
                 }
+                this.updateCopyLabels(this.selectionCount((this as any)._selRange));
                 ctxMenuFilter.style.left = `${e.clientX}px`;
                 ctxMenuFilter.style.top = `${e.clientY}px`;
                 ctxMenuFilter.classList.remove('hidden');
@@ -109,30 +133,41 @@ export class ContextMenu {
         document.getElementById('ctx-main-copy')?.addEventListener('click', async () => {
             const scroller = ((this as any)._selScroller as typeof mainScroller) || mainScroller;
             const range = (this as any)._selRange as { start: number; end: number } | null;
+            const count = this.selectionCount(range);
+            const label = count > 1 ? t('ctx_copy_line_plural') : t('ctx_copy_line');
             if (range) {
                 const ok = await scroller.copySelection();
-                if (ok) showToast(t('ctx_copy_line'), 'info', 1500);
+                if (ok) showToast(label, 'info', 1500);
                 else if (this.selectedLineText) {
                     await navigator.clipboard.writeText(this.selectedLineText);
-                    showToast(t('ctx_copy_line'), 'info', 1500);
+                    showToast(label, 'info', 1500);
                 }
                 return;
             }
             if (this.selectedLineText) {
                 await navigator.clipboard.writeText(this.selectedLineText);
-                showToast(t('ctx_copy_line'), 'info', 1500);
+                showToast(label, 'info', 1500);
             }
         });
 
         document.getElementById('ctx-main-copy-numbered')?.addEventListener('click', async () => {
-            if (this.selectedLineText && (this as any)._selRange?.start === (this as any)._selRange?.end) {
-                await navigator.clipboard.writeText(`${this.selectedLineIndex + 1}: ${this.selectedLineText}`);
-                showToast(t('ctx_copy_numbered'), 'info', 2000);
-                return;
-            }
             const scroller = ((this as any)._selScroller as typeof mainScroller) || mainScroller;
-            const ok = await scroller.copySelection();
-            if (ok) showToast(t('ctx_copy_numbered'), 'info', 1500);
+            const range = (this as any)._selRange as { start: number; end: number } | null;
+            const count = this.selectionCount(range);
+            const label = count > 1 ? t('ctx_copy_numbered_plural') : t('ctx_copy_numbered');
+            if (range) {
+                // Ensure scroller selection matches the range captured at menu open.
+                scroller.setSelection(range.start, range.end);
+                const ok = await scroller.copySelectionNumbered();
+                if (ok) {
+                    showToast(label, 'info', 1500);
+                    return;
+                }
+            }
+            if (this.selectedLineText) {
+                await navigator.clipboard.writeText(`${this.selectedLineIndex + 1}: ${this.selectedLineText}`);
+                showToast(label, 'info', 2000);
+            }
         });
 
         document.getElementById('ctx-main-add-search')?.addEventListener('click', () => {
@@ -162,16 +197,19 @@ export class ContextMenu {
 
         document.getElementById('ctx-filter-copy')?.addEventListener('click', async () => {
             const scroller = ((this as any)._selScroller as typeof filterScroller) || filterScroller;
-            if ((this as any)._selRange) {
+            const range = (this as any)._selRange as { start: number; end: number } | null;
+            const count = this.selectionCount(range);
+            const label = count > 1 ? t('ctx_copy_line_plural') : t('ctx_copy_line');
+            if (range) {
                 const ok = await scroller.copySelection();
                 if (ok) {
-                    showToast(t('ctx_copy_line'), 'info', 1500);
+                    showToast(label, 'info', 1500);
                     return;
                 }
             }
             if (this.selectedLineText) {
                 await navigator.clipboard.writeText(this.selectedLineText);
-                showToast(t('ctx_copy_line'), 'info', 1500);
+                showToast(label, 'info', 1500);
             }
         });
 

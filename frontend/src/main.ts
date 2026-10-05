@@ -1029,15 +1029,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         const helpEl = document.getElementById('help-overlay');
 
         // Ctrl/Cmd shortcuts — available even when focus is in an input.
-        // Ctrl/Cmd+C: copy the current line selection from the active viewport.
-        // Skip when focus is in an input/textarea (native copy should win).
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        // Ctrl/Cmd+Shift+C: always copy whole selected line(s) (context-menu
+        // "Copy line"). Checked first so a residual native selection does not
+        // swallow the shortcut.
+        // Ctrl/Cmd+C: prefer native character/multi-line selection; if none,
+        // fall back to copying the whole line-range selection.
+        if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyC' || e.key.toLowerCase() === 'c')) {
             const tag = (e.target as HTMLElement | null)?.tagName;
             if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
                 const scroller =
                     document.activeElement?.closest('#viewport-filter')
                         ? filterScroller
-                        : mainScroller;
+                        : document.activeElement?.closest('#viewport-main')
+                            ? mainScroller
+                            : (document.getElementById('viewport-filter')?.contains(document.activeElement as Node)
+                                ? filterScroller
+                                : mainScroller);
+
+                if (e.shiftKey) {
+                    const range = scroller.getSelectedRange();
+                    if (range) {
+                        e.preventDefault();
+                        void scroller.copySelection().then((ok) => {
+                            if (ok) showToast(t('ctx_copy_line'), 'info', 1500);
+                        });
+                        return;
+                    }
+                    // No line range — nothing to do for Shift+C.
+                    return;
+                }
+
+                const nativeSel = window.getSelection()?.toString() ?? '';
+                if (nativeSel.length > 0) {
+                    // Let the browser copy the character / multi-line selection.
+                    return;
+                }
+
+                // No native text selection: copy whole selected line(s) if any.
                 const range = scroller.getSelectedRange();
                 if (range) {
                     e.preventDefault();

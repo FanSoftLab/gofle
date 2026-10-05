@@ -29,6 +29,8 @@ export const translations: Record<LangCode, Record<string, string>> = {
         empty_title: "Відкрийте лог, щоб почати",
         empty_sub: "Перетягніть файл сюди · Ctrl+O — відкрити · Ctrl+R — останні · / — пошук · \\ — AND · ssh://",
         ctx_copy_numbered: "Копіювати рядок з номером",
+        ctx_copy_numbered_plural: "Копіювати рядки з номерами",
+        ctx_copy_line_plural: "Копіювати рядки",
         help_title: "Гарячі клавиші",
         hk_search: "Фокус на пошук",
         hk_secondary: "AND-фільтр у результатах (як у CLI)",
@@ -144,6 +146,7 @@ export const translations: Record<LangCode, Record<string, string>> = {
         layout_left_title: "Зліва",
         layout_right_title: "Справа",
         ctx_copy_line: "Копіювати рядок",
+        // plural forms used dynamically in the context menu when selection > 1
         ctx_add_to_search: "Додати до пошуку",
         ctx_goto_line: "Перейти",
         ctx_save_search_results: "Зберегти результати пошуку",
@@ -187,6 +190,8 @@ export const translations: Record<LangCode, Record<string, string>> = {
         empty_title: "Open a log to get started",
         empty_sub: "Drop a file here · Ctrl+O open · Ctrl+R recents · / search · \\ AND · ssh://",
         ctx_copy_numbered: "Copy line with number",
+        ctx_copy_numbered_plural: "Copy lines with numbers",
+        ctx_copy_line_plural: "Copy lines",
         help_title: "Keyboard shortcuts",
         hk_search: "Focus search",
         hk_secondary: "AND-filter within results (same as CLI)",
@@ -325,6 +330,7 @@ export const translations: Record<LangCode, Record<string, string>> = {
         layout_left_title: "Left",
         layout_right_title: "Right",
         ctx_copy_line: "Copy Line",
+        // plural forms used dynamically in the context menu when selection > 1
         ctx_add_to_search: "Add to Search",
         ctx_goto_line: "Go to Line",
         ctx_save_search_results: "Save Search Results",

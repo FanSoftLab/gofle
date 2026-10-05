@@ -194,7 +194,7 @@ connection is retried. A certificate that *differs* from the stored one raises a
 
 > SSH and FTP recent entries are stored together (deduped by a canonical
 > `scheme://host:port/path` key with no credentials) and reopenable from both
-> the GUI's Recent list and the CLI (`gofle list`).
+> the GUI's Recent list and the CLI (`gofle recent`).
 
 ## Architecture
 
@@ -547,7 +547,7 @@ Enable **Save open tabs on exit** in Settings. Next launch, all previously open 
 `gofle` is a terminal companion to the GoFLE desktop app. It reuses the same
 pure-Go backend (`pkg/indexer`, `pkg/search`, and `pkg/remote` + `pkg/ssh` /
 `pkg/ftp`) to open a log — local or over `ssh://` / `ftp://` — in an interactive
-terminal viewer built with Bubbletea.
+terminal viewer built with Bubbletea, or to dump a remote file straight to stdout.
 
 ### Install / build
 
@@ -564,21 +564,45 @@ go build ./cmd/gofle     # produces ./gofle next to the repo root
 
 | Command | Description |
 | --- | --- |
-| `gofle [target]` | Open a local file or an `ssh://` / `ftp://` URL in the viewer. With no argument, prints help. |
+| `gofle [target]` | Open a local file or an `ssh://` / `ftp://` URL in the **interactive viewer**. With no argument, prints help. |
 | `gofle version` | Print the `gofle` version. |
-| `gofle ssh [flags] <host>` | Connect over SSH, stream a remote file, and `--dump` it to stdout (default) or `--view` it. Omit `--remote` to browse interactively. |
+| `gofle ssh [flags] <host>` | Connect over SSH and stream a remote file. Default: open the interactive viewer. Pass `--dump` to print to stdout. Omit `--remote` to browse the remote filesystem interactively. |
 | `gofle ftp [flags] <host>` | Same as `ssh`, but over FTP/FTPS. `--tls explicit\|implicit` selects FTPS. |
-| `gofle list` | Interactive recent-file picker (shared with the GUI). |
-| `gofle list open <n>` | Reopen recent entry `<n>` in the viewer (non-interactive). |
-| `gofle list clear` | Clear the recent list. |
+| `gofle recent` | Interactive recent-file picker (shared with the GUI). |
+| `gofle recent open <n>` | Reopen recent entry `<n>` in the viewer (non-interactive). |
+| `gofle recent clear` | Clear the recent list. |
 
-Common flags: `-H`/`--host [user@]host`, `-u`/`--user`, `-p`/`--port` (22 for
-SSH, 21 for FTP), `--remote <path>`, `--key <path>` (SSH only), `--password
-<pw>`, `--view` / `--dump`, and `--insecure-accept-host-key` to trust an unknown
-host key / FTPS certificate instead of aborting. On first contact with an
-unknown SSH host key or FTPS certificate, the CLI prints the fingerprint and
-prompts `Trust this host? (y/N)`; approving writes it to `known_hosts` /
-`ftp_certs` and retries the connection.
+**`--view` vs `--dump` (ssh / ftp only)**
+
+| Flag | Behaviour |
+| --- | --- |
+| *(none)* / `--view` | Stream the remote file and open it in the interactive terminal viewer (default). |
+| `--dump` | Stream the remote file and print it to stdout. Useful for piping: `gofle ssh host --remote /var/log/x.log --dump \| grep error`. |
+
+Root-level targets (`gofle /path/to/file`, `gofle ssh://…`, `gofle ftp://…`) always open the viewer; there is no dump mode for them.
+
+Common flags for `ssh` / `ftp`:
+
+| Flag | Description |
+| --- | --- |
+| `-H` / `--host [user@]host` | Remote host (alternative to the positional `<host>`). |
+| `-u` / `--user` | Username (overrides any `user@` embedded in the host). |
+| `-p` / `--port` | Port (default 22 for SSH, 21 for FTP). |
+| `--remote <path>` | Remote file path. Optional — omit to launch an interactive directory browser. |
+| `-k` / `--key <path>` | Private key for SSH public-key auth (ignored for FTP). |
+| `--view` | Open the streamed file in the interactive terminal viewer (default). |
+| `--dump` | Print the streamed file to stdout instead of opening the viewer. |
+| `--insecure-accept-host-key` | Trust an unknown SSH host key or FTPS certificate instead of aborting. |
+| `--tls` | FTP only: `""` (plain), `explicit`, or `implicit`. |
+
+**Password auth:** there is no `--password` flag. When password authentication is
+used (SSH without `--key`, or any FTP connection), the CLI always prompts on the
+terminal (`Password: `, no echo). The secret never appears in shell history or
+process listings.
+
+On first contact with an unknown SSH host key or FTPS certificate, the CLI
+prints the fingerprint and prompts `Trust this host? (y/N)`; approving writes
+it to `known_hosts` / `ftp_certs` and retries the connection.
 
 ### Interactive viewer keys
 

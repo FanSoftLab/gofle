@@ -32,23 +32,23 @@ var versionCmd = &cobra.Command{
 
 var rootCmd = &cobra.Command{
 	Use:   "gofle [target]",
-	Short: "GoFLE terminal companion — open logs locally or over SSH in an interactive viewer",
+	Short: "GoFLE terminal companion — open logs locally or over SSH/FTP in an interactive viewer",
 	Long: `GoFLE terminal viewer — open local or remote logs interactively.
 
   Same backend as the desktop app. Config is shared
-  (~/.config/gofle/settings.json): theme, language, pane layout, view mode.
+  (~/.config/GoFLE/): theme, language, pane layout, view mode, recent files.
 
 USAGE
-  gofle <file>                 open local log
-  gofle ssh://user@host/path   open over SSH
-  gofle ftp://user@host/path   open over FTP/FTPS
+  gofle <file>                 open local log in the viewer
+  gofle ssh://user@host/path   open over SSH in the viewer
+  gofle ftp://user@host/path   open over FTP/FTPS in the viewer
   gofle                        this help
 
 COMMANDS
-  ssh     connect via SSH and stream a remote file
-  ftp     connect via FTP/FTPS and stream a remote file
-  recent  open recent files (interactive picker)
-  version print version
+  ssh      connect via SSH, stream a remote file (viewer by default; --dump for stdout)
+  ftp      connect via FTP/FTPS, stream a remote file (viewer by default; --dump for stdout)
+  recent   open recent files (interactive picker)
+  version  print version
 
 VIEWER KEYS  (press ? inside the viewer for the full list)
   ↑↓ j k     scroll line          PgUp/PgDn  page
@@ -66,13 +66,14 @@ VIEW MODES  (saved in settings.json → view_mode)
 	Example: `  # local
   gofle /var/log/app.log
 
-  # remote URLs
+  # remote URLs (always open the interactive viewer)
   gofle ssh://user@host/var/log/sys.log
   gofle ftp://user@host/var/log/sys.log
 
-  # interactive remote session
-  gofle ssh host -u user -p 22 --remote /var/log/x.log --view
-  gofle ftp host -u user --tls explicit --remote /var/log/x.log --view
+  # ssh/ftp subcommands: default opens the viewer; add --dump for stdout
+  gofle ssh user@host --remote /var/log/x.log
+  gofle ssh user@host --remote /var/log/x.log --dump
+  gofle ftp user@host --tls explicit --remote /var/log/x.log
 
   # history
   gofle recent`,

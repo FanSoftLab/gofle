@@ -15,38 +15,51 @@ func init() {
 	SSHCmd.Flags().IntP("port", "p", 22, "remote port")
 	SSHCmd.Flags().String("remote", "", "remote file path (optional; omit to browse interactively)")
 	SSHCmd.Flags().StringP("key", "k", "", "path to private key for key auth")
-	SSHCmd.Flags().String("password", "", "password for password auth")
-	SSHCmd.Flags().Bool("view", false, "open the streamed file in the viewer")
-	SSHCmd.Flags().Bool("dump", false, "print the streamed file to stdout (default)")
+	SSHCmd.Flags().Bool("view", false, "open the streamed file in the interactive terminal viewer (default)")
+	SSHCmd.Flags().Bool("dump", false, "print the streamed file to stdout instead of opening the viewer")
 	SSHCmd.Flags().Bool("insecure-accept-host-key", false, "trust an unknown host key instead of aborting")
 }
 
 // SSHCmd connects to a remote host over SSH, streams a log file locally, and
-// either dumps it or opens it in the viewer. The host is taken from the
-// positional <host> argument or --host/-H (exactly one of the two). --remote is
-// OPTIONAL: when omitted an interactive directory browser is launched.
+// opens it in the interactive terminal viewer by default (or dumps to stdout
+// with --dump). The host is taken from the positional <host> argument or
+// --host/-H (exactly one of the two). --remote is OPTIONAL: when omitted an
+// interactive directory browser is launched.
 var SSHCmd = &cobra.Command{
 	Use:   "ssh [flags] <host>",
 	Short: "Connect to a remote host and stream a log file over SSH",
-	Long: `Connect to a remote host over SSH, stream a remote log file into a local
-temp file, and either print it (--dump) or open it in the viewer (--view).
+	Long: `Connect to a remote host over SSH and stream a remote log file into a local
+temp file.
+
+By default the file is opened in the interactive terminal viewer (--view).
+Pass --dump to print it to stdout instead (useful for piping).
 
 The host is taken from the positional <host> argument or from --host/-H
 (exactly one of the two). Both accept a "[user@]host" form; a username
 embedded there is used unless --user is given explicitly.
 
 --remote is optional. When omitted, an interactive browser lists the remote
-directories so you can pick a file. Connection details (user, port, key/
-password, remote path) may be supplied via flags; unknown host keys abort
-unless --insecure-accept-host-key is given.`,
+directories so you can pick a file.
+
+Authentication: use --key for public-key auth. For password auth the password
+is always read interactively from the terminal (no echo; never accepted as a
+flag, so it does not appear in shell history). Unknown host keys abort unless
+--insecure-accept-host-key is given.`,
 	Args:          UsageArgs(cobra.MaximumNArgs(1)),
 	RunE:          runSSH,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	Example: `  gofle ssh user@host -p 22 --remote /var/log/sys.log --view
-  gofle ssh --host host -u user -p 2222 --remote /var/log/x.log --dump
-  gofle ssh user@host --remote /var/log            # browse the directory
-  gofle ssh user@host --key ~/.ssh/id_ed25519 --remote /var/log/x.log --view`,
+	Example: `  # open in interactive terminal viewer (default; password prompted)
+  gofle ssh user@host --remote /var/log/sys.log
+
+  # dump to stdout (for piping)
+  gofle ssh user@host --remote /var/log/sys.log --dump
+
+  # browse remote directory, then open the chosen file in the viewer
+  gofle ssh user@host
+
+  # key auth + custom port
+  gofle ssh user@host -p 2222 --key ~/.ssh/id_ed25519 --remote /var/log/x.log`,
 }
 
 // resolveSSHHost is the SSH-specific alias of resolveRemoteHost: host resolution

@@ -481,39 +481,63 @@ export class VirtualScroller {
     }
   }
 
-  /** Copy the current line selection to the clipboard. Returns true if anything was copied. */
-  public async copySelection(): Promise<boolean> {
+  /** Fetch plain text lines for the current selection (no clipboard write). */
+  private async selectionLineTexts(): Promise<{ texts: string[]; start: number } | null> {
     const range = this.getSelectedRange();
-    if (!range) return false;
+    if (!range) return null;
 
     const count = range.end - range.start + 1;
+    // fetchCallback is defined to return lines for the logical window
+    // [start, start+count) in order (main log: absolute lines; filter pane:
+    // match ordinals). Do NOT key by line.index — on the filter pane that is
+    // the source log line number and would leave almost every part empty.
+    const lines = await this.fetchCallback(range.start, count);
+    const parts: string[] = new Array(count).fill('');
+    for (let i = 0; i < lines.length && i < count; i++) {
+      parts[i] = lines[i]?.content ?? '';
+    }
+    // Prefer any content already rendered in the DOM for visible rows (avoids
+    // a second IPC when the selection is on-screen).
+    for (let i = range.start; i <= range.end; i++) {
+      const node = this.renderedNodes.get(i);
+      if (!node) continue;
+      const textEl = node.querySelector('.log-text') as HTMLElement | null;
+      const domText = textEl?.textContent;
+      if (domText != null && domText.length > 0) {
+        parts[i - range.start] = domText;
+      }
+    }
+    return { texts: parts, start: range.start };
+  }
+
+  /** Copy the current line selection to the clipboard. Returns true if anything was copied. */
+  public async copySelection(): Promise<boolean> {
     try {
-      // fetchCallback is defined to return lines for the logical window
-      // [start, start+count) in order (main log: absolute lines; filter pane:
-      // match ordinals). Do NOT key by line.index — on the filter pane that is
-      // the source log line number and would leave almost every part empty.
-      const lines = await this.fetchCallback(range.start, count);
-      const parts: string[] = new Array(count).fill('');
-      for (let i = 0; i < lines.length && i < count; i++) {
-        parts[i] = lines[i]?.content ?? '';
-      }
-      // Prefer any content already rendered in the DOM for visible rows (avoids
-      // a second IPC when the selection is on-screen).
-      for (let i = range.start; i <= range.end; i++) {
-        const node = this.renderedNodes.get(i);
-        if (!node) continue;
-        const textEl = node.querySelector('.log-text') as HTMLElement | null;
-        const domText = textEl?.textContent;
-        if (domText != null && domText.length > 0) {
-          parts[i - range.start] = domText;
-        }
-      }
-      const text = parts.join('\n');
+      const data = await this.selectionLineTexts();
+      if (!data) return false;
+      const text = data.texts.join('\n');
       if (!text) return false;
       await navigator.clipboard.writeText(text);
       return true;
     } catch (err) {
       console.error('copySelection failed:', err);
+      return false;
+    }
+  }
+
+  /** Copy selection with 1-based line numbers prefixed ("N: text"). */
+  public async copySelectionNumbered(): Promise<boolean> {
+    try {
+      const data = await this.selectionLineTexts();
+      if (!data) return false;
+      const text = data.texts
+        .map((line, i) => `${data.start + i + 1}: ${line}`)
+        .join('\n');
+      if (!text) return false;
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (err) {
+      console.error('copySelectionNumbered failed:', err);
       return false;
     }
   }
@@ -545,7 +569,14 @@ export class VirtualScroller {
     }
   }
 
-  // Mouse event handlers for selection
+  // Mouse event handlers for selection.
+  // Line-range selection (our .selected style) coexists with native character
+  // selection inside .log-text. We never call preventDefault / removeAllRanges
+  // on a plain drag, so the browser can form a multi-line text selection that
+  // Ctrl+C copies. Line-range is still tracked in parallel for context menu
+  // and Ctrl+Shift+C (copy whole lines).
+  private dragStartIndex: number | null = null;
+
   private handleMouseDown = (e: MouseEvent, logicalIndex: number) => {
     if (e.button !== 0) return; // Only left click — right-click is context menu
 
@@ -553,33 +584,38 @@ export class VirtualScroller {
     if (this.viewport.tabIndex < 0) this.viewport.tabIndex = 0;
     this.viewport.focus({ preventScroll: true });
 
+    this.dragStartIndex = logicalIndex;
+    this.isSelecting = true;
+
     if (e.shiftKey && this.selectionAnchor !== null) {
+      // Shift+click extends the line range (for Ctrl+Shift+C / context menu).
+      // Do not touch the native selection — user may still want character copy.
       this.extendSelection(logicalIndex);
     } else {
       this.setSelection(logicalIndex, logicalIndex);
     }
-    this.isSelecting = true;
-    // Prevent native text selection while dragging line ranges; single-line
-    // still shows our .selected style which is more reliable in a virtual list.
-    e.preventDefault();
   }
 
   private handleMouseMove = (e: MouseEvent) => {
-    if (!this.isSelecting) return;
+    if (!this.isSelecting || this.dragStartIndex === null) return;
     // Prefer elementFromPoint so selection still extends when the pointer is
     // over padding / between rows / on the sticky content layer.
     const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
     const rowEl = (under?.closest('.log-row') || (e.target as HTMLElement)?.closest?.('.log-row')) as HTMLElement | null;
-    if (rowEl) {
-      const idx = parseInt(rowEl.dataset.index || '', 10);
-      if (!isNaN(idx)) {
-        this.extendSelection(idx);
-      }
+    if (!rowEl) return;
+    const idx = parseInt(rowEl.dataset.index || '', 10);
+    if (isNaN(idx)) return;
+
+    // Track multi-row line range for Ctrl+Shift+C / context menu, but leave
+    // the native Selection alone so multi-line text can be copied with Ctrl+C.
+    if (idx !== this.dragStartIndex) {
+      this.extendSelection(idx);
     }
   }
 
   private handleMouseUp = () => {
     this.isSelecting = false;
+    this.dragStartIndex = null;
   }
 
   // Keyboard support for selection
