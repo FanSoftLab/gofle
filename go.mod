@@ -9,7 +9,7 @@ require (
 	github.com/jlaffaye/ftp v0.2.4
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/spf13/cobra v1.10.2
-	github.com/wailsapp/wails/v2 v2.15.0
+	github.com/wailsapp/wails/v2 v2.16.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.45.0

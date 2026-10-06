@@ -1,3 +1,44 @@
+/* Bundled log fonts — embedded in the app, no system install required */
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('./assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('./assets/fonts/JetBrainsMono-Cyrillic.woff2') format('woff2');
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: 'Fira Code';
+    src: url('./assets/fonts/FiraCode-Regular.woff2') format('woff2');
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: 'Fira Code';
+    src: url('./assets/fonts/FiraCode-Cyrillic.woff2') format('woff2');
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: 'Cascadia Code';
+    src: url('./assets/fonts/CascadiaCode-Regular.woff2') format('woff2');
+    font-weight: 400 700;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* frontend/src/style.css */
 :root {
     --bg-primary: #1e1e1e;
@@ -1580,4 +1621,408 @@ kbd { background:#333; border-radius:4px; padding:2px 6px; font-family:inherit; 
 .viewport .log-row,
 .viewport {
     font-size: var(--log-font-size, 13px);
+}
+
+
+/* ========== Settings modal (tabbed) ========== */
+.settings-modal-content.modal-content,
+.settings-modal-content {
+    width: min(860px, 94vw) !important;
+    max-width: 860px !important;
+    min-width: min(640px, 94vw) !important;
+    height: min(620px, 88vh);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    gap: 0 !important;
+    overflow: hidden;
+}
+.settings-header {
+    padding: 16px 20px 0;
+}
+.settings-header h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+.settings-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    border-top: 1px solid var(--border-color);
+    overflow: hidden;
+}
+.settings-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 180px;
+    min-width: 160px;
+    padding: 12px 8px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+}
+.settings-tab {
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.settings-tab:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-color);
+}
+.settings-tab.active {
+    background: var(--accent-color);
+    color: #fff;
+}
+.settings-panels {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 16px 20px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.settings-panel {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.settings-panel.active {
+    display: flex;
+}
+.settings-modal-content .form-group {
+    margin-bottom: 12px;
+}
+.settings-modal-content .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.settings-modal-content .form-group input[type="number"],
+.settings-modal-content .form-group input[type="text"],
+.settings-modal-content .form-group select {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--bg-primary);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+}
+.settings-modal-content .form-group select {
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+                      linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 28px;
+}
+.settings-modal-content .form-group input:focus,
+.settings-modal-content .form-group select:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(14, 99, 156, 0.35);
+}
+.settings-modal-content .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+}
+.settings-modal-content .checkbox-group {
+    margin-bottom: 10px;
+}
+.settings-modal-content .check-label {
+    display: flex !important;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0 !important;
+    cursor: pointer;
+    color: var(--text-color) !important;
+    font-size: 13px !important;
+    line-height: 1.35;
+}
+.settings-modal-content .check-label input[type="checkbox"] {
+    width: 16px !important;
+    height: 16px;
+    min-width: 16px;
+    margin-top: 2px;
+    accent-color: var(--accent-color);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.settings-modal-content .modal-actions {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+}
+
+/* ========== Word wrap (log viewport) ========== */
+/* Variable-height rows: full text visible, no clipping. Height comes from JS. */
+body.word-wrap .log-row,
+.log-content-container.word-wrap .log-row {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    white-space: normal !important;
+    contain: none;
+    align-items: flex-start;
+    overflow: visible !important;
+}
+body.word-wrap .log-text,
+.log-content-container.word-wrap .log-text {
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    overflow: visible !important;
+}
+body.word-wrap .log-num,
+.log-content-container.word-wrap .log-num {
+    align-self: stretch;
+}
+body.word-wrap .viewport {
+    overflow-x: hidden !important;
+}
+body.word-wrap .log-content-container,
+body.word-wrap .log-scroll-spacer {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+}
+body.hide-line-numbers .log-num {
+    display: none !important;
+}
+:root {
+    --log-font-size: 13px;
+    --log-font-family: monospace;
+    --line-density: 1.35;
+}
+.log-row, .log-text, .log-num {
+    font-size: var(--log-font-size);
+    font-family: var(--log-font-family), monospace;
+}
+
+.settings-modal-content .field-hint {
+    margin: 4px 0 0 0;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-muted);
+    opacity: 0.95;
+}
+.settings-modal-content .checkbox-group .field-hint {
+    margin-left: 26px;
+}
+
+
+/* log font vars (forced) */
+:root {
+    --log-font-size: 13px;
+    --log-font-family: monospace;
+}
+.viewport .log-row,
+.viewport .log-text,
+.viewport .log-num,
+.log-content-container .log-row,
+.log-content-container .log-text,
+.log-content-container .log-num {
+    font-family: var(--log-font-family) !important;
+    font-size: var(--log-font-size) !important;
+}
+
+
+/* Dangerous setting marker — red triangle icon before the label */
+.settings-danger .check-label {
+    align-items: flex-start;
+}
+.settings-danger .danger-icon {
+    width: 14px;
+    height: 14px;
+    min-width: 14px;
+    margin-top: 2px;
+    color: #ef4444;
+    flex-shrink: 0;
+}
+body.theme-light .settings-danger .danger-icon {
+    color: #dc2626;
+}
+.settings-danger .field-hint {
+    color: #f87171;
+}
+body.theme-light .settings-danger .field-hint {
+    color: #b91c1c;
+}
+
+
+/* Recent files modal — same shell as settings (tabs + panels) */
+.recent-modal-content.modal-content,
+.recent-modal-content {
+    width: min(860px, 94vw) !important;
+    max-width: 860px !important;
+    min-width: min(560px, 94vw) !important;
+    height: min(620px, 88vh);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    gap: 0 !important;
+    overflow: hidden;
+}
+.recent-modal-content > .settings-header {
+    flex: 0 0 auto;
+}
+.recent-modal-content > .settings-body {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.recent-modal-content > .modal-actions {
+    flex: 0 0 auto;
+}
+.recent-modal-content .settings-header {
+    padding: 16px 20px 0;
+}
+.recent-modal-content .settings-header h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+.recent-modal-content .settings-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    border-top: 1px solid var(--border-color);
+    overflow: hidden;
+}
+.recent-modal-content .settings-tabs {
+    align-self: stretch;
+    height: auto;
+}
+.recent-modal-content .recent-panels {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    padding: 12px 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.recent-modal-content .settings-panel {
+    display: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+}
+.recent-modal-content .settings-panel.active {
+    display: flex !important;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+.recent-modal-content .recent-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none !important; /* override global .recent-list { max-height: 280px } */
+    height: 100%;
+    align-self: stretch;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+}
+.recent-modal-content .recent-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+}
+.recent-modal-content .recent-item:last-child {
+    border-bottom: none;
+}
+.recent-modal-content .recent-item:hover {
+    background: var(--bg-tertiary);
+}
+.recent-modal-content .recent-item-main {
+    min-width: 0;
+    flex: 1;
+}
+.recent-modal-content .recent-path {
+    font-size: 13px;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.recent-modal-content .recent-info {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.recent-modal-content .recent-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.recent-modal-content .recent-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(14, 99, 156, 0.25);
+    color: var(--accent-color);
+}
+.recent-modal-content .recent-browse-btn {
+    font-size: 11px;
+    padding: 4px 8px;
+}
+.recent-modal-content .modal-actions {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+}
+.recent-modal-content .recent-item-empty {
+    cursor: default;
+    color: var(--text-muted);
+    justify-content: center;
+    padding: 24px 12px;
+}
+.recent-modal-content .recent-item-empty:hover {
+    background: transparent;
 }

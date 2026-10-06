@@ -6,6 +6,8 @@
 #   GUI  — linux (amd64/arm64) + windows (amd64, arm64 if toolchain present)
 #   GUI darwin is intentionally unsupported from Linux in Wails v2
 
+# Global build-args (used only after the system stage so apt is not cache-busted
+# by version/commit/time that change on every build).
 ARG RUN_TESTS=false
 ARG APP_NAME=GoFLE
 ARG BUILD_MODE=prod
@@ -18,7 +20,35 @@ ARG BUILD_COMMIT=unknown
 ARG BUILD_SOURCE=local
 ARG BUILD_TARGET=all
 
-FROM golang:1.26-bookworm AS builder
+# ---------- system packages (stable stage) ----------
+# No build-args here. This layer is reused until the package list or base image
+# changes — not on every code/version rebuild.
+FROM golang:1.26-bookworm AS system
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        nodejs \
+        npm \
+        git \
+        ca-certificates \
+        libgtk-3-dev \
+        libwebkit2gtk-4.1-dev \
+        gcc-mingw-w64-x86-64 \
+        g++-mingw-w64-x86-64 \
+        nsis
+
+# Compatibility symlink for older Wails templates that look for webkit2gtk-4.0
+RUN ln -sf /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
+           /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc 2>/dev/null || \
+    ln -sf /usr/lib/pkgconfig/webkit2gtk-4.1.pc \
+           /usr/lib/pkgconfig/webkit2gtk-4.0.pc 2>/dev/null || true
+
+# ---------- build stage ----------
+FROM system AS builder
 
 ARG RUN_TESTS
 ARG APP_NAME
@@ -34,69 +64,56 @@ ARG BUILD_TARGET
 ARG TARGET_UID=0
 ARG TARGET_GID=0
 
-# Version ldflags for injection into binaries
+# Version ldflags for injection into binaries (changes every build — declared
+# only after apt so it cannot invalidate the system package layer).
 ARG VERSION_LDFLAGS="-X main.version=${GOFILE_VERSION} -X GoFLE/pkg/version.Version=${GOFILE_VERSION} -X GoFLE/pkg/version.BuildTime=${BUILD_TIME} -X GoFLE/pkg/version.BuildCommit=${BUILD_COMMIT} -X GoFLE/pkg/version.BuildSource=${BUILD_SOURCE}"
-
-# ---------- system packages ----------
-# Always install Node + Git.
-# For GUI we need GTK/WebKit (Linux) and MinGW (Windows cross).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        pkg-config \
-        nodejs \
-        npm \
-        git \
-        ca-certificates \
-    && if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
-        apt-get install -y --no-install-recommends \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            gcc-mingw-w64-x86-64 \
-            g++-mingw-w64-x86-64 \
-            nsis \
-            ; \
-    fi \
-    && rm -rf /var/lib/apt/lists/*
-
-# Compatibility symlink for older Wails templates that look for webkit2gtk-4.0
-RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
-        ln -sf /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
-               /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc 2>/dev/null || \
-        ln -sf /usr/lib/pkgconfig/webkit2gtk-4.1.pc \
-               /usr/lib/pkgconfig/webkit2gtk-4.0.pc 2>/dev/null || true; \
-    fi
 
 WORKDIR /app
 
-# ---------- Go modules (layer cache) ----------
+# ---------- Go modules (cached unless go.mod / go.sum change) ----------
+# Do NOT run `go clean -modcache` here — that forces a full re-download every build.
 COPY go.mod* go.sum* ./
-RUN go clean -modcache
-RUN if [ ! -f go.mod ]; then \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ ! -f go.mod ]; then \
         echo "go.mod not found — initialising module '$APP_NAME'..." && \
         go mod init "$APP_NAME"; \
     fi && \
     if [ ! -f go.sum ]; then touch go.sum; fi && \
-    go mod download 2>/dev/null || true
+    go mod download
 
-# ---------- Frontend deps (layer cache) ----------
+# ---------- Frontend deps (cached unless package.json / lock change) ----------
 COPY frontend/package.json frontend/package-lock.json* ./frontend/
-RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
-        cd frontend && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund); \
+RUN --mount=type=cache,target=/root/.npm \
+    if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
+        cd frontend && \
+        if [ -f package-lock.json ]; then \
+            npm ci --no-audit --no-fund; \
+        else \
+            npm install --no-audit --no-fund; \
+        fi; \
     fi
 
+# Source code — this layer invalidates on any code change, but deps layers above stay cached.
 COPY . .
 
-RUN go mod tidy && go mod verify
+# Refresh module graph from full source tree without wiping the download cache.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod tidy && go mod verify
 
-# Install Wails CLI only when GUI is requested
-RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
+# Install Wails CLI only when GUI is requested (module cache reuse).
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
         go install github.com/wailsapp/wails/v2/cmd/wails@latest; \
     fi
 
 RUN mkdir -p build/bin dist
 
-# ---------- Frontend build ----------
-RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
+# ---------- Frontend build (deps already installed; only rebuilds when sources change) ----------
+RUN --mount=type=cache,target=/root/.npm \
+    if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
         cd frontend && npm run build && cd ..; \
     else \
         mkdir -p frontend/dist && echo '<!DOCTYPE html><html><body></body></html>' > frontend/dist/index.html; \
@@ -109,17 +126,23 @@ RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
     fi
 
 # ---------- Tests / vet ----------
-RUN touch test_results.log && \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    touch test_results.log && \
     if [ "$RUN_TESTS" = "true" ]; then \
         go test -v ./... 2>&1 | tee test_results.log; \
     else \
         echo "Tests skipped" > test_results.log; \
     fi
-RUN go vet ./...
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go vet ./...
 
 # ---------- GUI builds ----------
 # Iterate platforms so we can set correct compiler, tags and skip darwin GUI.
-RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
         set -e; \
         IFS=','; set -- $PLATFORMS; \
         FIRST=true; \
@@ -189,7 +212,9 @@ RUN if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
     fi
 
 # ---------- CLI builds (pure Go, CGO=0) ----------
-RUN if [ "$BUILD_TARGET" = "cli" ] || [ "$BUILD_TARGET" = "all" ]; then \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$BUILD_TARGET" = "cli" ] || [ "$BUILD_TARGET" = "all" ]; then \
         set -e; \
         IFS=','; set -- $PLATFORMS; \
         for p in "$@"; do \

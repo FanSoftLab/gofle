@@ -65,6 +65,8 @@ func resolveFTPCertStore(cfg remote.Config) string {
 // streamed temp file, registers a tab, and on an unknown FTPS certificate stashes
 // the connection so AckFTPCert can persist the trust and the frontend can retry.
 func (a *App) OpenRemoteFile(cfg remote.Config) (*FileStatsResponse, error) {
+	connectTO, stallTO := a.remoteTimeouts()
+
 	proto := cfg.Protocol
 	if proto == "" {
 		proto = remote.ProtocolSSH
@@ -106,7 +108,8 @@ func (a *App) OpenRemoteFile(cfg remote.Config) (*FileStatsResponse, error) {
 			TLSMode:        cfg.TLSMode,
 			KnownHostsPath: resolveFTPCertStore(cfg),
 			Progress:       cfg.Progress,
-			StallTimeout:   cfg.StallTimeout,
+			ConnectTimeout: connectTO,
+			StallTimeout:   stallTO,
 		}
 		summary := &config.SSHConfigSummary{
 			Host:           cfg.Host,
@@ -123,18 +126,27 @@ func (a *App) OpenRemoteFile(cfg remote.Config) (*FileStatsResponse, error) {
 
 stats, err := a.openFTPStream(ftpCfg, displayPath, summary, "")
 	if err != nil {
-		a.recordConnFailure(cfg.Host, cfg.Port)
 		var certErr *ftp.CertUnknownError
-		if errors.As(err, &certErr) {
-			// Stash the connection + the cert store line so AckFTPCert can
-			// persist the certificate and the frontend can re-open/re-list.
-			a.mu.Lock()
-			a.pendingFTPHost[certErr.Host] = certErr.Line
-			a.pendingFTPConfig[certErr.Host] = cfg
-			a.mu.Unlock()
+		if errors.As(err, &certErr) && a.autoAcceptHostKey() {
+			if werr := ftp.WriteCertTrust(resolveFTPCertStore(cfg), certErr.Line); werr != nil {
+				a.recordConnFailure(cfg.Host, cfg.Port)
+				return nil, fmt.Errorf("failed to auto-accept FTP certificate: %w", werr)
+			}
+			slog.Warn("ftp: auto-accepted unknown server certificate", "host", certErr.Host)
+			stats, err = a.openFTPStream(ftpCfg, displayPath, summary, "")
 		}
-
-		return nil, err
+		if err != nil {
+			a.recordConnFailure(cfg.Host, cfg.Port)
+			if errors.As(err, &certErr) {
+				// Stash the connection + the cert store line so AckFTPCert can
+				// persist the certificate and the frontend can re-open/re-list.
+				a.mu.Lock()
+				a.pendingFTPHost[certErr.Host] = certErr.Line
+				a.pendingFTPConfig[certErr.Host] = cfg
+				a.mu.Unlock()
+			}
+			return nil, err
+		}
 	}
 
 	a.recordConnSuccess(cfg.Host, cfg.Port)
@@ -251,6 +263,14 @@ func (a *App) openFTPResources(
 	displayPath string,
 	progress func(stage string, done, total int64),
 ) (*ftp.Streamer, *indexer.FileIndexer, error) {
+	connectTO, stallTO := a.remoteTimeouts()
+	if ftpCfg.ConnectTimeout <= 0 {
+		ftpCfg.ConnectTimeout = connectTO
+	}
+	if ftpCfg.StallTimeout <= 0 {
+		ftpCfg.StallTimeout = stallTO
+	}
+
 	base := a.ctx
 	if base == nil {
 		base = context.Background()
@@ -326,6 +346,8 @@ func (a *App) openFTPResources(
 //
 //nolint:nestif // cached-lister reuse with dial/drop/else branch is inherently nested
 func (a *App) ListRemoteFiles(cfg remote.Config, path string) ([]remote.DirEntry, error) {
+	connectTO, stallTO := a.remoteTimeouts()
+
 	proto := cfg.Protocol
 	if proto == "" {
 		proto = remote.ProtocolSSH
@@ -360,6 +382,9 @@ func (a *App) ListRemoteFiles(cfg remote.Config, path string) ([]remote.DirEntry
 			RemoteFilePath: cfg.RemoteFilePath,
 			TLSMode:        cfg.TLSMode,
 			KnownHostsPath: resolveFTPCertStore(cfg),
+		
+			ConnectTimeout: connectTO,
+			StallTimeout:   stallTO,
 		}
 		key := fmt.Sprintf("%s:%d", ftpCfg.Host, ftpCfg.Port)
 

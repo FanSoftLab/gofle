@@ -1,5 +1,6 @@
 import { t } from './i18n';
 import type { AppContext, RecentFileItem, RemoteConfig } from './app_context';
+import { getPrefs } from './settings_manager';
 
 interface FieldRef {
     input: HTMLInputElement | HTMLSelectElement;
@@ -119,10 +120,10 @@ export class SSHHandler {
             sshAuthSelect.value = 'password';
             if (tlsGroup) tlsGroup.classList.remove('hidden');
             // Default the port to 21 only when it still holds the ssh default.
-            if (portEl && portEl.value === '22') portEl.value = '21';
+            if (portEl && (portEl.value === '22' || portEl.value === String(getPrefs().defaultSshPort || 22))) portEl.value = String(getPrefs().defaultFtpPort || 21);
         } else {
             if (tlsGroup) tlsGroup.classList.add('hidden');
-            if (portEl && portEl.value === '21') portEl.value = '22';
+            if (portEl && (portEl.value === '21' || portEl.value === String(getPrefs().defaultFtpPort || 21))) portEl.value = String(getPrefs().defaultSshPort || 22);
             this.applyAuthVisibility();
         }
     }
@@ -350,7 +351,7 @@ export class SSHHandler {
 
         let port: number;
         if (portRaw === '') {
-            port = 22;
+            port = getPrefs().defaultSshPort || 22;
         } else {
             port = parseInt(portRaw, 10);
             if (isNaN(port) || port < 1 || port > 65535) {

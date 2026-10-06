@@ -172,9 +172,28 @@
 
     <!-- Modal Dialogs -->
     <div id="recent-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3 data-i18n="recent_modal_title">Нещодавно відкриті файли</h3>
-            <ul id="recent-files-list" class="recent-list"></ul>
+        <div class="modal-content recent-modal-content">
+            <div class="settings-header">
+                <h3 data-i18n="recent_modal_title">Нещодавно відкриті файли</h3>
+            </div>
+            <div class="settings-body">
+                <nav class="settings-tabs" role="tablist">
+                    <button type="button" class="settings-tab active" data-recent-tab="local" data-i18n="recent_tab_local">Локальні</button>
+                    <button type="button" class="settings-tab" data-recent-tab="ssh" data-i18n="recent_tab_ssh">SSH</button>
+                    <button type="button" class="settings-tab" data-recent-tab="ftp" data-i18n="recent_tab_ftp">FTP</button>
+                </nav>
+                <div class="settings-panels recent-panels">
+                    <div class="settings-panel active" data-recent-panel="local">
+                        <ul id="recent-files-list-local" class="recent-list"></ul>
+                    </div>
+                    <div class="settings-panel" data-recent-panel="ssh">
+                        <ul id="recent-files-list-ssh" class="recent-list"></ul>
+                    </div>
+                    <div class="settings-panel" data-recent-panel="ftp">
+                        <ul id="recent-files-list-ftp" class="recent-list"></ul>
+                    </div>
+                </div>
+            </div>
             <div class="modal-actions">
                 <button id="btn-clear-recent" class="btn-danger" data-i18n="btn_clear_history">Очистити</button>
                 <button id="btn-close-recent" data-i18n="btn_close">Закрити</button>
@@ -237,42 +256,208 @@
     </div>
 
     <div id="settings-modal" class="modal hidden">
-        <div class="modal-content">
-            <h3 data-i18n="settings_modal_title">Налаштування</h3>
-            <div class="form-group">
-                <label data-i18n="label_theme">Тема оформлення:</label>
-                <select id="settings-theme">
-                    <option value="system" data-i18n="opt_theme_system">Системна</option>
-                    <option value="dark" data-i18n="opt_theme_dark">Dark (Темна)</option>
-                    <option value="light" data-i18n="opt_theme_light">Light (Світла)</option>
-                </select>
+        <div class="modal-content settings-modal-content">
+            <div class="settings-header">
+                <h3 data-i18n="settings_modal_title">Налаштування</h3>
             </div>
-            <div class="form-group">
-                <label data-i18n="label_language">Мова інтерфейсу:</label>
-                <select id="settings-lang">
-                    <option value="system" data-i18n="opt_lang_system">Системна</option>
-                    <option value="uk">Українська</option>
-                    <option value="en">English</option>
-                </select>
-            </div>
-            <div class="form-group checkbox-group">
-                <input type="checkbox" id="settings-save-tabs" checked />
-                <label for="settings-save-tabs" data-i18n="label_save_tabs">Зберігати відкриті вкладки при закритті</label>
-            </div>
-            <div class="form-group">
-                <label for="settings-max-history" data-i18n="label_max_history">Макс. кількість записів в історії:</label>
-                <input type="number" id="settings-max-history" min="1" max="1000" step="1" />
-            </div>
-            <div class="form-group">
-                <label for="settings-font-size" data-i18n="label_font_size">Розмір шрифту логу:</label>
-                <select id="settings-font-size">
-                    <option value="12">12px</option>
-                    <option value="13" selected>13px</option>
-                    <option value="14">14px</option>
-                    <option value="15">15px</option>
-                    <option value="16">16px</option>
-                    <option value="18">18px</option>
-                </select>
+            <div class="settings-body">
+                <nav class="settings-tabs" role="tablist">
+                    <button type="button" class="settings-tab active" data-settings-tab="appearance" data-i18n="settings_section_appearance">Вигляд</button>
+                    <button type="button" class="settings-tab" data-settings-tab="viewer" data-i18n="settings_section_viewer">Перегляд</button>
+                    <button type="button" class="settings-tab" data-settings-tab="session" data-i18n="settings_section_session">Сесія</button>
+                    <button type="button" class="settings-tab" data-settings-tab="remote" data-i18n="settings_section_remote">Remote</button>
+                </nav>
+                <div class="settings-panels">
+                    <div class="settings-panel active" data-settings-panel="appearance">
+                        <div class="form-group">
+                            <label for="settings-theme" data-i18n="label_theme">Тема</label>
+                            <select id="settings-theme">
+                                <option value="system" data-i18n="opt_theme_system">Системна</option>
+                                <option value="dark" data-i18n="opt_theme_dark">Темна</option>
+                                <option value="light" data-i18n="opt_theme_light">Світла</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="settings-lang" data-i18n="label_language">Мова інтерфейсу</label>
+                            <select id="settings-lang">
+                                <option value="system" data-i18n="opt_lang_system">Системна</option>
+                                <option value="uk">Українська</option>
+                                <option value="en">English</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="settings-font-family" data-i18n="label_font_family">Шрифт логу</label>
+                            <select id="settings-font-family">
+                                <option value="monospace">System Mono</option>
+                                <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+                                <option value="'Fira Code', monospace">Fira Code</option>
+                                <option value="'Cascadia Code', monospace">Cascadia Code</option>
+                                <option value="Consolas, monospace">Consolas</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-font-size" data-i18n="label_font_size">Розмір шрифту</label>
+                                <select id="settings-font-size">
+                                    <option value="12">12px</option>
+                                    <option value="13" selected>13px</option>
+                                    <option value="14">14px</option>
+                                    <option value="15">15px</option>
+                                    <option value="16">16px</option>
+                                    <option value="18">18px</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-line-density" data-i18n="label_line_density">Щільність рядків</label>
+                                <select id="settings-line-density">
+                                    <option value="compact" data-i18n="opt_density_compact">Компактна</option>
+                                    <option value="normal" selected data-i18n="opt_density_normal">Звичайна</option>
+                                    <option value="comfortable" data-i18n="opt_density_comfortable">Простора</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-word-wrap" />
+                                <span data-i18n="label_word_wrap">Перенос довгих рядків</span>
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-show-line-numbers" checked />
+                                <span data-i18n="label_show_line_numbers">Номери рядків</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-panel" data-settings-panel="viewer">
+                        <div class="form-group">
+                            <label for="settings-view-mode" data-i18n="label_view_mode">Режим перегляду</label>
+                            <select id="settings-view-mode">
+                                <option value="split" data-i18n="opt_view_split">Лог і результати</option>
+                                <option value="results" data-i18n="opt_view_results">Лише результати</option>
+                                <option value="normal" data-i18n="opt_view_normal">Лише лог</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-default-follow" checked />
+                                <span data-i18n="label_default_follow">Слідкувати (хвіст)</span>
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-default-search-case" />
+                                <span data-i18n="label_default_search_case">Враховувати регістр</span>
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-default-search-regex" />
+                                <span data-i18n="label_default_search_regex">Регулярний вираз</span>
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-default-search-invert" />
+                                <span data-i18n="label_default_search_invert">Інвертувати збіг</span>
+                            </label>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-search-orientation" data-i18n="label_search_orientation">Панель результатів</label>
+                                <select id="settings-search-orientation">
+                                    <option value="horizontal" data-i18n="opt_orient_horizontal">Горизонтально</option>
+                                    <option value="vertical" data-i18n="opt_orient_vertical">Вертикально</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-search-side" data-i18n="label_search_side">Розташування панелі</label>
+                                <select id="settings-search-side">
+                                    <option value="bottom" data-i18n="opt_side_bottom">Знизу</option>
+                                    <option value="top" data-i18n="opt_side_top">Зверху</option>
+                                    <option value="left" data-i18n="opt_side_left">Зліва</option>
+                                    <option value="right" data-i18n="opt_side_right">Справа</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-panel" data-settings-panel="session">
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-save-tabs" checked />
+                                <span data-i18n="label_save_tabs">Пам’ятати відкриті вкладки</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="settings-startup-behavior" data-i18n="label_startup_behavior">При запуску</label>
+                            <select id="settings-startup-behavior">
+                                <option value="session" data-i18n="opt_startup_session">Відновити сесію</option>
+                                <option value="empty" data-i18n="opt_startup_empty">Порожнє вікно</option>
+                                <option value="open_dialog" data-i18n="opt_startup_open">Діалог «Відкрити»</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-confirm-close-tab" checked />
+                                <span data-i18n="label_confirm_close_tab">Підтверджувати закриття SSH/FTP</span>
+                            </label>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-max-recent" data-i18n="label_max_recent">Список «Останні»</label>
+                                <input type="number" id="settings-max-recent" min="1" max="200" step="1" value="20" />
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-max-history" data-i18n="label_max_history">Історія введення</label>
+                                <input type="number" id="settings-max-history" min="1" max="1000" step="1" value="100" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-panel" data-settings-panel="remote">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-ssh-timeout" data-i18n="label_ssh_timeout">Таймаут з’єднання (сек)</label>
+                                <input type="number" id="settings-ssh-timeout" min="3" max="120" step="1" value="10" />
+                                <p class="field-hint" data-i18n="hint_ssh_timeout"></p>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-stall-timeout" data-i18n="label_stall_timeout">Таймаут тиші завантаження (сек)</label>
+                                <input type="number" id="settings-stall-timeout" min="10" max="600" step="1" value="60" />
+                                <p class="field-hint" data-i18n="hint_stall_timeout"></p>
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group settings-danger">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-auto-accept-host-key" />
+                                <svg class="danger-icon" viewBox="0 0 512 512" aria-hidden="true" focusable="false" title="!">
+                                    <path fill="currentColor" d="M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.4.1 39.8S486.3 480 472 480H40c-14.3 0-27.6-7.7-34.7-20.2s-7-27.8.1-39.8l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24v112c0 13.3 10.7 24 24 24s24-10.7 24-24V184c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0-64 0 32 32 0 1 0 64 0z"/>
+                                </svg>
+                                <span data-i18n="label_auto_accept_host_key">Автоприйняття ключа хоста</span>
+                            </label>
+                            <p class="field-hint" data-i18n="hint_auto_accept_host_key"></p>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-conn-max-attempts" data-i18n="label_conn_max_attempts">Ліміт невдалих спроб</label>
+                                <input type="number" id="settings-conn-max-attempts" min="1" max="50" step="1" value="5" />
+                                <p class="field-hint" data-i18n="hint_conn_max_attempts"></p>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-conn-window" data-i18n="label_conn_window">Вікно підрахунку (хв)</label>
+                                <input type="number" id="settings-conn-window" min="1" max="120" step="1" value="15" />
+                                <p class="field-hint" data-i18n="hint_conn_window"></p>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-conn-lockout" data-i18n="label_conn_lockout">Блокування (хв)</label>
+                                <input type="number" id="settings-conn-lockout" min="1" max="120" step="1" value="5" />
+                                <p class="field-hint" data-i18n="hint_conn_lockout"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-actions">
                 <button id="btn-save-settings" class="active" data-i18n="btn_save">Зберегти</button>

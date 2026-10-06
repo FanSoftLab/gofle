@@ -23,18 +23,17 @@ export class VirtualScroller {
   private bufferCount = 25;
   private fetchCallback: FetchLinesCallback;
 
+  /** Full text wrap with variable row height (no clipping). */
+  private wordWrap = false;
+  private heightCache = new Map<number, number>();
+  private avgHeight = 20;
+  private charWidthPx = 8;
+
   private scrollSpacerHeight = 0;
-  // Max measured content width of currently rendered rows — drives horizontal
-  // scroll so lines longer than the viewport are reachable.
   private contentWidthPx = 0;
-  // Height (px) of a panel overlaid on the bottom of the viewport (e.g. the
-  // status bar) that would otherwise cover the last visible row. The rows
-  // layer is shrunk by this so rows never sit behind it.
   private bottomInset = 0;
   private static readonly MAX_SAFE_PIXELS = 15_000_000;
 
-  // IPC coalescing: at most one fetch is in flight; a further render() request
-  // while one is pending is collapsed into a single retry.
   private fetchInFlight = false;
   private pendingRender = false;
 
@@ -47,23 +46,25 @@ export class VirtualScroller {
   private currentSearchQuery = '';
   private onRowClickCallback?: (index: number) => void;
   private onScrollPauseCallback?: () => void;
+  private onScrollPositionCallback?: (anchor: { index: number; fraction: number }) => void;
+  /** Pixel scroll to re-apply after layout (derived from pendingAnchor). */
+  private pendingScrollTop: number | null = null;
+  /** Content anchor to re-apply after setTotalLines / async fetch (wrap-safe). */
+  private pendingAnchor: { index: number; fraction: number } | null = null;
+  /** Ignore scroll events caused by programmatic scroll restores. */
+  private suppressScrollEvent = false;
 
-  // Selection state
   private selectionStart: number | null = null;
   private selectionEnd: number | null = null;
   private isSelecting = false;
   private selectionAnchor: number | null = null;
 
-  // Raw line text per row node so search-query changes can re-highlight in place
-  // without a full recycle/refetch (which was the main source of flicker).
   private rowRawContent = new WeakMap<HTMLElement, string>();
-  // Last highlight key applied to a row: `${sourceIndex}\0${searchQuery}`.
   private rowHighlightKey = new WeakMap<HTMLElement, string>();
 
   constructor(viewportId: string, fetchCallback: FetchLinesCallback) {
     this.viewport = document.getElementById(viewportId)!;
     this.fetchCallback = fetchCallback;
-    // Keyboard focus target for Shift+Arrow selection and Ctrl+C.
     if (this.viewport.tabIndex < 0) this.viewport.tabIndex = 0;
 
     this.contentContainer = document.createElement('div');
@@ -82,9 +83,6 @@ export class VirtualScroller {
     this.attachSelectionListeners();
   }
 
-  // Maps the native scroll position (0..spacerHeight) to a 0..1 fraction of
-  // the file. Using a fraction (instead of absolute pixels) keeps the scroll
-  // math independent of the pixel cap, so every line stays reachable.
   private fractionFromScrollTop(scrollTop: number): number {
     const maxScroll = this.scrollSpacerHeight - this.effectiveClientHeight();
     if (maxScroll <= 0) return 0;
@@ -92,43 +90,50 @@ export class VirtualScroller {
   }
 
   private updateLayout() {
-    const full = this.totalLines * this.lineHeight;
+    const unit = this.wordWrap ? Math.max(this.lineHeight, this.avgHeight) : this.lineHeight;
+    const full = this.totalLines * unit;
     this.scrollSpacerHeight = Math.min(full, VirtualScroller.MAX_SAFE_PIXELS);
-    // Spacer provides the scroll range; rows layer is pinned via sticky and
-    // sized to the viewport minus the bottom inset so its rows stay at small
-    // coordinates and never sit behind an overlaid panel.
     this.scrollSpacer.style.height = `${Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight())}px`;
     this.contentContainer.style.height = `${this.effectiveClientHeight()}px`;
     this.applyContentWidth();
     document.documentElement.style.setProperty('--line-height', `${this.lineHeight}px`);
   }
 
-  /** Expand spacer/content min-width so the viewport can scroll horizontally. */
   private applyContentWidth() {
+    if (this.wordWrap) {
+      const w = this.viewport.clientWidth || 0;
+      this.scrollSpacer.style.width = `${w}px`;
+      this.contentContainer.style.minWidth = `${w}px`;
+      this.contentContainer.style.width = `${w}px`;
+      this.contentContainer.style.maxWidth = `${w}px`;
+      return;
+    }
     const w = Math.max(this.contentWidthPx, this.viewport.clientWidth || 0);
     this.scrollSpacer.style.width = `${w}px`;
     this.contentContainer.style.minWidth = `${w}px`;
+    this.contentContainer.style.width = '';
+    this.contentContainer.style.maxWidth = '';
   }
 
-  /** Reset horizontal extent (call on tab switch / clear). */
   private resetHorizontalExtent() {
     this.contentWidthPx = 0;
     this.viewport.scrollLeft = 0;
     this.applyContentWidth();
   }
 
-  /** Measure visible rows and update the horizontal scroll extent. */
   private measureContentWidth() {
+    if (this.wordWrap) {
+      this.contentWidthPx = this.viewport.clientWidth || 0;
+      this.applyContentWidth();
+      return;
+    }
     let maxW = this.viewport.clientWidth || 0;
     for (const node of this.renderedNodes.values()) {
       const sw = node.scrollWidth;
       if (sw > maxW) maxW = sw;
     }
-    // Always apply: tab switches must shrink as well as grow the scroll range.
     if (maxW !== this.contentWidthPx) {
       this.contentWidthPx = maxW;
-      this.applyContentWidth();
-    } else {
       this.applyContentWidth();
     }
   }
@@ -138,41 +143,175 @@ export class VirtualScroller {
     this.updateLayout();
   }
 
-  // Usable height of the rows layer: the viewport height minus any overlaid
-  // panel at the bottom (e.g. the status bar). The content layer, the visible
-  // row count and the scroll range all derive from this so the bottom rows are
-  // never clipped or pushed out of reach.
   private effectiveClientHeight(): number {
     return Math.max(1, this.viewport.clientHeight - this.bottomInset);
   }
 
+  public setWordWrap(enabled: boolean) {
+    if (this.wordWrap === enabled) return;
+    this.wordWrap = enabled;
+    this.heightCache.clear();
+    this.avgHeight = this.lineHeight;
+    this.contentContainer.classList.toggle('word-wrap', enabled);
+    this.contentWidthPx = 0;
+    this.applyContentWidth();
+    this.updateLayout();
+    this.recalculateVisible();
+    this.render(true);
+  }
+
+  public getWordWrap(): boolean {
+    return this.wordWrap;
+  }
+
+  public refreshMetrics() {
+    this.heightCache.clear();
+    this.avgHeight = this.lineHeight;
+    this.measureLineHeight();
+    this.measureCharWidth();
+    this.updateLayout();
+    this.recalculateVisible();
+    this.render(true);
+  }
+
+  private measureCharWidth() {
+    const sample = document.createElement('span');
+    sample.className = 'log-text';
+    sample.style.position = 'absolute';
+    sample.style.visibility = 'hidden';
+    sample.style.whiteSpace = 'pre';
+    sample.textContent = 'MMMMMMMMMM';
+    this.contentContainer.appendChild(sample);
+    const w = sample.getBoundingClientRect().width;
+    sample.remove();
+    if (w > 0) this.charWidthPx = w / 10;
+  }
+
+  private textWidthPx(): number {
+    const gutter = !document.body.classList.contains('hide-line-numbers') ? 78 : 8;
+    return Math.max(40, (this.viewport.clientWidth || 800) - gutter);
+  }
+
+  private estimateHeight(content: string): number {
+    if (!this.wordWrap) return this.lineHeight;
+    const cw = Math.max(4, this.charWidthPx);
+    const cols = Math.max(1, Math.floor(this.textWidthPx() / cw));
+    const parts = (content || '').split('\n');
+    let lines = 0;
+    for (const p of parts) {
+      lines += Math.max(1, Math.ceil(Math.max(1, p.length) / cols));
+    }
+    return Math.max(this.lineHeight, lines * this.lineHeight);
+  }
+
+  private heightOf(index: number): number {
+    if (!this.wordWrap) return this.lineHeight;
+    return this.heightCache.get(index) ?? this.avgHeight;
+  }
+
+  private rememberHeight(index: number, h: number) {
+    const prev = this.heightCache.get(index);
+    if (prev === h) return false;
+    this.heightCache.set(index, h);
+    // Recompute average from a bounded sample of cache values.
+    let sum = 0;
+    let n = 0;
+    for (const v of this.heightCache.values()) {
+      sum += v;
+      n++;
+      if (n >= 200) break;
+    }
+    if (n > 0) this.avgHeight = Math.max(this.lineHeight, Math.round(sum / n));
+    return true;
+  }
+
+  private positionRows(firstVisibleIndex: number, fractional: number) {
+    if (!this.wordWrap) {
+      const fracPx = fractional * this.lineHeight;
+      for (const [idx, node] of this.renderedNodes) {
+        node.style.top = `${(idx - firstVisibleIndex) * this.lineHeight - fracPx}px`;
+        node.style.height = `${this.lineHeight}px`;
+        node.style.minHeight = '';
+        node.style.overflow = '';
+      }
+      return;
+    }
+
+    const indices = [...this.renderedNodes.keys()].sort((a, b) => a - b);
+    if (indices.length === 0) return;
+
+    const minIdx = indices[0];
+    let cursor = -fractional * this.heightOf(firstVisibleIndex);
+    for (let i = firstVisibleIndex - 1; i >= minIdx; i--) {
+      cursor -= this.heightOf(i);
+    }
+
+    let expected = minIdx;
+    for (const idx of indices) {
+      while (expected < idx) {
+        cursor += this.heightOf(expected);
+        expected++;
+      }
+      const node = this.renderedNodes.get(idx)!;
+      const h = this.heightOf(idx);
+      node.style.top = `${cursor}px`;
+      node.style.height = 'auto';
+      node.style.minHeight = `${h}px`;
+      node.style.overflow = 'visible';
+      cursor += h;
+      expected = idx + 1;
+    }
+  }
+
+  private refineMeasuredHeights(anchorIndex: number, anchorFrac: number) {
+    if (!this.wordWrap) return;
+    let changed = false;
+    for (const [idx, node] of this.renderedNodes) {
+      const h = Math.max(this.lineHeight, Math.round(node.scrollHeight || node.offsetHeight || this.lineHeight));
+      if (this.rememberHeight(idx, h)) changed = true;
+    }
+    if (!changed) return;
+    const maxFirst = Math.max(0, this.totalLines - this.visibleCount);
+    const exact = Math.min(maxFirst, anchorIndex + anchorFrac);
+    const targetFrac = maxFirst <= 0 ? 0 : exact / maxFirst;
+    this.updateLayout();
+    const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
+    const desired = targetFrac * maxScroll;
+    if (Math.abs(this.viewport.scrollTop - desired) > 1) {
+      this.viewport.scrollTop = desired;
+    }
+    this.positionRows(anchorIndex, anchorFrac);
+  }
+
   public setTotalLines(total: number) {
-    // Same length (e.g. search re-run with identical match count): keep mounted
-    // rows and only refresh what's missing — avoids a full blank flash.
     if (total === this.totalLines && total > 0) {
       this.updateLayout();
+      this.recalculateVisible();
+      this.applyPendingAnchor();
       this.render();
       return;
     }
     this.totalLines = total;
+    this.heightCache.clear();
+    this.avgHeight = this.lineHeight;
     this.measureLineHeight();
-    // Drop previous tab's width/scroll before loading new rows.
+    this.measureCharWidth();
     this.resetHorizontalExtent();
     this.updateLayout();
+    this.recalculateVisible();
     this.clear();
+    // Re-map content anchor → pixels after spacer metrics change.
+    this.applyPendingAnchor();
     this.render();
   }
 
   public setSearchQuery(query: string) {
     if (this.currentSearchQuery === query) return;
     this.currentSearchQuery = query;
-    // Re-highlight currently mounted rows in place. A force recycle + refetch
-    // used to blank the viewport on every keystroke / search update.
     this.rehighlightVisibleRows();
     requestAnimationFrame(() => this.measureContentWidth());
   }
 
-  /** Update .log-text HTML for every mounted row from cached raw content. */
   private rehighlightVisibleRows() {
     const q = this.currentSearchQuery;
     for (const [, node] of this.renderedNodes) {
@@ -191,7 +330,7 @@ export class VirtualScroller {
   public setHighlightedLine(index: number | null) {
     this.highlightedLineIndex = index;
     this.applyHighlighting();
-      this.applySelectionStyle();
+    this.applySelectionStyle();
   }
 
   public setOnRowClick(cb: (index: number) => void) {
@@ -203,7 +342,69 @@ export class VirtualScroller {
   }
 
   public setAutoScroll(_enabled: boolean) {
-    // Auto-scroll state is owned by the host; nothing to track here.
+    // host-owned
+  }
+
+  /** Current first-visible line + fractional progress within that line. */
+  public getViewAnchor(): { index: number; fraction: number } {
+    const w = this.windowFromScrollTop(this.viewport.scrollTop || 0);
+    return { index: w.firstVisibleIndex, fraction: w.fractional };
+  }
+
+  /**
+   * Restore view so `index + fraction` is at the top of the viewport.
+   * Survives setTotalLines / word-wrap height changes (re-applied via pendingAnchor).
+   */
+  public setViewAnchor(index: number, fraction = 0) {
+    const frac = Math.max(0, Math.min(1, fraction || 0));
+    const idx = Math.max(0, Math.floor(index || 0));
+    this.pendingAnchor = { index: idx, fraction: frac };
+    this.applyPendingAnchor();
+    this.render();
+  }
+
+  public setOnScrollPosition(cb: (anchor: { index: number; fraction: number }) => void) {
+    this.onScrollPositionCallback = cb;
+  }
+
+  /** Map a content anchor to pixel scrollTop for the current spacer metrics. */
+  private scrollTopForAnchor(index: number, fraction: number): number {
+    const maxFirst = Math.max(0, this.totalLines - this.visibleCount);
+    if (maxFirst <= 0) return 0;
+    const exact = Math.min(maxFirst, Math.max(0, index + fraction));
+    const targetFrac = exact / maxFirst;
+    const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
+    return targetFrac * maxScroll;
+  }
+
+  private applyPendingAnchor() {
+    if (!this.pendingAnchor) return;
+    const y = this.scrollTopForAnchor(this.pendingAnchor.index, this.pendingAnchor.fraction);
+    this.pendingScrollTop = y;
+    this.applyPendingScroll();
+  }
+
+  private applyPendingScroll() {
+    if (this.pendingScrollTop === null) return;
+    const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
+    const y = Math.max(0, Math.min(maxScroll, this.pendingScrollTop));
+    if (Math.abs((this.viewport.scrollTop || 0) - y) > 0.5) {
+      this.suppressScrollEvent = true;
+      this.viewport.scrollTop = y;
+      queueMicrotask(() => { this.suppressScrollEvent = false; });
+    }
+  }
+
+  /** @deprecated pixel API — prefer getViewAnchor / setViewAnchor */
+  public getScrollTop(): number {
+    return this.viewport.scrollTop || 0;
+  }
+
+  public setScrollTop(px: number) {
+    this.pendingAnchor = null;
+    this.pendingScrollTop = Math.max(0, px || 0);
+    this.applyPendingScroll();
+    this.render();
   }
 
   public scrollToBottom() {
@@ -231,6 +432,42 @@ export class VirtualScroller {
     return { firstVisibleIndex, fractional };
   }
 
+  /** Mount enough rows to cover the viewport in pixels (wrap-aware). */
+  private indexWindow(firstVisibleIndex: number, fractional: number): { startIdx: number; endIdx: number } {
+    const vh = this.effectiveClientHeight();
+    const bufPx = this.wordWrap ? Math.max(vh, 400) : this.bufferCount * this.lineHeight;
+
+    if (!this.wordWrap) {
+      return {
+        startIdx: Math.max(0, firstVisibleIndex - this.bufferCount),
+        endIdx: Math.min(this.totalLines - 1, firstVisibleIndex + this.visibleCount + this.bufferCount * 2),
+      };
+    }
+
+    let covered = -fractional * this.heightOf(firstVisibleIndex);
+    let end = firstVisibleIndex;
+    while (end < this.totalLines && covered < vh + bufPx) {
+      covered += this.heightOf(end);
+      end++;
+    }
+
+    let start = firstVisibleIndex;
+    let up = fractional * this.heightOf(firstVisibleIndex);
+    while (start > 0 && up < bufPx) {
+      start--;
+      up += this.heightOf(start);
+    }
+
+    const maxMount = Math.max(120, this.visibleCount + this.bufferCount * 6);
+    if (end - start > maxMount) {
+      end = Math.min(this.totalLines, start + maxMount);
+    }
+    return {
+      startIdx: Math.max(0, start),
+      endIdx: Math.min(this.totalLines - 1, Math.max(start, end - 1)),
+    };
+  }
+
   public render(force = false) {
     if (this.totalLines === 0) {
       this.clear();
@@ -240,24 +477,16 @@ export class VirtualScroller {
     this.recalculateVisible();
     this.currentScrollTop = this.viewport.scrollTop;
     const { firstVisibleIndex, fractional } = this.windowFromScrollTop(this.viewport.scrollTop);
-    const startIdx = Math.max(0, firstVisibleIndex - this.bufferCount);
-    const endIdx = Math.min(this.totalLines - 1, firstVisibleIndex + this.visibleCount + this.bufferCount * 2);
+    const { startIdx, endIdx } = this.indexWindow(firstVisibleIndex, fractional);
 
     const gen = ++this.generation;
 
-    // Recycle rows that left the window, and reposition the rows that remain so
-    // they track the current scroll position. Repositioning must run on EVERY
-    // scroll pass (even while a fetch is in flight) — otherwise kept rows keep
-    // their old offset and the view flickers as you wheel-scroll.
     for (const [idx, node] of this.renderedNodes.entries()) {
       if (force || idx < startIdx || idx > endIdx) {
         this.recycleRowNode(idx, node);
-      } else {
-        const rowTop = (idx - firstVisibleIndex) * this.lineHeight - fractional * this.lineHeight;
-        node.style.top = `${rowTop}px`;
-        node.style.height = `${this.lineHeight}px`;
       }
     }
+    this.positionRows(firstVisibleIndex, fractional);
 
     if (this.fetchInFlight) {
       this.pendingRender = true;
@@ -269,10 +498,11 @@ export class VirtualScroller {
       if (!this.renderedNodes.has(i)) missingIndices.push(i);
     }
     if (missingIndices.length === 0) {
+      this.applyPendingAnchor();
+      const w = this.windowFromScrollTop(this.viewport.scrollTop);
+      this.positionRows(w.firstVisibleIndex, w.fractional);
       this.applyHighlighting();
       this.applySelectionStyle();
-      // Rows were only repositioned — still refresh horizontal extent (e.g. after
-      // a tab switch that recycled everything then hit a warm cache path).
       requestAnimationFrame(() => this.measureContentWidth());
       return;
     }
@@ -283,84 +513,65 @@ export class VirtualScroller {
     this.fetchInFlight = true;
     this.fetchCallback(fetchStart, fetchCount).then((lines) => {
       if (gen !== this.generation) return;
+
       const fragment = document.createDocumentFragment();
-
       const win = this.windowFromScrollTop(this.viewport.scrollTop);
-
-      const startIdx2 = Math.max(0, win.firstVisibleIndex - this.bufferCount);
-      const endIdx2 = Math.min(this.totalLines - 1, win.firstVisibleIndex + this.visibleCount + this.bufferCount * 2);
+      const { startIdx: startIdx2, endIdx: endIdx2 } = this.indexWindow(win.firstVisibleIndex, win.fractional);
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        // The fetch callback returns lines for the logical range
-        // [fetchStart, fetchStart+count) in order, so the i-th returned line
-        // occupies the logical (virtual) index fetchStart + i. For the main log
-        // this equals the global line number; for the filter panel it equals
-        // the match index. We must position/recycle by the logical index, not
-        // by line.index (which for filtered results is the *source* line and
-        // would otherwise push rows far outside the scroll area).
         const logicalIndex = fetchStart + i;
         if (logicalIndex < startIdx2 || logicalIndex > endIdx2) continue;
         if (this.renderedNodes.has(logicalIndex)) continue;
 
         const rowNode = this.createRowNode();
-        // Small coordinates relative to the pinned rows layer: the first
-        // visible line sits at the top (minus a partial-line offset), so rows
-        // never exceed the viewport height and avoid the browser pixel cap.
-        const rowTop = (logicalIndex - win.firstVisibleIndex) * this.lineHeight - win.fractional * this.lineHeight;
-        rowNode.style.top = `${rowTop}px`;
-        rowNode.style.height = `${this.lineHeight}px`;
+        const h = this.wordWrap ? this.estimateHeight(line.content ?? '') : this.lineHeight;
+        if (this.wordWrap) this.rememberHeight(logicalIndex, h);
 
-        if (this.highlightedLineIndex === logicalIndex) {
-          rowNode.classList.add('highlighted');
-        } else {
-          rowNode.classList.remove('highlighted');
-        }
+        const unit = this.wordWrap ? this.avgHeight : this.lineHeight;
+        const rowTop = (logicalIndex - win.firstVisibleIndex) * unit - win.fractional * unit;
+        rowNode.style.top = `${rowTop}px`;
+        rowNode.style.height = this.wordWrap ? 'auto' : `${this.lineHeight}px`;
+        rowNode.style.minHeight = `${h}px`;
+        rowNode.style.overflow = this.wordWrap ? 'visible' : '';
 
         const numEl = rowNode.children[0] as HTMLElement;
         const textEl = rowNode.children[1] as HTMLElement;
+        const sourceIndex = line.index;
+        numEl.textContent = String(sourceIndex + 1);
+        rowNode.dataset.sourceIndex = String(sourceIndex);
 
-        const lineNo = (line.index + 1).toString();
-        if (numEl.textContent !== lineNo) numEl.textContent = lineNo;
+        const raw = line.content ?? '';
+        this.rowRawContent.set(rowNode, raw);
+        const hlKey = `${sourceIndex}\0${this.currentSearchQuery}`;
+        textEl.innerHTML = LogHighlighter.highlightLine(raw, this.currentSearchQuery);
+        this.rowHighlightKey.set(rowNode, hlKey);
 
-        // Skip expensive highlight + innerHTML when this node already shows the
-        // same source line under the same search query (common when scrolling
-        // back over a recently recycled buffer).
-        const highlightKey = `${line.index}\0${this.currentSearchQuery}`;
-        const prevKey = this.rowHighlightKey.get(rowNode);
-        if (prevKey !== highlightKey) {
-          textEl.innerHTML = LogHighlighter.highlightLine(line.content, this.currentSearchQuery);
-          this.rowHighlightKey.set(rowNode, highlightKey);
-        }
-        this.rowRawContent.set(rowNode, line.content);
-
-        // Logical index for selection / context menu (NOT line.index — on the
-        // filter pane line.index is the source log line, while the virtual
-        // position is the match ordinal).
-        rowNode.dataset.index = String(logicalIndex);
-        rowNode.dataset.sourceIndex = String(line.index);
-
-        const range = this.getSelectedRange();
-        if (range && logicalIndex >= range.start && logicalIndex <= range.end) {
-          rowNode.classList.add('selected');
-        } else {
-          rowNode.classList.remove('selected');
-        }
-
-        rowNode.onclick = () => {
-          this.highlightedLineIndex = logicalIndex;
-          this.applyHighlighting();
-          this.applySelectionStyle();
-          if (this.onRowClickCallback) this.onRowClickCallback(line.index);
+        rowNode.onclick = (e) => {
+          if (e.shiftKey) return;
+          this.onRowClickCallback?.(logicalIndex);
         };
 
         this.renderedNodes.set(logicalIndex, rowNode);
         fragment.appendChild(rowNode);
       }
+
       this.contentContainer.appendChild(fragment);
+      this.applyPendingAnchor();
+      const win2 = this.windowFromScrollTop(this.viewport.scrollTop);
+      this.positionRows(win2.firstVisibleIndex, win2.fractional);
+
+      if (this.wordWrap) {
+        const anchorIdx = win.firstVisibleIndex;
+        const anchorFrac = win.fractional;
+        requestAnimationFrame(() => {
+          if (gen !== this.generation) return;
+          this.refineMeasuredHeights(anchorIdx, anchorFrac);
+        });
+      }
+
       this.applyHighlighting();
       this.applySelectionStyle();
-      // After rows are in the DOM, expand horizontal scroll for long lines.
       requestAnimationFrame(() => this.measureContentWidth());
     }).catch((err) => {
       if (gen === this.generation) {
@@ -377,7 +588,8 @@ export class VirtualScroller {
   }
 
   private recalculateVisible() {
-    this.visibleCount = Math.floor(this.effectiveClientHeight() / this.lineHeight);
+    const unit = this.wordWrap ? Math.max(this.lineHeight, this.avgHeight) : this.lineHeight;
+    this.visibleCount = Math.max(1, Math.floor(this.effectiveClientHeight() / unit));
   }
 
   private measureLineHeight() {
@@ -401,6 +613,8 @@ export class VirtualScroller {
 
   private onResize() {
     this.measureLineHeight();
+    this.measureCharWidth();
+    if (this.wordWrap) this.heightCache.clear();
     this.updateLayout();
     this.recalculateVisible();
     this.render(true);
@@ -412,6 +626,11 @@ export class VirtualScroller {
     if (!isAtBottom && this.onScrollPauseCallback) {
       this.onScrollPauseCallback();
     }
+    if (this.suppressScrollEvent) return;
+    // User-driven scroll — drop pending restore and report content anchor.
+    this.pendingScrollTop = null;
+    this.pendingAnchor = null;
+    this.onScrollPositionCallback?.(this.getViewAnchor());
     if (!this.isRequestPending) {
       this.isRequestPending = true;
       requestAnimationFrame(() => {
@@ -437,16 +656,13 @@ export class VirtualScroller {
   }
 
   private recycleRowNode(idx: number, node: HTMLElement) {
-    // Detach without destroying — pool reuses the element. Removing from the
-    // sticky layer is still required so absolute positions don't stack, but we
-    // never wipe textContent here so a recycled node can skip identical HTML
-    // writes when rebound to the same line.
     node.remove();
     this.renderedNodes.delete(idx);
     this.poolNodes.push(node);
   }
 
   private clear() {
+    this.heightCache.clear();
     for (const [idx, node] of this.renderedNodes) {
       this.recycleRowNode(idx, node);
     }
@@ -464,7 +680,6 @@ export class VirtualScroller {
     }
   }
 
-  // Selection API
   public getSelectedRange(): { start: number; end: number } | null {
     if (this.selectionStart === null || this.selectionEnd === null) return null;
     const start = Math.min(this.selectionStart, this.selectionEnd);
@@ -481,23 +696,15 @@ export class VirtualScroller {
     }
   }
 
-  /** Fetch plain text lines for the current selection (no clipboard write). */
   private async selectionLineTexts(): Promise<{ texts: string[]; start: number } | null> {
     const range = this.getSelectedRange();
     if (!range) return null;
-
     const count = range.end - range.start + 1;
-    // fetchCallback is defined to return lines for the logical window
-    // [start, start+count) in order (main log: absolute lines; filter pane:
-    // match ordinals). Do NOT key by line.index — on the filter pane that is
-    // the source log line number and would leave almost every part empty.
     const lines = await this.fetchCallback(range.start, count);
     const parts: string[] = new Array(count).fill('');
     for (let i = 0; i < lines.length && i < count; i++) {
       parts[i] = lines[i]?.content ?? '';
     }
-    // Prefer any content already rendered in the DOM for visible rows (avoids
-    // a second IPC when the selection is on-screen).
     for (let i = range.start; i <= range.end; i++) {
       const node = this.renderedNodes.get(i);
       if (!node) continue;
@@ -510,7 +717,6 @@ export class VirtualScroller {
     return { texts: parts, start: range.start };
   }
 
-  /** Copy the current line selection to the clipboard. Returns true if anything was copied. */
   public async copySelection(): Promise<boolean> {
     try {
       const data = await this.selectionLineTexts();
@@ -525,7 +731,6 @@ export class VirtualScroller {
     }
   }
 
-  /** Copy selection with 1-based line numbers prefixed ("N: text"). */
   public async copySelectionNumbered(): Promise<boolean> {
     try {
       const data = await this.selectionLineTexts();
@@ -569,91 +774,68 @@ export class VirtualScroller {
     }
   }
 
-  // Mouse event handlers for selection.
-  // Line-range selection (our .selected style) coexists with native character
-  // selection inside .log-text. We never call preventDefault / removeAllRanges
-  // on a plain drag, so the browser can form a multi-line text selection that
-  // Ctrl+C copies. Line-range is still tracked in parallel for context menu
-  // and Ctrl+Shift+C (copy whole lines).
-  private dragStartIndex: number | null = null;
-
-  private handleMouseDown = (e: MouseEvent, logicalIndex: number) => {
-    if (e.button !== 0) return; // Only left click — right-click is context menu
-
-    // Focus viewport so Shift+Arrow / Ctrl+C work without clicking an input first.
-    if (this.viewport.tabIndex < 0) this.viewport.tabIndex = 0;
-    this.viewport.focus({ preventScroll: true });
-
-    this.dragStartIndex = logicalIndex;
-    this.isSelecting = true;
-
-    if (e.shiftKey && this.selectionAnchor !== null) {
-      // Shift+click extends the line range (for Ctrl+Shift+C / context menu).
-      // Do not touch the native selection — user may still want character copy.
-      this.extendSelection(logicalIndex);
-    } else {
-      this.setSelection(logicalIndex, logicalIndex);
+  private indexFromPoint(clientY: number): number | null {
+    for (const [idx, node] of this.renderedNodes) {
+      const r = node.getBoundingClientRect();
+      if (clientY >= r.top && clientY <= r.bottom) return idx;
     }
-  }
-
-  private handleMouseMove = (e: MouseEvent) => {
-    if (!this.isSelecting || this.dragStartIndex === null) return;
-    // Prefer elementFromPoint so selection still extends when the pointer is
-    // over padding / between rows / on the sticky content layer.
-    const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-    const rowEl = (under?.closest('.log-row') || (e.target as HTMLElement)?.closest?.('.log-row')) as HTMLElement | null;
-    if (!rowEl) return;
-    const idx = parseInt(rowEl.dataset.index || '', 10);
-    if (isNaN(idx)) return;
-
-    // Track multi-row line range for Ctrl+Shift+C / context menu, but leave
-    // the native Selection alone so multi-line text can be copied with Ctrl+C.
-    if (idx !== this.dragStartIndex) {
-      this.extendSelection(idx);
-    }
-  }
-
-  private handleMouseUp = () => {
-    this.isSelecting = false;
-    this.dragStartIndex = null;
-  }
-
-  // Keyboard support for selection
-  public handleKeyDown = (e: KeyboardEvent) => {
-    if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      e.preventDefault();
-      const current = this.highlightedLineIndex;
-      if (current === null) return;
-      
-      const direction = e.key === 'ArrowUp' ? -1 : 1;
-      const newIndex = Math.max(0, Math.min(this.totalLines - 1, current + direction));
-      
-      if (this.selectionAnchor === null) {
-        this.setSelection(current, newIndex);
-      } else {
-        this.extendSelection(newIndex);
+    // nearest
+    let best: number | null = null;
+    let bestDist = Infinity;
+    for (const [idx, node] of this.renderedNodes) {
+      const r = node.getBoundingClientRect();
+      const mid = (r.top + r.bottom) / 2;
+      const d = Math.abs(clientY - mid);
+      if (d < bestDist) {
+        bestDist = d;
+        best = idx;
       }
-      this.scrollToIndex(newIndex);
-    } else if (e.key === 'Escape') {
-      this.clearSelection();
     }
+    return best;
   }
 
-  // Attach event listeners for selection
-  public attachSelectionListeners() {
+  private attachSelectionListeners() {
     this.viewport.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      const rowEl = target.closest('.log-row') as HTMLElement;
-      if (rowEl) {
-        const idx = parseInt(rowEl.dataset.index || '', 10);
-        if (!isNaN(idx)) {
-          this.handleMouseDown(e, idx);
-        }
+      if (!target.closest('.log-row')) return;
+
+      // Allow native text selection inside a single row with plain drag;
+      // line-range selection uses Shift or starts from gutter.
+      const inGutter = !!target.closest('.log-num');
+      if (!e.shiftKey && !inGutter) {
+        // Don't clear native selection mid-drag; only clear our line selection
+        // when starting a new non-shift click on gutter next time.
+        return;
       }
+
+      const idx = this.indexFromPoint(e.clientY);
+      if (idx === null) return;
+
+      e.preventDefault();
+      this.viewport.focus();
+      this.isSelecting = true;
+
+      if (e.shiftKey && this.selectionAnchor !== null) {
+        this.selectionEnd = idx;
+      } else {
+        this.selectionAnchor = idx;
+        this.selectionStart = idx;
+        this.selectionEnd = idx;
+      }
+      this.applySelectionStyle();
     });
 
-    this.viewport.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    document.addEventListener('mouseup', this.handleMouseUp.bind(this));
-    this.viewport.addEventListener('keydown', this.handleKeyDown.bind(this));
+    window.addEventListener('mousemove', (e) => {
+      if (!this.isSelecting) return;
+      const idx = this.indexFromPoint(e.clientY);
+      if (idx === null) return;
+      this.selectionEnd = idx;
+      this.applySelectionStyle();
+    });
+
+    window.addEventListener('mouseup', () => {
+      this.isSelecting = false;
+    });
   }
 }

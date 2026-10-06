@@ -24,6 +24,14 @@ export interface TabData {
     currentMatchIndex: number;
     /** When true, only the search-results pane is shown for this tab. */
     resultsOnly?: boolean;
+    /**
+     * Saved view anchors (first visible line + fraction within that line).
+     * Index-based so word-wrap / variable row heights still restore the same content.
+     */
+    mainScrollIndex?: number;
+    mainScrollFrac?: number;
+    filterScrollIndex?: number;
+    filterScrollFrac?: number;
 }
 
 export interface TabGroup {

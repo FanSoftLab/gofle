@@ -127,10 +127,39 @@ type AppConfig struct {
 	ViewMode        string `json:"view_mode"`
 	// LogFontSize is the desktop log font size in px (shared settings.json).
 	LogFontSize     int    `json:"log_font_size"`
-	WindowWidth     int    `json:"window_width"`
-	WindowHeight    int    `json:"window_height"`
-	WindowMaximized bool   `json:"window_maximized"`
-	MaxHistorySize  int    `json:"-"`
+	// LogFontFamily is a CSS font-family stack for the log view.
+	LogFontFamily string `json:"log_font_family"`
+	// LineDensity is "compact" | "normal" | "comfortable" (row spacing).
+	LineDensity string `json:"line_density"`
+	// WordWrap wraps long log lines instead of horizontal scrolling.
+	WordWrap bool `json:"word_wrap"`
+	// ShowLineNumbers toggles the gutter with 1-based line numbers.
+	ShowLineNumbers bool `json:"show_line_numbers"`
+	// DefaultFollow enables tail/follow when a new tab is opened.
+	DefaultFollow bool `json:"default_follow"`
+	// Default search option toggles applied to newly opened tabs.
+	DefaultSearchCase  bool `json:"default_search_case"`
+	DefaultSearchRegex bool `json:"default_search_regex"`
+	DefaultSearchInvert bool `json:"default_search_invert"`
+	// MaxRecentFiles caps the recent-files list (separate from input history).
+	MaxRecentFiles int `json:"max_recent_files"`
+	// ConfirmCloseTab asks before closing a tab that is SSH/FTP or has an active stream.
+	ConfirmCloseTab bool `json:"confirm_close_tab"`
+	// StartupBehavior: "session" (restore tabs) | "empty" | "open_dialog".
+	StartupBehavior string `json:"startup_behavior"`
+	// Remote connection preferences (desktop GUI).
+	SSHConnectTimeoutSec int  `json:"ssh_connect_timeout_sec"`
+	RemoteStallTimeoutSec int `json:"remote_stall_timeout_sec"`
+	AutoAcceptHostKey     bool `json:"auto_accept_host_key"`
+	ConnMaxAttempts       int  `json:"conn_max_attempts"`
+	ConnAttemptWindowMin  int  `json:"conn_attempt_window_min"`
+	ConnLockoutMin        int  `json:"conn_lockout_min"`
+	DefaultSSHPort        int  `json:"default_ssh_port"`
+	DefaultFTPPort        int  `json:"default_ftp_port"`
+	WindowWidth     int `json:"window_width"`
+	WindowHeight    int `json:"window_height"`
+	WindowMaximized bool `json:"window_maximized"`
+	MaxHistorySize  int `json:"-"`
 
 	RecentFiles  []RecentFileItem    `json:"-"`
 	SavedSession *SavedSession       `json:"-"`
@@ -166,6 +195,25 @@ type settingsFile struct {
 	SearchSide        string `json:"search_side"`
 	ViewMode          string `json:"view_mode"`
 	LogFontSize       int    `json:"log_font_size"`
+	LogFontFamily     string `json:"log_font_family"`
+	LineDensity       string `json:"line_density"`
+	WordWrap          *bool  `json:"word_wrap"`
+	ShowLineNumbers   *bool  `json:"show_line_numbers"`
+	DefaultFollow     *bool  `json:"default_follow"`
+	DefaultSearchCase   *bool `json:"default_search_case"`
+	DefaultSearchRegex  *bool `json:"default_search_regex"`
+	DefaultSearchInvert *bool `json:"default_search_invert"`
+	MaxRecentFiles    int    `json:"max_recent_files"`
+	ConfirmCloseTab   *bool  `json:"confirm_close_tab"`
+	StartupBehavior   string `json:"startup_behavior"`
+	SSHConnectTimeoutSec  int `json:"ssh_connect_timeout_sec"`
+	RemoteStallTimeoutSec int `json:"remote_stall_timeout_sec"`
+	AutoAcceptHostKey     *bool `json:"auto_accept_host_key"`
+	ConnMaxAttempts       int `json:"conn_max_attempts"`
+	ConnAttemptWindowMin  int `json:"conn_attempt_window_min"`
+	ConnLockoutMin        int `json:"conn_lockout_min"`
+	DefaultSSHPort        int `json:"default_ssh_port"`
+	DefaultFTPPort        int `json:"default_ftp_port"`
 	WindowMaximized   bool   `json:"window_maximized"`
 	MaxHistorySize    int    `json:"max_history_size"`
 }
@@ -251,6 +299,25 @@ func LoadConfig() (*AppConfig, error) {
 		SearchSide:        "bottom",
 		ViewMode:          "split", // CLI default: split view
 		LogFontSize:       13,
+		LogFontFamily:     "monospace",
+		LineDensity:       "normal",
+		WordWrap:          false,
+		ShowLineNumbers:   true,
+		DefaultFollow:     true,
+		DefaultSearchCase: false,
+		DefaultSearchRegex: false,
+		DefaultSearchInvert: false,
+		MaxRecentFiles:    20,
+		ConfirmCloseTab:   true,
+		StartupBehavior:   "session",
+		SSHConnectTimeoutSec:  10,
+		RemoteStallTimeoutSec: 60,
+		AutoAcceptHostKey:     false,
+		ConnMaxAttempts:       5,
+		ConnAttemptWindowMin:  15,
+		ConnLockoutMin:        5,
+		DefaultSSHPort:        22,
+		DefaultFTPPort:        21,
 		WindowWidth:       1280,
 		WindowHeight:      800,
 		WindowMaximized:   true,
@@ -312,6 +379,63 @@ func (c *AppConfig) loadSettings() {
 	if c.LogFontSize < 11 || c.LogFontSize > 22 {
 		c.LogFontSize = 13
 	}
+	if sf.LogFontFamily != "" {
+		c.LogFontFamily = sf.LogFontFamily
+	}
+	if sf.LineDensity != "" {
+		c.LineDensity = sf.LineDensity
+	}
+	if sf.WordWrap != nil {
+		c.WordWrap = *sf.WordWrap
+	}
+	if sf.ShowLineNumbers != nil {
+		c.ShowLineNumbers = *sf.ShowLineNumbers
+	}
+	if sf.DefaultFollow != nil {
+		c.DefaultFollow = *sf.DefaultFollow
+	}
+	if sf.DefaultSearchCase != nil {
+		c.DefaultSearchCase = *sf.DefaultSearchCase
+	}
+	if sf.DefaultSearchRegex != nil {
+		c.DefaultSearchRegex = *sf.DefaultSearchRegex
+	}
+	if sf.DefaultSearchInvert != nil {
+		c.DefaultSearchInvert = *sf.DefaultSearchInvert
+	}
+	if sf.MaxRecentFiles > 0 {
+		c.MaxRecentFiles = sf.MaxRecentFiles
+	}
+	if sf.ConfirmCloseTab != nil {
+		c.ConfirmCloseTab = *sf.ConfirmCloseTab
+	}
+	if sf.StartupBehavior != "" {
+		c.StartupBehavior = sf.StartupBehavior
+	}
+	if sf.SSHConnectTimeoutSec > 0 {
+		c.SSHConnectTimeoutSec = sf.SSHConnectTimeoutSec
+	}
+	if sf.RemoteStallTimeoutSec > 0 {
+		c.RemoteStallTimeoutSec = sf.RemoteStallTimeoutSec
+	}
+	if sf.AutoAcceptHostKey != nil {
+		c.AutoAcceptHostKey = *sf.AutoAcceptHostKey
+	}
+	if sf.ConnMaxAttempts > 0 {
+		c.ConnMaxAttempts = sf.ConnMaxAttempts
+	}
+	if sf.ConnAttemptWindowMin > 0 {
+		c.ConnAttemptWindowMin = sf.ConnAttemptWindowMin
+	}
+	if sf.ConnLockoutMin > 0 {
+		c.ConnLockoutMin = sf.ConnLockoutMin
+	}
+	if sf.DefaultSSHPort > 0 {
+		c.DefaultSSHPort = sf.DefaultSSHPort
+	}
+	if sf.DefaultFTPPort > 0 {
+		c.DefaultFTPPort = sf.DefaultFTPPort
+	}
 	c.WindowWidth = sf.WindowWidth
 	c.WindowHeight = sf.WindowHeight
 
@@ -325,6 +449,14 @@ func (c *AppConfig) loadSettings() {
 
 func (c *AppConfig) persistSettings() error {
 	saveTabs := c.SaveTabsExit
+	wordWrap := c.WordWrap
+	showLN := c.ShowLineNumbers
+	defFollow := c.DefaultFollow
+	defCase := c.DefaultSearchCase
+	defRegex := c.DefaultSearchRegex
+	defInvert := c.DefaultSearchInvert
+	confirmClose := c.ConfirmCloseTab
+	autoHost := c.AutoAcceptHostKey
 	sf := settingsFile{
 		Theme:             c.Theme,
 		Language:          c.Language,
@@ -335,6 +467,25 @@ func (c *AppConfig) persistSettings() error {
 		SearchSide:        c.SearchSide,
 		ViewMode:          c.ViewMode,
 		LogFontSize:       c.LogFontSize,
+		LogFontFamily:     c.LogFontFamily,
+		LineDensity:       c.LineDensity,
+		WordWrap:          &wordWrap,
+		ShowLineNumbers:   &showLN,
+		DefaultFollow:     &defFollow,
+		DefaultSearchCase:   &defCase,
+		DefaultSearchRegex:  &defRegex,
+		DefaultSearchInvert: &defInvert,
+		MaxRecentFiles:    c.MaxRecentFiles,
+		ConfirmCloseTab:   &confirmClose,
+		StartupBehavior:   c.StartupBehavior,
+		SSHConnectTimeoutSec:  c.SSHConnectTimeoutSec,
+		RemoteStallTimeoutSec: c.RemoteStallTimeoutSec,
+		AutoAcceptHostKey:     &autoHost,
+		ConnMaxAttempts:       c.ConnMaxAttempts,
+		ConnAttemptWindowMin:  c.ConnAttemptWindowMin,
+		ConnLockoutMin:        c.ConnLockoutMin,
+		DefaultSSHPort:        c.DefaultSSHPort,
+		DefaultFTPPort:        c.DefaultFTPPort,
 		WindowWidth:       c.WindowWidth,
 		WindowHeight:      c.WindowHeight,
 		WindowMaximized:   c.WindowMaximized,
@@ -738,8 +889,12 @@ func (c *AppConfig) AddRecentFile(path string, size int64, isSSH bool, ssh *SSHC
 	}
 
 	c.RecentFiles = append([]RecentFileItem{newItem}, filtered...)
-	if len(c.RecentFiles) > 20 {
-		c.RecentFiles = c.RecentFiles[:20]
+	maxRecent := c.MaxRecentFiles
+	if maxRecent <= 0 {
+		maxRecent = 20
+	}
+	if len(c.RecentFiles) > maxRecent {
+		c.RecentFiles = c.RecentFiles[:maxRecent]
 	}
 
 	c.recentFileCacheValid = false

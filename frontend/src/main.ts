@@ -10,7 +10,7 @@ import { TabManager } from './tab_manager';
 import { ModalController } from './modal_controller';
 import { SSHHandler } from './ssh_handler';
 import { InputHistory } from './input_history';
-import { SettingsManager, applyLogFontSize } from './settings_manager';
+import { SettingsManager, applyLogFontSize, getPrefs } from './settings_manager';
 import { ContextMenu } from './context_menu';
 
 type FileStatsResponse = any;
@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         btnNavLast: document.getElementById('btn-search-last') as HTMLButtonElement,
         btnSaveSearch: document.getElementById('btn-save-search-results') as HTMLButtonElement,
         recentModal: document.getElementById('recent-modal')!,
-        recentFilesList: document.getElementById('recent-files-list')!,
+        recentFilesList: document.getElementById('recent-files-list-local')!,
         btnCloseRecent: document.getElementById('btn-close-recent')!,
         btnClearRecent: document.getElementById('btn-clear-recent')!,
         groupModal: document.getElementById('group-modal')!,
@@ -120,6 +120,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     ctx.mainScroller = mainScroller;
     ctx.filterScroller = filterScroller;
 
+    /** When true, updateUIState restores scroll from TabData (set by switchTab). */
+    let pendingScrollRestore = false;
+
+    const persistActiveScroll = (
+        which: 'main' | 'filter',
+        anchor: { index: number; fraction: number },
+    ) => {
+        if (!ctx.activeTabId || !ctx.tabs.has(ctx.activeTabId)) return;
+        const tab = ctx.tabs.get(ctx.activeTabId)!;
+        if (which === 'main') {
+            if (!tab.autoScroll) {
+                tab.mainScrollIndex = anchor.index;
+                tab.mainScrollFrac = anchor.fraction;
+            }
+        } else {
+            tab.filterScrollIndex = anchor.index;
+            tab.filterScrollFrac = anchor.fraction;
+        }
+    };
+    mainScroller.setOnScrollPosition((a) => persistActiveScroll('main', a));
+    filterScroller.setOnScrollPosition((a) => persistActiveScroll('filter', a));
+
     // Reserve space at the bottom of each log viewport for the overlaid status
     // bar (it uses the accent/blue color) so the last visible row is never
     // hidden behind it.
@@ -143,7 +165,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     const tabManager = new TabManager(ctx);
     const sshHandler = new SSHHandler(ctx);
     const modalController = new ModalController(ctx, sshHandler);
-    const settingsManager = new SettingsManager(ctx);
+    let lastFontKey = '';
+    const settingsManager = new SettingsManager(ctx, (prefs) => {
+        mainScroller.setWordWrap(!!prefs.wordWrap);
+        filterScroller.setWordWrap(!!prefs.wordWrap);
+        // Only remeasure when font metrics actually change — not on every prefs write.
+        const fontKey = `${prefs.logFontSize}|${prefs.logFontFamily}|${prefs.lineDensity}`;
+        if (fontKey !== lastFontKey) {
+            lastFontKey = fontKey;
+            mainScroller.refreshMetrics();
+            filterScroller.refreshMetrics();
+        }
+    });
+    void settingsManager.loadAndApply().then((prefs) => {
+        mainScroller.setWordWrap(!!prefs.wordWrap);
+        filterScroller.setWordWrap(!!prefs.wordWrap);
+    });
     const contextMenu = new ContextMenu(ctx);
 
     tabManager.initGroupModalHandlers();
@@ -423,9 +460,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         syncSearchClearBtn();
 
         mainScroller.setAutoScroll(tab.autoScroll);
+        // Queue scroll restore BEFORE setTotalLines so pendingScrollTop survives layout.
+        if (pendingScrollRestore) {
+            pendingScrollRestore = false;
+            if (!tab.autoScroll && typeof tab.mainScrollIndex === 'number') {
+                mainScroller.setViewAnchor(tab.mainScrollIndex, tab.mainScrollFrac ?? 0);
+            }
+            if (typeof tab.filterScrollIndex === 'number') {
+                filterScroller.setViewAnchor(tab.filterScrollIndex, tab.filterScrollFrac ?? 0);
+            }
+        }
         mainScroller.setTotalLines(tab.totalLines);
         mainScroller.setSearchQuery(tab.searchQuery);
         filterScroller.setTotalLines(tab.matchedLines);
+        if (tab.autoScroll) {
+            mainScroller.scrollToBottom();
+        }
         validateRegexUI();
         updateSearchNavState();
     };
@@ -578,6 +628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Wire cross-manager callbacks into the shared context.
     ctx.updateUIState = updateUIState;
+    (ctx as any).requestScrollRestore = () => { pendingScrollRestore = true; };
     ctx.triggerSearch = triggerSearch;
     ctx.loadRecent = modalController.loadRecent;
     ctx.addOrUpdateTab = tabManager.addOrUpdateTab;
@@ -1286,10 +1337,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     await loadSettings();
 
+    const startupBehavior = (getPrefs().startupBehavior || 'session').toLowerCase();
+
     // D1: restore the previous tab-bar structure (order, groups, collapsed,
     // active tab) when "save tabs on exit" is enabled. RestoreTab preserves the
     // persisted tab ids, so group membership and strip order stay valid.
     const restoreSavedSession = async () => {
+        if (startupBehavior === 'empty' || startupBehavior === 'open_dialog') return;
         if (ctx.tabs.size > 0) return;
         const api = getApi();
         if (!api || !api.GetSavedSession) return;
@@ -1413,6 +1467,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     await restoreSavedSession();
+
+    if (startupBehavior === 'open_dialog' && pendingStartupArgs.length === 0) {
+        // No OS file args — present the open dialog so the user can pick a log.
+        queueMicrotask(() => {
+            try { ctx.btnOpen.click(); } catch (e) { console.error('startup open dialog failed', e); }
+        });
+    }
 
     if (pendingStartupArgs.length > 0) {
         const api = getApi();

@@ -90,6 +90,9 @@ type Config struct {
 	// StallTimeout bounds a silent initial download. Zero selects
 	// streamStallTimeout.
 	StallTimeout time.Duration `json:"-"`
+	// ConnectTimeout bounds the FTP dial (and TLS handshake when applicable).
+	// Zero selects a 15s default.
+	ConnectTimeout time.Duration `json:"-"`
 }
 
 // validateRemotePath checks the path used for FTP navigation/streaming. Both
@@ -283,7 +286,10 @@ func dialClient(cfg Config) (*ftp.ServerConn, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, port)
-	timeout := 30 * time.Second
+	timeout := cfg.ConnectTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 
 	tlsMode := cfg.TLSMode
 	if tlsMode == "" {

@@ -73,17 +73,27 @@ func (a *App) OpenSSHFile(sshCfg SSHConfig) (*FileStatsResponse, error) {
 
 	stats, err := a.openSSHStream(sshCfg, sshPathDisplay, sshSummary, "")
 	if err != nil {
-		a.recordConnFailure(sshCfg.Host, sshCfg.Port)
-		if hkErr, ok := errors.AsType[*ssh.HostKeyUnknownError](err); ok {
-			// Stash the connection + the known_hosts line so AcceptSSHHost can
-			// persist the host and retry once the user trusts it.
-			a.mu.Lock()
-			a.pendingSSHHost[hkErr.Host] = hkErr.Line
-			a.pendingSSHConfig[hkErr.Host] = sshCfg
-			a.mu.Unlock()
+		if hkErr, ok := errors.AsType[*ssh.HostKeyUnknownError](err); ok && a.autoAcceptHostKey() {
+			if werr := ssh.WriteKnownHost(a.cfg.KnownHostsPath(), hkErr.Line); werr != nil {
+				a.recordConnFailure(sshCfg.Host, sshCfg.Port)
+				return nil, fmt.Errorf("failed to auto-accept host key: %w", werr)
+			}
+			slog.Warn("ssh: auto-accepted unknown host key", "host", hkErr.Host, "fingerprint", hkErr.Fingerprint)
+			stats, err = a.openSSHStream(sshCfg, sshPathDisplay, sshSummary, "")
 		}
-		// Failures are already logged inside openSSHStream.
-		return nil, err
+		if err != nil {
+			a.recordConnFailure(sshCfg.Host, sshCfg.Port)
+			if hkErr, ok := errors.AsType[*ssh.HostKeyUnknownError](err); ok {
+				// Stash the connection + the known_hosts line so AcceptSSHHost can
+				// persist the host and retry once the user trusts it.
+				a.mu.Lock()
+				a.pendingSSHHost[hkErr.Host] = hkErr.Line
+				a.pendingSSHConfig[hkErr.Host] = sshCfg
+				a.mu.Unlock()
+			}
+			// Failures are already logged inside openSSHStream.
+			return nil, err
+		}
 	}
 
 	a.recordConnSuccess(sshCfg.Host, sshCfg.Port)
@@ -162,6 +172,8 @@ func (a *App) AcceptSSHHost(host string) (*FileStatsResponse, error) {
 // pendingSSH* maps OpenSSHFile uses, so AckSSHHost can persist the key and the
 // frontend can re-list afterwards.
 func (a *App) ListSSHFiles(sshCfg SSHConfig, path string) ([]ssh.DirEntry, error) {
+	connectTO, stallTO := a.remoteTimeouts()
+
 	// Rate limiting check
 	if err := a.checkConnRateLimit(sshCfg.Host, sshCfg.Port); err != nil {
 		return nil, fmt.Errorf("ssh connection rate limited: %w", err)
@@ -177,7 +189,10 @@ func (a *App) ListSSHFiles(sshCfg SSHConfig, path string) ([]ssh.DirEntry, error
 		KeyPassphrase:  sshCfg.KeyPassphrase,
 		RemoteFilePath: sshCfg.RemoteFilePath,
 		KnownHostsPath: a.cfg.KnownHostsPath(),
-	}
+	
+			ConnectTimeout: connectTO,
+			StallTimeout:   stallTO,
+		}
 	key := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
 	// Reuse the cached lister for this host if we have one.
@@ -194,16 +209,24 @@ func (a *App) ListSSHFiles(sshCfg SSHConfig, path string) ([]ssh.DirEntry, error
 		l, err := ssh.NewLister(cfg)
 		if err != nil {
 			var hkErr *ssh.HostKeyUnknownError
-			if errors.As(err, &hkErr) {
-				// Stash the connection + the known_hosts line so AckSSHHost can
-				// persist the host; the frontend then re-calls ListSSHFiles.
-				a.mu.Lock()
-				a.pendingSSHHost[hkErr.Host] = hkErr.Line
-				a.pendingSSHConfig[hkErr.Host] = sshCfg
-				a.mu.Unlock()
+			if errors.As(err, &hkErr) && a.autoAcceptHostKey() {
+				if werr := ssh.WriteKnownHost(a.cfg.KnownHostsPath(), hkErr.Line); werr != nil {
+					return nil, fmt.Errorf("failed to auto-accept host key: %w", werr)
+				}
+				slog.Warn("ssh: auto-accepted unknown host key (browse)", "host", hkErr.Host)
+				l, err = ssh.NewLister(cfg)
 			}
-
-			return nil, err
+			if err != nil {
+				if errors.As(err, &hkErr) {
+					// Stash the connection + the known_hosts line so AckSSHHost can
+					// persist the host; the frontend then re-calls ListSSHFiles.
+					a.mu.Lock()
+					a.pendingSSHHost[hkErr.Host] = hkErr.Line
+					a.pendingSSHConfig[hkErr.Host] = sshCfg
+					a.mu.Unlock()
+				}
+				return nil, err
+			}
 		}
 
 		lister = l
@@ -288,6 +311,7 @@ func (a *App) AckSSHHost(host string) error {
 //
 //nolint:dupl // symmetric SSH/FTP stream openers
 func (a *App) openSSHStream(sshCfg SSHConfig, sshPathDisplay string, sshSummary *config.SSHConfigSummary, tabID string) (*FileStatsResponse, error) {
+
 	// 1 tab = 1 file, for ALL callers (open / accept-host / restore): a tab
 	// registered while another open of the same remote is still dialing is not
 	// visible to findOpenTab yet, so concurrent opens must be collapsed here.
@@ -383,6 +407,8 @@ func (a *App) openSSHResources(
 	sshPathDisplay string,
 	progress func(stage string, done, total int64),
 ) (*ssh.Streamer, *indexer.FileIndexer, error) {
+	connectTO, stallTO := a.remoteTimeouts()
+
 	// Headless callers (tests, CLI paths) have no Wails context yet.
 	base := a.ctx
 	if base == nil {
@@ -412,6 +438,9 @@ func (a *App) openSSHResources(
 			RemoteFilePath: sshCfg.RemoteFilePath,
 			KnownHostsPath: a.cfg.KnownHostsPath(),
 			Progress:       progress,
+		
+			ConnectTimeout: connectTO,
+			StallTimeout:   stallTO,
 		})
 		if err != nil {
 			// NewStreamer errors are already fully contextualized ("failed to

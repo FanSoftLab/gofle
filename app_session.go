@@ -231,18 +231,148 @@ func (a *App) GetSettings() (map[string]any, error) {
 	defer a.cfg.Mu.RUnlock()
 
 	return map[string]any{
-		"theme":               a.cfg.Theme,
-		"language":            a.cfg.Language,
-		"save_tabs_exit":      a.cfg.SaveTabsExit,
-		"search_pane_height":  a.cfg.SearchPaneHeight,
-		"search_pane_width":   a.cfg.SearchPaneWidth,
-		"search_orientation":  a.cfg.SearchOrientation,
-		"search_side":         a.cfg.SearchSide,
-		"view_mode":          a.cfg.ViewMode,
-		"log_font_size":      a.cfg.LogFontSize,
-		"max_history_size":   a.cfg.MaxHistorySize,
-		"startup_args":       a.startupArgs,
+		"theme":                    a.cfg.Theme,
+		"language":                 a.cfg.Language,
+		"save_tabs_exit":           a.cfg.SaveTabsExit,
+		"search_pane_height":       a.cfg.SearchPaneHeight,
+		"search_pane_width":        a.cfg.SearchPaneWidth,
+		"search_orientation":       a.cfg.SearchOrientation,
+		"search_side":              a.cfg.SearchSide,
+		"view_mode":                a.cfg.ViewMode,
+		"log_font_size":            a.cfg.LogFontSize,
+		"log_font_family":          a.cfg.LogFontFamily,
+		"line_density":             a.cfg.LineDensity,
+		"word_wrap":                a.cfg.WordWrap,
+		"show_line_numbers":        a.cfg.ShowLineNumbers,
+		"default_follow":           a.cfg.DefaultFollow,
+		"default_search_case":      a.cfg.DefaultSearchCase,
+		"default_search_regex":     a.cfg.DefaultSearchRegex,
+		"default_search_invert":    a.cfg.DefaultSearchInvert,
+		"max_recent_files":         a.cfg.MaxRecentFiles,
+		"confirm_close_tab":        a.cfg.ConfirmCloseTab,
+		"startup_behavior":         a.cfg.StartupBehavior,
+		"ssh_connect_timeout_sec":  a.cfg.SSHConnectTimeoutSec,
+		"remote_stall_timeout_sec": a.cfg.RemoteStallTimeoutSec,
+		"auto_accept_host_key":     a.cfg.AutoAcceptHostKey,
+		"conn_max_attempts":        a.cfg.ConnMaxAttempts,
+		"conn_attempt_window_min":  a.cfg.ConnAttemptWindowMin,
+		"conn_lockout_min":         a.cfg.ConnLockoutMin,
+		"default_ssh_port":         a.cfg.DefaultSSHPort,
+		"default_ftp_port":         a.cfg.DefaultFTPPort,
+		"max_history_size":         a.cfg.MaxHistorySize,
+		"startup_args":             a.startupArgs,
 	}, nil
+}
+
+// SaveAppSettings persists the full settings map from the Settings dialog.
+func (a *App) SaveAppSettings(settings map[string]any) error {
+	a.cfg.Mu.Lock()
+	if v, ok := settings["theme"].(string); ok && v != "" {
+		a.cfg.Theme = v
+	}
+	if v, ok := settings["language"].(string); ok && v != "" {
+		a.cfg.Language = v
+	}
+	if v, ok := settings["save_tabs_exit"].(bool); ok {
+		a.cfg.SaveTabsExit = v
+	}
+	if v, ok := settings["view_mode"].(string); ok && v != "" {
+		a.cfg.ViewMode = v
+	}
+	if v, ok := asIntSetting(settings["log_font_size"]); ok {
+		a.cfg.LogFontSize = v
+	}
+	if v, ok := settings["log_font_family"].(string); ok && v != "" {
+		a.cfg.LogFontFamily = v
+	}
+	if v, ok := settings["line_density"].(string); ok && v != "" {
+		a.cfg.LineDensity = v
+	}
+	if v, ok := settings["word_wrap"].(bool); ok {
+		a.cfg.WordWrap = v
+	}
+	if v, ok := settings["show_line_numbers"].(bool); ok {
+		a.cfg.ShowLineNumbers = v
+	}
+	if v, ok := settings["default_follow"].(bool); ok {
+		a.cfg.DefaultFollow = v
+	}
+	if v, ok := settings["default_search_case"].(bool); ok {
+		a.cfg.DefaultSearchCase = v
+	}
+	if v, ok := settings["default_search_regex"].(bool); ok {
+		a.cfg.DefaultSearchRegex = v
+	}
+	if v, ok := settings["default_search_invert"].(bool); ok {
+		a.cfg.DefaultSearchInvert = v
+	}
+	if v, ok := asIntSetting(settings["max_recent_files"]); ok && v > 0 {
+		a.cfg.MaxRecentFiles = v
+	}
+	if v, ok := asIntSetting(settings["max_history_size"]); ok && v > 0 {
+		a.cfg.MaxHistorySize = v
+	}
+	if v, ok := settings["confirm_close_tab"].(bool); ok {
+		a.cfg.ConfirmCloseTab = v
+	}
+	if v, ok := settings["startup_behavior"].(string); ok && v != "" {
+		a.cfg.StartupBehavior = v
+	}
+	if v, ok := settings["search_orientation"].(string); ok && v != "" {
+		a.cfg.SearchOrientation = v
+	}
+	if v, ok := settings["search_side"].(string); ok && v != "" {
+		a.cfg.SearchSide = v
+	}
+	if v, ok := asIntSetting(settings["ssh_connect_timeout_sec"]); ok && v > 0 {
+		a.cfg.SSHConnectTimeoutSec = v
+	}
+	if v, ok := asIntSetting(settings["remote_stall_timeout_sec"]); ok && v > 0 {
+		a.cfg.RemoteStallTimeoutSec = v
+	}
+	if v, ok := settings["auto_accept_host_key"].(bool); ok {
+		a.cfg.AutoAcceptHostKey = v
+	}
+	if v, ok := asIntSetting(settings["conn_max_attempts"]); ok && v > 0 {
+		a.cfg.ConnMaxAttempts = v
+	}
+	if v, ok := asIntSetting(settings["conn_attempt_window_min"]); ok && v > 0 {
+		a.cfg.ConnAttemptWindowMin = v
+	}
+	if v, ok := asIntSetting(settings["conn_lockout_min"]); ok && v > 0 {
+		a.cfg.ConnLockoutMin = v
+	}
+	if v, ok := asIntSetting(settings["default_ssh_port"]); ok && v > 0 {
+		a.cfg.DefaultSSHPort = v
+	}
+	if v, ok := asIntSetting(settings["default_ftp_port"]); ok && v > 0 {
+		a.cfg.DefaultFTPPort = v
+	}
+	saveTabs := a.cfg.SaveTabsExit
+	a.cfg.Mu.Unlock()
+
+	var clearErr error
+	if !saveTabs {
+		clearErr = a.cfg.ClearSavedSession()
+	}
+	return errors.Join(clearErr, a.cfg.Save())
+}
+
+func asIntSetting(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case float32:
+		return int(n), true
+	default:
+		return 0, false
+	}
 }
 
 // SaveSearchPaneHeight persists the search-results panel height (used by the

@@ -16,6 +16,8 @@ export function ClearSavedSession():Promise<void>;
 
 export function RestoreTab(arg1:config.SavedTabItem):Promise<main.FileStatsResponse>;
 
+export function SaveAppSettings(arg1:Record<string, any>):Promise<void>;
+
 export function GetSettings():Promise<{[key: string]: any}>;
 
 export function OpenFile(arg1:string):Promise<main.FileStatsResponse>;

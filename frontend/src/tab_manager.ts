@@ -1,6 +1,7 @@
 import { t } from './i18n';
 import { showToast } from './toast';
 import type { AppContext, TabData, TabGroup, StripEntry } from './app_context';
+import { getPrefs } from './settings_manager';
 
 // genId returns a collision-resistant unique id. crypto.randomUUID is preferred
 // when available (secure context / WebView); otherwise we fall back to a
@@ -495,6 +496,10 @@ export class TabManager {
     };
 
     public closeTab = async (tabId: string) => {
+        const tab = this.ctx.tabs.get(tabId);
+        if (tab && getPrefs().confirmCloseTab && tab.isSSH) {
+            if (!confirm(t('confirm_close_remote_tab') || 'Close remote tab?')) return;
+        }
         await this.closeTabs([tabId]);
     };
 
@@ -605,14 +610,18 @@ export class TabManager {
             totalLines: stats.total_lines,
             matchedLines: stats.matched_lines,
             fileSize: stats.file_size,
-            autoScroll: true,
+            autoScroll: getPrefs().defaultFollow,
             searchQuery: '',
             secondaryQuery: '',
-            isRegex: false,
-            caseSensitive: false,
-            invertMatch: false,
+            isRegex: getPrefs().defaultSearchRegex,
+            caseSensitive: getPrefs().defaultSearchCase,
+            invertMatch: getPrefs().defaultSearchInvert,
             currentMatchIndex: -1,
             resultsOnly: false,
+            mainScrollIndex: 0,
+            mainScrollFrac: 0,
+            filterScrollIndex: 0,
+            filterScrollFrac: 0,
         });
 
         if (!this.ctx.strip.some(e => e.type === 'tab' && e.id === stats.tab_id)) {
@@ -624,7 +633,20 @@ export class TabManager {
     };
 
     public switchTab = (tabId: string) => {
+        // Persist scroll positions of the tab we are leaving.
+        const prevId = this.ctx.activeTabId;
+        if (prevId && prevId !== tabId && this.ctx.tabs.has(prevId)) {
+            const prev = this.ctx.tabs.get(prevId)!;
+            const mainA = this.ctx.mainScroller.getViewAnchor();
+            const filterA = this.ctx.filterScroller.getViewAnchor();
+            prev.mainScrollIndex = mainA.index;
+            prev.mainScrollFrac = mainA.fraction;
+            prev.filterScrollIndex = filterA.index;
+            prev.filterScrollFrac = filterA.fraction;
+        }
         this.ctx.activeTabId = tabId;
+        // Only restore scroll on an actual tab switch (not on every UI refresh).
+        (this.ctx as any).requestScrollRestore?.();
         this.ctx.mainScroller.setHighlightedLine(null);
         this.ctx.filterScroller.setHighlightedLine(null);
         const api = this.ctx.getApi();

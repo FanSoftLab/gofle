@@ -6,6 +6,7 @@ CLI_APP_NAME="gofle"
 TARGET_UID=$(id -u)
 TARGET_GID=$(id -g)
 RUN_TESTS=false
+NO_CACHE=false
 
 # Defaults
 MODE="prod"
@@ -19,6 +20,7 @@ usage() {
 Usage: $0 [options]
 
   -run-tests          Run go tests + vet inside the build container
+  -no-cache           Force full rebuild (ignore Docker/BuildKit layer cache)
   -mode <dev|prod>    Build mode (default: prod)
   -os <target>        linux | mac | windows | all   (default: linux)
   -arch <target>      amd64 | arm64 | all           (default: amd64)
@@ -40,6 +42,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -run-tests|--run-tests) RUN_TESTS=true; shift;;
+        -no-cache|--no-cache) NO_CACHE=true; shift;;
         -mode) MODE="$2"; shift 2;;
         -os) TARGET_OS="$2"; shift 2;;
         -arch) TARGET_ARCH="$2"; shift 2;;
@@ -173,8 +176,9 @@ cleanup() {
 
     rm -rf "$OUT_DIR" 2>/dev/null || true
 
+    # Do not run `docker builder prune` here — it wipes BuildKit layer cache and
+    # forces a full re-download of Go/npm deps on the next build.
     docker image prune -f --label=stage=builder > /dev/null 2>&1 || true
-    docker builder prune -f > /dev/null 2>&1 || true
 }
 
 trap 'INTERRUPTED=1; cleanup' INT TERM
@@ -184,8 +188,24 @@ OUT_DIR=".buildout"
 rm -rf "$OUT_DIR" 2>/dev/null || true
 
 export DOCKER_BUILDKIT=1
+export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-auto}"
+
+# Dependency layers (apt / go mod / npm) stay cached across builds.
+# They re-run only when lockfiles change, or when -no-cache is passed.
+DOCKER_CACHE_OPTS=()
+if [ "$NO_CACHE" = "true" ]; then
+    echo "Full rebuild (-no-cache): Docker layer cache disabled."
+    DOCKER_CACHE_OPTS+=(--no-cache)
+else
+    echo "Incremental build (BuildKit cache enabled):"
+    echo "  • apt packages             → cached in 'system' stage (no reinstall)"
+    echo "  • go.mod / go.sum change   → re-download Go modules"
+    echo "  • package-lock.json change → re-run npm ci"
+    echo "  • code-only change         → reuse deps, rebuild app"
+fi
 
 docker build \
+  "${DOCKER_CACHE_OPTS[@]}" \
   --build-arg RUN_TESTS="$RUN_TESTS" \
   --build-arg GOFILE_VERSION="$CLI_VERSION" \
   --build-arg BUILD_TIME="$BUILD_TIME" \

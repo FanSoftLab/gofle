@@ -173,14 +173,28 @@ type connAttemptInfo struct {
 	lockedUntil time.Time
 }
 
-const (
-	// maxConnAttempts is the maximum number of failed attempts before rate limiting kicks in.
-	maxConnAttempts = 5
-	// connAttemptWindow is the time window for counting attempts.
-	connAttemptWindow = 15 * time.Minute
-	// connLockoutDuration is how long to lock out after max attempts exceeded.
-	connLockoutDuration = 5 * time.Minute
-)
+
+func (a *App) connLimitParams() (maxAttempts int, window, lockout time.Duration) {
+	maxAttempts = 5
+	window = 15 * time.Minute
+	lockout = 5 * time.Minute
+	if a.cfg == nil {
+		return
+	}
+	a.cfg.Mu.RLock()
+	defer a.cfg.Mu.RUnlock()
+	if a.cfg.ConnMaxAttempts > 0 {
+		maxAttempts = a.cfg.ConnMaxAttempts
+	}
+	if a.cfg.ConnAttemptWindowMin > 0 {
+		window = time.Duration(a.cfg.ConnAttemptWindowMin) * time.Minute
+	}
+	if a.cfg.ConnLockoutMin > 0 {
+		lockout = time.Duration(a.cfg.ConnLockoutMin) * time.Minute
+	}
+	return
+}
+
 
 // NewApp constructs the application, loading persisted configuration. Returns
 // an error if the config directory or secret key cannot be initialized.
@@ -258,9 +272,39 @@ func (a *App) GetVersion() string {
 	return version.Get().String()
 }
 
+
+// remoteTimeouts returns connect and stall timeouts from settings (with defaults).
+func (a *App) remoteTimeouts() (connect, stall time.Duration) {
+	connect = 10 * time.Second
+	stall = 60 * time.Second
+	if a.cfg == nil {
+		return
+	}
+	a.cfg.Mu.RLock()
+	defer a.cfg.Mu.RUnlock()
+	if a.cfg.SSHConnectTimeoutSec > 0 {
+		connect = time.Duration(a.cfg.SSHConnectTimeoutSec) * time.Second
+	}
+	if a.cfg.RemoteStallTimeoutSec > 0 {
+		stall = time.Duration(a.cfg.RemoteStallTimeoutSec) * time.Second
+	}
+	return
+}
+
+// autoAcceptHostKey reports whether unknown host keys/certs should be trusted automatically.
+func (a *App) autoAcceptHostKey() bool {
+	if a.cfg == nil {
+		return false
+	}
+	a.cfg.Mu.RLock()
+	defer a.cfg.Mu.RUnlock()
+	return a.cfg.AutoAcceptHostKey
+}
+
 // checkConnRateLimit checks if a connection to the given host:port is allowed.
 // Returns an error if rate limited, otherwise returns nil and records the attempt start.
 func (a *App) checkConnRateLimit(host string, port int) error {
+	maxAttempts, window, lockout := a.connLimitParams()
 	key := fmt.Sprintf("%s:%d", host, port)
 	now := time.Now()
 
@@ -283,7 +327,7 @@ func (a *App) checkConnRateLimit(host string, port int) error {
 	}
 
 	// Reset count if outside the window
-	if now.Sub(info.lastAttempt) > connAttemptWindow {
+	if now.Sub(info.lastAttempt) > window {
 		info.count = 1
 		info.lastAttempt = now
 		return nil
@@ -293,10 +337,10 @@ func (a *App) checkConnRateLimit(host string, port int) error {
 	info.count++
 	info.lastAttempt = now
 
-	if info.count > maxConnAttempts {
-		info.lockedUntil = now.Add(connLockoutDuration)
+	if info.count > maxAttempts {
+		info.lockedUntil = now.Add(lockout)
 		return fmt.Errorf("too many failed connection attempts to %s: locked for %v",
-			key, connLockoutDuration)
+			key, lockout)
 	}
 
 	return nil
@@ -304,6 +348,7 @@ func (a *App) checkConnRateLimit(host string, port int) error {
 
 // recordConnFailure records a failed connection attempt for rate limiting.
 func (a *App) recordConnFailure(host string, port int) {
+	maxAttempts, _, lockout := a.connLimitParams()
 	key := fmt.Sprintf("%s:%d", host, port)
 	now := time.Now()
 
@@ -315,15 +360,15 @@ func (a *App) recordConnFailure(host string, port int) {
 		a.connAttempts[key] = &connAttemptInfo{
 			count:       1,
 			lastAttempt: now,
-			lockedUntil: now.Add(connLockoutDuration),
+			lockedUntil: now.Add(lockout),
 		}
 		return
 	}
 
 	info.count++
 	info.lastAttempt = now
-	if info.count > maxConnAttempts {
-		info.lockedUntil = now.Add(connLockoutDuration)
+	if info.count > maxAttempts {
+		info.lockedUntil = now.Add(lockout)
 	}
 }
 

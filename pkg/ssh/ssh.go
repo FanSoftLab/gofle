@@ -97,6 +97,10 @@ type Config struct {
 	// Progress resets the timer, so a slow-but-alive transfer of a huge log is
 	// never cut off. Zero selects streamStallTimeout.
 	StallTimeout time.Duration `json:"-"`
+	// ConnectTimeout bounds TCP dial + SSH handshake/auth. Zero selects
+	// streamHandshakeTimeout (30s). The value is applied to ClientConfig.Timeout
+	// and the net.Dialer used by dialContext.
+	ConnectTimeout time.Duration `json:"-"`
 }
 
 // shellQuote safely embeds s as a single literal argument for a remote shell
@@ -442,11 +446,15 @@ func NewStreamerContext(ctx context.Context, cfg Config) (*Streamer, error) { //
 		return nil, fmt.Errorf("failed to initialize SSH host key verification: %w", err)
 	}
 
+	connectTimeout := cfg.ConnectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = streamHandshakeTimeout
+	}
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            authMethods,
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         10 * time.Second,
+		Timeout:         connectTimeout,
 	}
 
 	address := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -1814,11 +1822,15 @@ func NewLister(cfg Config) (*Lister, error) {
 		return nil, fmt.Errorf("failed to initialize SSH host key verification: %w", err)
 	}
 
+	connectTimeout := cfg.ConnectTimeout
+	if connectTimeout <= 0 {
+		connectTimeout = streamHandshakeTimeout
+	}
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            authMethods,
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         10 * time.Second,
+		Timeout:         connectTimeout,
 	}
 
 	address := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
