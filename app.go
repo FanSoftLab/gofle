@@ -50,6 +50,8 @@ type FileStatsResponse struct {
 type LogLineResponse struct {
 	Index   int64  `json:"index"`
 	Content string `json:"content"`
+	// IsMatch is false for context-only neighbor lines expanded around a hit.
+	IsMatch bool `json:"is_match"`
 }
 
 // RegexValidationResult reports whether a user pattern is compilable and, if not, a human-readable reason for the UI.
@@ -69,6 +71,7 @@ type TabState struct {
 	Indexer          *indexer.FileIndexer
 	Searcher         *search.SearchEngine
 	MatchedLines     []int64
+	MatchSet         map[int64]struct{} // true search hits (before context expand)
 	// PrimaryMatches is the last full-file (primary) result before SecondaryQuery
 	// was applied. Used to refine the AND-filter in O(matches) via FilterLines
 	// instead of rescanning the whole file.

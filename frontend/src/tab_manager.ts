@@ -1,5 +1,6 @@
 import { t } from './i18n';
 import { showToast } from './toast';
+import { showConfirm } from './confirm_dialog';
 import type { AppContext, TabData, TabGroup, StripEntry } from './app_context';
 import { getPrefs } from './settings_manager';
 
@@ -497,8 +498,8 @@ export class TabManager {
 
     public closeTab = async (tabId: string) => {
         const tab = this.ctx.tabs.get(tabId);
-        if (tab && getPrefs().confirmCloseTab && tab.isSSH) {
-            if (!confirm(t('confirm_close_remote_tab') || 'Close remote tab?')) return;
+        if (tab && getPrefs().confirmCloseTab && (tab.isSSH || (tab as any).isFTP || (tab as any).isRemote)) {
+            if (!(await showConfirm(t('confirm_close_remote_tab') || 'Close remote tab?', { ok: t('btn_ok') || 'OK', cancel: t('btn_cancel') || 'Cancel' }))) return;
         }
         await this.closeTabs([tabId]);
     };
@@ -526,7 +527,7 @@ export class TabManager {
         const ids = this.orderedTabIds();
         if (ids.length === 0) return;
         this.suppressReopen = true;
-        if (!confirm(t('confirm_close_all'))) return;
+        if (!(await showConfirm(t('confirm_close_all'), { ok: t('btn_ok') || 'OK', cancel: t('btn_cancel') || 'Cancel' }))) return;
 
         const api = this.ctx.getApi();
         for (const id of ids) {
@@ -545,7 +546,7 @@ export class TabManager {
     private closeGroup = async (groupId: string) => {
         const grp = this.ctx.groups.get(groupId);
         if (!grp) return;
-        if (!confirm(t('confirm_close_group', { name: grp.title }))) return;
+        if (!(await showConfirm(t('confirm_close_group', { name: grp.title }), { ok: t('btn_ok') || 'OK', cancel: t('btn_cancel') || 'Cancel' }))) return;
         // pruneEmptyGroups (inside closeTabs) drops the now-empty group.
         await this.closeTabs([...grp.memberIds]);
     };
@@ -613,6 +614,7 @@ export class TabManager {
             autoScroll: getPrefs().defaultFollow,
             searchQuery: '',
             secondaryQuery: '',
+            secondaryMode: (getPrefs() as any).defaultSearchCombine === 'and' ? 'and' : 'or',
             isRegex: getPrefs().defaultSearchRegex,
             caseSensitive: getPrefs().defaultSearchCase,
             invertMatch: getPrefs().defaultSearchInvert,

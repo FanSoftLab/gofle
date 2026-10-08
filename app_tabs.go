@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"GoFLE/pkg/indexer"
 	"GoFLE/pkg/search"
 	"bytes"
@@ -265,6 +266,7 @@ func (a *App) GetLogLines(tabID string, start, count int64) ([]LogLineResponse, 
 	resp := make([]LogLineResponse, len(lines))
 	for i, l := range lines {
 		resp[i] = LogLineResponse{
+			IsMatch: true,
 			Index:   l.Index,
 			Content: l.Content,
 		}
@@ -296,6 +298,46 @@ func looksLikeRegex(q string) bool {
 //   - changing only SecondaryQuery refines PrimaryMatches via FilterLines
 //     (O(matches) instead of a full-file rescan);
 //   - search_progress events stream partial counts to the UI while scanning.
+func sameAdvanced(a, b search.SearchOptions) bool {
+	if a.ContextBefore != b.ContextBefore || a.ContextAfter != b.ContextAfter {
+		return false
+	}
+	if !strings.EqualFold(a.SecondaryMode, b.SecondaryMode) {
+		return false
+	}
+	if a.NearbyQuery != b.NearbyQuery || a.NearbyMode != b.NearbyMode || a.NearbyWindow != b.NearbyWindow {
+		return false
+	}
+	if a.ExcludeIsRegex != b.ExcludeIsRegex || a.TimeFrom != b.TimeFrom || a.TimeTo != b.TimeTo || a.TimeRequireStamp != b.TimeRequireStamp {
+		return false
+	}
+	if a.LineStart != b.LineStart || a.LineEnd != b.LineEnd {
+		return false
+	}
+	if len(a.ExcludePatterns) != len(b.ExcludePatterns) || len(a.Levels) != len(b.Levels) {
+		return false
+	}
+	for i := range a.ExcludePatterns {
+		if a.ExcludePatterns[i] != b.ExcludePatterns[i] {
+			return false
+		}
+	}
+	for i := range a.Levels {
+		if a.Levels[i] != b.Levels[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasAdvancedFilters(opts search.SearchOptions) bool {
+	return len(opts.ExcludePatterns) > 0 ||
+		opts.NearbyQuery != "" ||
+		len(opts.Levels) > 0 ||
+		opts.TimeFrom != "" || opts.TimeTo != "" ||
+		opts.LineStart > 0 || opts.LineEnd > 0
+}
+
 func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMatch bool, secondaryQuery string) (int64, error) {
 	a.mu.RLock()
 	tab, exists := a.tabs[tabID]
@@ -311,12 +353,28 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 	// AND-filter stays on the fast path even when primary is a real regex.
 	secondaryRegex := isRegex && secondaryQuery != "" && looksLikeRegex(secondaryQuery)
 
+	// Preserve advanced filters previously set via SearchLinesAdvanced / UI state.
+	prevAdv := tab.LastSearchOpts
 	opts := search.SearchOptions{
-		Query:          query,
-		SecondaryQuery: secondaryQuery,
-		IsRegex:        primaryRegex,
-		CaseSensitive:  caseSensitive,
-		InvertMatch:    invertMatch,
+		Query:              query,
+		SecondaryQuery:     secondaryQuery,
+		IsRegex:            primaryRegex,
+		CaseSensitive:      caseSensitive,
+		InvertMatch:        invertMatch,
+		ExcludePatterns:    prevAdv.ExcludePatterns,
+		ExcludeIsRegex:     prevAdv.ExcludeIsRegex,
+		NearbyQuery:        prevAdv.NearbyQuery,
+		NearbyMode:         prevAdv.NearbyMode,
+		NearbyWindow:       prevAdv.NearbyWindow,
+		Levels:             prevAdv.Levels,
+		ContextBefore:      prevAdv.ContextBefore,
+		ContextAfter:       prevAdv.ContextAfter,
+		SecondaryMode:      prevAdv.SecondaryMode,
+		LineStart:          prevAdv.LineStart,
+		LineEnd:            prevAdv.LineEnd,
+		TimeFrom:           prevAdv.TimeFrom,
+		TimeTo:             prevAdv.TimeTo,
+		TimeRequireStamp:   prevAdv.TimeRequireStamp,
 	}
 
 	// security: bound regex complexity (ReDoS hardening).
@@ -344,11 +402,14 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 
 	tab.mu.Lock()
 	prev := tab.LastSearchOpts
+	if opts.SecondaryMode == "" {
+		opts.SecondaryMode = "and"
+	}
 	tab.LastSearchOpts = opts
 	// Preserve the caller's secondary in LastSearchOpts for refine detection even
 	// though primary scans run without SecondaryQuery (applied via FilterLines).
 	tab.LastSearchOpts.SecondaryQuery = secondaryQuery
-	if query == "" {
+	if query == "" && !hasAdvancedFilters(opts) {
 		tab.MatchedLines = make([]int64, 0)
 		tab.PrimaryMatches = make([]int64, 0)
 		tab.searchGen++
@@ -362,14 +423,35 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 		}
 		return 0, nil
 	}
+	// Empty primary + advanced filters → MatchAll indices (no content scan), then post-filter.
+	if query == "" && hasAdvancedFilters(opts) {
+		opts.MatchAll = true
+		opts.Query = ""
+		opts.IsRegex = false
+		opts.InvertMatch = false
+		primaryRegex = false
+		tab.LastSearchOpts = opts
+	}
+	// Empty primary + secondary only → scan all lines, combine via AND/OR in matchRange.
+	if query == "" && secondaryQuery != "" && !opts.MatchAll {
+		opts.MatchAll = true
+		opts.Query = ""
+		opts.IsRegex = false
+		opts.InvertMatch = false
+		primaryRegex = false
+		tab.LastSearchOpts = opts
+	}
 
 	// Secondary-only change: refine cached primary hits in O(matches).
-	onlySecondary := prev.Query == query &&
+	onlySecondary := !strings.EqualFold(opts.SecondaryMode, "or") &&
+		prev.Query == query &&
 		prev.IsRegex == primaryRegex &&
 		prev.CaseSensitive == caseSensitive &&
 		prev.InvertMatch == invertMatch &&
 		prev.SecondaryQuery != secondaryQuery &&
-		len(tab.PrimaryMatches) > 0
+		len(tab.PrimaryMatches) > 0 &&
+		// Advanced filters must be unchanged — otherwise full rescan + post-filter.
+		sameAdvanced(prev, opts)
 	primarySnap := slices.Clone(tab.PrimaryMatches)
 	gen := tab.searchGen + 1
 	tab.searchGen = gen
@@ -407,9 +489,17 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 		popts := opts
 		popts.SecondaryQuery = ""
 		popts.IsRegex = primaryRegex
-		matches, err = tab.Searcher.SearchWithProgress(ctx, popts, func(partial int64) {
-			emit(partial, false)
-		})
+		if opts.LineStart > 0 || opts.LineEnd > 0 {
+			end := opts.LineEnd
+			if end <= 0 {
+				end = tab.Indexer.TotalLines()
+			}
+			matches, err = tab.Searcher.SearchRange(ctx, popts, opts.LineStart, end)
+		} else {
+			matches, err = tab.Searcher.SearchWithProgress(ctx, popts, func(partial int64) {
+				emit(partial, false)
+			})
+		}
 		if err != nil {
 			return 0, err
 		}
@@ -429,18 +519,133 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 		}
 	}
 
+	matches, err = tab.Searcher.ApplyAdvancedFilters(ctx, opts, matches)
+	if err != nil {
+		return 0, err
+	}
+
+	// Record true hits, then optionally expand with context neighbors for display.
+	matchSet := make(map[int64]struct{}, len(matches))
+	for _, m := range matches {
+		matchSet[m] = struct{}{}
+	}
+	totalLines := tab.Indexer.TotalLines()
+	if opts.ContextBefore > 0 || opts.ContextAfter > 0 {
+		matches = search.ExpandMatchesWithContext(matches, opts.ContextBefore, opts.ContextAfter, totalLines)
+	}
+
 	tab.mu.Lock()
 	// Ignore stale results if a newer search already started.
 	if tab.searchGen != gen {
 		tab.mu.Unlock()
 		return 0, context.Canceled
 	}
+	tab.MatchSet = matchSet
 	tab.MatchedLines = slices.Clone(matches)
 	matchCount := int64(len(matches))
 	tab.mu.Unlock()
 
 	emit(matchCount, true)
 	return matchCount, nil
+}
+
+
+// SearchLinesAdvanced applies advanced filters (JSON) then runs SearchLines.
+// filterJSON keys: exclude_patterns, exclude_is_regex, nearby_query, nearby_mode,
+// nearby_window, levels, line_start, line_end, time_from, time_to, time_require_stamp.
+// Passing "{}" clears advanced filters. JSON string avoids Wails map binding issues.
+func (a *App) SearchLinesAdvanced(tabID, query string, isRegex, caseSensitive, invertMatch bool, secondaryQuery string, filterJSON string) (int64, error) {
+	a.mu.RLock()
+	tab, exists := a.tabs[tabID]
+	a.mu.RUnlock()
+	if !exists {
+		return 0, fmt.Errorf("tab %s not found", tabID)
+	}
+
+	var filter map[string]interface{}
+	if strings.TrimSpace(filterJSON) != "" {
+		if err := json.Unmarshal([]byte(filterJSON), &filter); err != nil {
+			return 0, fmt.Errorf("invalid search filter JSON: %w", err)
+		}
+	}
+	if filter == nil {
+		filter = map[string]interface{}{}
+	}
+
+	tab.mu.Lock()
+	opts := tab.LastSearchOpts
+
+	// Always overwrite advanced fields so cleared UI filters do not stick.
+	opts.Levels = stringSliceFromFilter(filter["levels"])
+	opts.ExcludePatterns = stringSliceFromFilter(filter["exclude_patterns"])
+	opts.ExcludeIsRegex, _ = filter["exclude_is_regex"].(bool)
+	opts.NearbyQuery, _ = filter["nearby_query"].(string)
+	opts.NearbyMode, _ = filter["nearby_mode"].(string)
+	opts.NearbyWindow = intFromFilter(filter["nearby_window"], 10)
+	opts.LineStart = int64FromFilter(filter["line_start"], 0)
+	opts.LineEnd = int64FromFilter(filter["line_end"], 0)
+	opts.TimeFrom, _ = filter["time_from"].(string)
+	opts.TimeTo, _ = filter["time_to"].(string)
+	opts.TimeRequireStamp, _ = filter["time_require_stamp"].(bool)
+	opts.ContextBefore = intFromFilter(filter["context_before"], 0)
+	opts.ContextAfter = intFromFilter(filter["context_after"], 0)
+	if v, ok := filter["secondary_mode"].(string); ok && v != "" {
+		opts.SecondaryMode = strings.ToLower(v)
+	}
+
+	tab.LastSearchOpts = opts
+	tab.mu.Unlock()
+
+	return a.SearchLines(tabID, query, isRegex, caseSensitive, invertMatch, secondaryQuery)
+}
+
+func stringSliceFromFilter(v interface{}) []string {
+	switch x := v.(type) {
+	case []string:
+		out := make([]string, 0, len(x))
+		for _, s := range x {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func intFromFilter(v interface{}, fallback int) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case int64:
+		return int(x)
+	default:
+		return fallback
+	}
+}
+
+func int64FromFilter(v interface{}, fallback int64) int64 {
+	switch x := v.(type) {
+	case float64:
+		return int64(x)
+	case int:
+		return int64(x)
+	case int64:
+		return x
+	default:
+		return fallback
+	}
 }
 
 // GetFilteredLines returns a page of matched lines [start, start+count) from the
@@ -477,9 +682,14 @@ func (a *App) GetFilteredLines(tabID string, start, count int64) ([]LogLineRespo
 			content = fmt.Sprintf("<error reading line %d>", lineIdx)
 		}
 
+		_, isHit := tab.MatchSet[lineIdx]
+		if tab.MatchSet == nil {
+			isHit = true
+		}
 		resp = append(resp, LogLineResponse{
 			Index:   lineIdx,
 			Content: content,
+			IsMatch: isHit,
 		})
 	}
 

@@ -21,6 +21,7 @@ rendered inside a native webview.
 - [Getting Started](#getting-started)
 - [Why GoFLE](#why-gofle)
 - [Features](#features)
+- [Search capabilities (detail)](#search-capabilities-detail)
 - [Scope & Intended Use](#scope--intended-use)
 - [Remote Transports (SSH & FTP)](#remote-transports-ssh--ftp)
 - [Architecture](#architecture)
@@ -99,15 +100,24 @@ For live front-end hot-reload during development, use `wails dev` (see [Developm
 
 ## Why GoFLE
 
-Log files in production are often **gigabytes** in size and grow continuously. A
-plain text editor chokes on them, `less` is powerful but terminal-only, and web-based
-viewers require a pipeline. GoFLE is purpose-built to:
+**GoFLE — Go Fast Log Explorer.** Production logs are often multi-gigabyte and keep
+growing. Editors choke, `less` stays terminal-only, and web viewers need a server
+pipeline. GoFLE is a **native desktop** log explorer that prioritizes **speed and
+low memory**:
 
-- open a multi-GB file **near-instantly** (only an offset index is built, not the full file),
-- let you **tail** the file in real time as new lines are appended,
-- run **regex or substring search** over millions of lines in parallel,
-- reach **remote logs over SSH** and tail them as if they were local,
-- keep everything in a **native desktop window** with tabs, groups, and theming.
+| Need | How GoFLE handles it |
+| --- | --- |
+| Open huge files | Byte-offset **index only** — file content is read lazily (`pread`), not loaded into RAM |
+| Smooth scroll | **Virtualized** log view — only visible rows exist in the DOM |
+| Find signal in noise | Parallel **substring / regex** search, AND filter, proximity, levels, time, exclude |
+| Live systems | **Follow/tail** local and remote streams without reopening the file |
+| Many files at once | **Tabs + groups**, session restore, recent local/SSH/FTP |
+| Remote ops | **SSH** and **FTP/FTPS** into the same UI as local files |
+| One binary story | **Go + Wails v2** — Linux / macOS / Windows; optional CLI companion `gofle` |
+
+Compared to a general editor, GoFLE is **search- and tail-first**. Compared to
+`grep`/`less`, it keeps context, navigation, and multi-file workflow in one place
+without scanning the entire file into memory.
 
 ---
 
@@ -117,22 +127,66 @@ viewers require a pipeline. GoFLE is purpose-built to:
 | --- | --- |
 | **Instant large-file loading** | Only a byte-offset index is built; lines are read lazily via `pread`. |
 | **Virtualized rendering** | Only visible rows are in the DOM — smooth scrolling on millions of lines. |
-| **Live tail / follow** | A background poller detects file growth every 500 ms and appends new lines. |
-| **Incremental search** | Full-text and regex search with case sensitivity and invert-match options. |
-| **Parallel search engine** | Worker-pool over CPU cores; search range can be limited to newly appended lines. |
-| **Match navigation** | Jump first / previous / next / last across search results with a dedicated results pane. |
-| **Remote logs via SSH** | Stream a remote file over password or private-key auth; tail it incrementally to a local temp file. |
-| **Remote logs via FTP/FTPS** | Stream a remote file over FTP or FTPS (explicit/implicit); tail it incrementally, with the server certificate pinned in the `ftp_certs` trust store. |
-| **Tabs & tab groups** | Open many files side-by-side, organize them into colored groups. |
-| **Recent files** | Up to 20 recent local/SSH entries, re-openable in one click. |
-| **Session restore** | Optionally persist and restore open tabs on next launch. |
-| **Export** | Save search results only, or the entire log, to a file. |
-| **Theming** | Dark, Light, Dracula, and System; Ukrainian & English UI. |
-| **Encrypted secrets** | SSH credentials are encrypted at rest with AES-GCM. |
-| **Drag & drop** | Drop files directly onto the window to open them. |
+| **Live tail / follow** | Background poller detects growth and appends new lines without full reload. |
+| **Parallel search engine** | Worker-pool over CPU cores; primary scan + optional refine filters. |
+| **Rich search toolbar** | Substring/regex, case, invert, secondary **AND**, history, export matches. |
+| **Advanced filters** | Nearby (before/after/either), levels, time window, exclude patterns, line range. |
+| **Results context** | Optional −B/−A style context lines embedded on each match row. |
+| **Top unique** | Aggregate frequent match texts over the current result set (batched, memory-bounded). |
+| **Match navigation** | First / prev / next / last, plus **from current line** prev/next. |
+| **Multi-term highlight** | Primary, AND, nearby, and exclude terms with distinct colors. |
+| **Search presets** | Save/load advanced filter combinations from the toolbar. |
+| **Tabs & groups** | Multiple files, colored groups, drag order, session restore. |
+| **Remote SSH / FTP** | Stream remote logs into the same indexer/search path as local files. |
+| **Recent files** | Local / SSH / FTP tabs; reopen without retyping connection details. |
+| **Settings** | Appearance, log view, **Search**, session, remote timeouts & host-key policy. |
+| **In-app help (F1)** | Tabbed guide with search; Ukrainian / English. |
+| **i18n & themes** | Ukrainian / English; light/dark/system. |
+| **CLI companion** | `gofle` for terminal open/search/recent (unchanged by GUI-only features). |
+
+### Search capabilities (detail)
+
+```text
+Primary query ──► parallel index scan ──► Secondary AND (same line)
+                                      ──► Exclude patterns
+                                      ──► Level filter (ERROR/WARN/…)
+                                      ──► Time from/to (timestamp heuristic)
+                                      ──► Nearby window (before | after | either)
+                                      ──► Line range / from-cursor
+                                      ──► Results pane (+ optional context)
+                                      ──► Top unique (optional)
+```
+
+| Mode | What it does | Performance notes |
+| --- | --- | --- |
+| **Substring / Regex** | Classic match on each line | Parallel workers; regex demoted to substring when no metacharacters |
+| **Case / Invert** | Sensitivity and non-match mode | Applied in the engine, not a second full-file pass |
+| **Secondary AND** | Line must also match a second pattern | Refine path over primary hits when only AND changes |
+| **Nearby** | Primary line must have another pattern within N lines | Single post-pass; line cache ≤256; window capped (≤200) |
+| **Levels** | Keep ERROR / WARN / INFO / DEBUG / OTHER | Cheap prefix scan of match lines only |
+| **Time** | Keep lines whose parsed timestamp is in range | Heuristic layouts (RFC3339, syslog-like); optional “require stamp” |
+| **Exclude** | Drop lines matching any exclude pattern | Same matcher stack as AND; optional regex |
+| **Range** | Search entire file, from/to cursor, or line numbers | Uses `SearchRange` — less work than full file |
+| **Context** | Show ±K lines around each **visible** match | In-row only; does not inflate virtual list length |
+| **Top** | Count duplicate match texts | Batches of 200; max 20k matches scanned; map pruned to limit |
+| **From here** | Next/prev match relative to the viewport line | Client-side over current filtered indices |
+| **Presets** | Named snapshots of advanced filters | Stored in `localStorage` |
+
+Defaults stay **backward compatible**: empty advanced filters mean the previous
+primary + AND + regex/case/invert behaviour.
+
+### Settings → Search
+
+Configurable defaults (GUI **Settings → Пошук / Search**):
+
+- Context lines before / after  
+- Default Nearby mode and window  
+- Exclude-as-regex default  
+- Time: require parseable timestamp  
+- Top: max unique rows  
+- Highlight toggles: primary, AND, nearby, exclude  
 
 ---
-
 ## Scope & Intended Use
 
 **GoFLE is a read-oriented log viewer.** It is designed for:
@@ -478,6 +532,13 @@ req-[0-9a-f]{8}
 DEBUG
 ```
 
+### 2b. Advanced search (nearby, exclude, range)
+
+1. Enter a primary query (e.g. `timeout`).
+2. Open **Nearby** on the advanced bar — set “connection refused”, mode **after**, window **15**.
+3. Optionally **Exclude** noisy patterns (`healthcheck`) and limit **Range** to “from cursor down”.
+4. Results list only primary lines that satisfy every active filter; use **Top** to see the most frequent match texts.
+
 ### 3. Tail a remote log over SSH
 
 1. Click **Open via SSH** (the SSH toolbar button).
@@ -522,6 +583,18 @@ Enable **Save open tabs on exit** in Settings. Next launch, all previously open 
 
 ---
 
+
+## In-app help
+
+Press **F1** or the **?** button next to Settings to open the interactive help window.
+
+- Content is grouped into tabs (Overview, Files, Search, Advanced filters, SSH/FTP, Settings, Shortcuts, CLI).
+- Each topic includes short explanations and, where useful, examples.
+- Use the search field at the top of the help window to filter topics and highlight matches.
+- Language follows the app UI language (Ukrainian / English).
+Topics cover toolbar buttons, tabs, search, every advanced filter, settings groups, remote access, and shortcuts.
+
+---
 ## Keyboard Shortcuts
 
 | Shortcut | Action |

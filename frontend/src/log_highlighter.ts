@@ -54,6 +54,24 @@ export class LogHighlighter {
     );
   }
 
+  public static highlightLineMulti(
+    text: string,
+    terms: { q: string; cls: string; isRegex?: boolean }[],
+  ): string {
+    text = this.sanitize(text);
+    let html = this.escapeHtml(text);
+    for (const term of terms) {
+      if (!term.q) continue;
+      try {
+        const re = term.isRegex
+          ? new RegExp(term.q, 'gi')
+          : new RegExp(term.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        html = html.replace(re, (m) => `<span class="${term.cls}">${m}</span>`);
+      } catch { /* ignore bad regex */ }
+    }
+    return html;
+  }
+
   public static highlightLine(text: string, searchQuery?: string, isRegex?: boolean): string {
     text = this.sanitize(text);
     const tokens = this.tokenize(text);

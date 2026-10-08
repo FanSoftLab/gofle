@@ -16,6 +16,19 @@ export type AppPrefs = {
     defaultSearchCase: boolean;
     defaultSearchRegex: boolean;
     defaultSearchInvert: boolean;
+    /** Default AND/OR for secondary search field */
+    defaultSearchCombine: 'and' | 'or';
+    ctxBefore: number;
+    ctxAfter: number;
+    nearbyMode: string;
+    nearbyWindow: number;
+    excludeRegexDefault: boolean;
+    timeRequireStamp: boolean;
+    topLimit: number;
+    hlPrimary: boolean;
+    hlSecondary: boolean;
+    hlNearby: boolean;
+    hlExclude: boolean;
     maxRecentFiles: number;
     maxHistorySize: number;
     confirmCloseTab: boolean;
@@ -36,7 +49,10 @@ const defaultPrefs: AppPrefs = {
     theme: 'system', language: 'system', saveTabsExit: true, viewMode: 'split',
     logFontSize: 13, logFontFamily: 'monospace', lineDensity: 'normal',
     wordWrap: false, showLineNumbers: true, defaultFollow: true,
-    defaultSearchCase: false, defaultSearchRegex: false, defaultSearchInvert: false,
+    defaultSearchCase: false, defaultSearchRegex: false, defaultSearchInvert: false, defaultSearchCombine: 'or',
+    ctxBefore: 0, ctxAfter: 0, nearbyMode: 'either', nearbyWindow: 10,
+    excludeRegexDefault: false, timeRequireStamp: false, topLimit: 100,
+    hlPrimary: true, hlSecondary: true, hlNearby: true, hlExclude: false,
     maxRecentFiles: 20, maxHistorySize: 100, confirmCloseTab: true,
     startupBehavior: 'session', searchOrientation: 'horizontal', searchSide: 'bottom',
     sshConnectTimeoutSec: 10, remoteStallTimeoutSec: 60, autoAcceptHostKey: false,
@@ -100,22 +116,48 @@ export class SettingsManager {
     }
 
     private mapFromBackend(cfg: any): AppPrefs {
+        // Spread defaults so AppPrefs stays complete when backend omits new keys.
         return {
-            theme: cfg.theme || 'system', language: cfg.language || 'system',
-            saveTabsExit: !!cfg.save_tabs_exit, viewMode: cfg.view_mode || 'split',
-            logFontSize: cfg.log_font_size || 13, logFontFamily: cfg.log_font_family || 'monospace',
-            lineDensity: cfg.line_density || 'normal', wordWrap: !!cfg.word_wrap,
-            showLineNumbers: cfg.show_line_numbers !== false, defaultFollow: cfg.default_follow !== false,
-            defaultSearchCase: !!cfg.default_search_case, defaultSearchRegex: !!cfg.default_search_regex,
-            defaultSearchInvert: !!cfg.default_search_invert, maxRecentFiles: cfg.max_recent_files || 20,
-            maxHistorySize: cfg.max_history_size || 100, confirmCloseTab: cfg.confirm_close_tab !== false,
+            ...defaultPrefs,
+            theme: cfg.theme || 'system',
+            language: cfg.language || 'system',
+            saveTabsExit: !!cfg.save_tabs_exit,
+            viewMode: cfg.view_mode || 'split',
+            logFontSize: cfg.log_font_size || 13,
+            logFontFamily: cfg.log_font_family || 'monospace',
+            lineDensity: cfg.line_density || 'normal',
+            wordWrap: !!cfg.word_wrap,
+            showLineNumbers: cfg.show_line_numbers !== false,
+            defaultFollow: cfg.default_follow !== false,
+            defaultSearchCase: !!cfg.default_search_case,
+            defaultSearchRegex: !!cfg.default_search_regex,
+            defaultSearchInvert: !!cfg.default_search_invert,
+            defaultSearchCombine: (cfg.default_search_combine === 'and' ? 'and' : 'or') as 'and' | 'or',
+            ctxBefore: cfg.ctx_before ?? (() => { try { return JSON.parse(localStorage.getItem("gofle.appPrefs")||"{}").ctxBefore; } catch { return undefined; } })() ?? defaultPrefs.ctxBefore,
+            ctxAfter: cfg.ctx_after ?? (() => { try { return JSON.parse(localStorage.getItem("gofle.appPrefs")||"{}").ctxAfter; } catch { return undefined; } })() ?? defaultPrefs.ctxAfter,
+            nearbyMode: cfg.nearby_mode || defaultPrefs.nearbyMode,
+            nearbyWindow: cfg.nearby_window ?? defaultPrefs.nearbyWindow,
+            excludeRegexDefault: cfg.exclude_regex_default != null ? !!cfg.exclude_regex_default : defaultPrefs.excludeRegexDefault,
+            timeRequireStamp: cfg.time_require_stamp != null ? !!cfg.time_require_stamp : defaultPrefs.timeRequireStamp,
+            topLimit: cfg.top_limit ?? defaultPrefs.topLimit,
+            hlPrimary: cfg.hl_primary !== false,
+            hlSecondary: cfg.hl_secondary !== false,
+            hlNearby: cfg.hl_nearby !== false,
+            hlExclude: !!cfg.hl_exclude,
+            maxRecentFiles: cfg.max_recent_files || 20,
+            maxHistorySize: cfg.max_history_size || 100,
+            confirmCloseTab: cfg.confirm_close_tab !== false,
             startupBehavior: cfg.startup_behavior || 'session',
-            searchOrientation: cfg.search_orientation || 'horizontal', searchSide: cfg.search_side || 'bottom',
+            searchOrientation: cfg.search_orientation || 'horizontal',
+            searchSide: cfg.search_side || 'bottom',
             sshConnectTimeoutSec: cfg.ssh_connect_timeout_sec || 10,
             remoteStallTimeoutSec: cfg.remote_stall_timeout_sec || 60,
-            autoAcceptHostKey: !!cfg.auto_accept_host_key, connMaxAttempts: cfg.conn_max_attempts || 5,
-            connAttemptWindowMin: cfg.conn_attempt_window_min || 15, connLockoutMin: cfg.conn_lockout_min || 5,
-            defaultSshPort: cfg.default_ssh_port || 22, defaultFtpPort: cfg.default_ftp_port || 21,
+            autoAcceptHostKey: !!cfg.auto_accept_host_key,
+            connMaxAttempts: cfg.conn_max_attempts || 5,
+            connAttemptWindowMin: cfg.conn_attempt_window_min || 15,
+            connLockoutMin: cfg.conn_lockout_min || 5,
+            defaultSshPort: cfg.default_ssh_port || 22,
+            defaultFtpPort: cfg.default_ftp_port || 21,
         };
     }
 
@@ -150,7 +192,19 @@ export class SettingsManager {
             lineDensity: sel('settings-line-density') || 'normal', wordWrap: chk('settings-word-wrap'),
             showLineNumbers: chk('settings-show-line-numbers'), defaultFollow: chk('settings-default-follow'),
             defaultSearchCase: chk('settings-default-search-case'), defaultSearchRegex: chk('settings-default-search-regex'),
-            defaultSearchInvert: chk('settings-default-search-invert'), maxRecentFiles: num('settings-max-recent', 20),
+            ctxBefore: num('settings-ctx-before', 0),
+            ctxAfter: num('settings-ctx-after', 0),
+            nearbyMode: sel('settings-nearby-mode') || 'either',
+            nearbyWindow: num('settings-nearby-window', 10),
+            excludeRegexDefault: chk('settings-exclude-regex'),
+            timeRequireStamp: chk('settings-time-require'),
+            topLimit: num('settings-top-limit', 100),
+            hlPrimary: chk('settings-hl-primary'),
+            hlSecondary: chk('settings-hl-secondary'),
+            hlNearby: chk('settings-hl-nearby'),
+            hlExclude: chk('settings-hl-exclude'),
+            defaultSearchInvert: chk('settings-default-search-invert'),
+            defaultSearchCombine: (sel('settings-default-search-combine') === 'and' ? 'and' : 'or') as 'and' | 'or', maxRecentFiles: num('settings-max-recent', 20),
             maxHistorySize: num('settings-max-history', 100), confirmCloseTab: chk('settings-confirm-close-tab'),
             startupBehavior: sel('settings-startup-behavior') || 'session',
             searchOrientation: sel('settings-search-orientation') || 'horizontal',
@@ -167,12 +221,25 @@ export class SettingsManager {
         const setNum = (id: string, v: number) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.value = String(v); };
         const setChk = (id: string, v: boolean) => { const el = document.getElementById(id) as HTMLInputElement | null; if (el) el.checked = v; };
         setSel('settings-theme', p.theme); setSel('settings-lang', p.language);
+        setNum('settings-ctx-before', p.ctxBefore ?? 0);
+        setNum('settings-ctx-after', p.ctxAfter ?? 0);
+        setSel('settings-nearby-mode', p.nearbyMode || 'either');
+        setNum('settings-nearby-window', p.nearbyWindow ?? 10);
+        setChk('settings-exclude-regex', !!p.excludeRegexDefault);
+        setChk('settings-time-require', !!p.timeRequireStamp);
+        setNum('settings-top-limit', p.topLimit ?? 100);
+        setChk('settings-hl-primary', p.hlPrimary !== false);
+        setChk('settings-hl-secondary', p.hlSecondary !== false);
+        setChk('settings-hl-nearby', p.hlNearby !== false);
+        setChk('settings-hl-exclude', !!p.hlExclude);
         setChk('settings-save-tabs', p.saveTabsExit); setSel('settings-view-mode', p.viewMode);
         setSel('settings-font-family', p.logFontFamily); setSel('settings-font-size', String(p.logFontSize));
         setSel('settings-line-density', p.lineDensity); setChk('settings-word-wrap', p.wordWrap);
         setChk('settings-show-line-numbers', p.showLineNumbers); setChk('settings-default-follow', p.defaultFollow);
         setChk('settings-default-search-case', p.defaultSearchCase); setChk('settings-default-search-regex', p.defaultSearchRegex);
-        setChk('settings-default-search-invert', p.defaultSearchInvert); setNum('settings-max-recent', p.maxRecentFiles);
+        setChk('settings-default-search-invert', p.defaultSearchInvert);
+        setSel('settings-default-search-combine', p.defaultSearchCombine || 'or');
+        setNum('settings-max-recent', p.maxRecentFiles);
         setNum('settings-max-history', p.maxHistorySize); setChk('settings-confirm-close-tab', p.confirmCloseTab);
         setSel('settings-startup-behavior', p.startupBehavior); setSel('settings-search-orientation', p.searchOrientation);
         setSel('settings-search-side', p.searchSide); setNum('settings-ssh-timeout', p.sshConnectTimeoutSec);
@@ -187,7 +254,14 @@ export class SettingsManager {
             log_font_size: p.logFontSize, log_font_family: p.logFontFamily, line_density: p.lineDensity,
             word_wrap: p.wordWrap, show_line_numbers: p.showLineNumbers, default_follow: p.defaultFollow,
             default_search_case: p.defaultSearchCase, default_search_regex: p.defaultSearchRegex,
-            default_search_invert: p.defaultSearchInvert, max_recent_files: p.maxRecentFiles,
+            default_search_invert: p.defaultSearchInvert,
+            default_search_combine: p.defaultSearchCombine || 'or',
+            ctx_before: p.ctxBefore, ctx_after: p.ctxAfter,
+            nearby_mode: p.nearbyMode, nearby_window: p.nearbyWindow,
+            exclude_regex_default: p.excludeRegexDefault,
+            time_require_stamp: p.timeRequireStamp, top_limit: p.topLimit,
+            hl_primary: p.hlPrimary, hl_secondary: p.hlSecondary,
+            hl_nearby: p.hlNearby, hl_exclude: p.hlExclude, max_recent_files: p.maxRecentFiles,
             max_history_size: p.maxHistorySize, confirm_close_tab: p.confirmCloseTab,
             startup_behavior: p.startupBehavior, search_orientation: p.searchOrientation, search_side: p.searchSide,
             ssh_connect_timeout_sec: p.sshConnectTimeoutSec, remote_stall_timeout_sec: p.remoteStallTimeoutSec,
@@ -206,6 +280,15 @@ export class SettingsManager {
         const prefs = this.readForm();
         currentPrefs = prefs;
         this.applyPrefs(prefs);
+        try { this.ctx.syncSearchCombineUI?.(); } catch { /* ignore */ }
+        try {
+            localStorage.setItem('gofle.appPrefs', JSON.stringify({
+                ctxBefore: prefs.ctxBefore, ctxAfter: prefs.ctxAfter,
+                nearbyMode: prefs.nearbyMode, nearbyWindow: prefs.nearbyWindow,
+                excludeRegexDefault: prefs.excludeRegexDefault,
+                timeRequireStamp: prefs.timeRequireStamp, topLimit: prefs.topLimit,
+            }));
+        } catch { /* ignore quota */ }
         const api = this.ctx.getApi();
         if (!api) return;
         try {
@@ -259,14 +342,19 @@ export class SettingsManager {
         btnSaveSettings.addEventListener('click', async () => {
             await this.persistSettings(true);
             this.ctx.settingsModal.classList.add('hidden');
+            // Context ±N and search-related defaults take effect on next search.
+            try { this.ctx.triggerSearch?.(); } catch { /* ignore */ }
         });
         const schedule = () => this.scheduleAutosave();
         const ids = [
             'settings-theme', 'settings-lang', 'settings-save-tabs', 'settings-max-history',
+            'settings-ctx-before', 'settings-ctx-after', 'settings-nearby-mode', 'settings-nearby-window',
+            'settings-exclude-regex', 'settings-time-require', 'settings-top-limit',
+            'settings-hl-primary', 'settings-hl-secondary', 'settings-hl-nearby', 'settings-hl-exclude',
             'settings-font-size', 'settings-font-family', 'settings-line-density',
             'settings-word-wrap', 'settings-show-line-numbers', 'settings-view-mode',
             'settings-default-follow', 'settings-default-search-case', 'settings-default-search-regex',
-            'settings-default-search-invert', 'settings-max-recent', 'settings-confirm-close-tab',
+            'settings-default-search-invert', 'settings-default-search-combine', 'settings-max-recent', 'settings-confirm-close-tab',
             'settings-startup-behavior', 'settings-search-orientation', 'settings-search-side',
             'settings-ssh-timeout', 'settings-stall-timeout', 'settings-auto-accept-host-key',
             'settings-conn-max-attempts', 'settings-conn-window', 'settings-conn-lockout',

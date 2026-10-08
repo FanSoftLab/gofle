@@ -53,6 +53,9 @@ export class VirtualScroller {
   private pendingAnchor: { index: number; fraction: number } | null = null;
   /** Ignore scroll events caused by programmatic scroll restores. */
   private suppressScrollEvent = false;
+  private scrollPosRaf = 0;
+  private measureWidthRaf = 0;
+
 
   private selectionStart: number | null = null;
   private selectionEnd: number | null = null;
@@ -77,10 +80,32 @@ export class VirtualScroller {
 
     this.viewport.addEventListener('scroll', () => this.onScroll(), { passive: true });
     window.addEventListener('resize', () => this.onResize());
+    // Panel/splitter size changes do not fire window.resize — observe the viewport.
+    if (typeof ResizeObserver !== 'undefined') {
+      let roT = 0;
+      const ro = new ResizeObserver(() => {
+        if (roT) cancelAnimationFrame(roT);
+        roT = requestAnimationFrame(() => {
+          roT = 0;
+          this.onResize();
+        });
+      });
+      ro.observe(this.viewport);
+    }
 
     this.updateLayout();
     this.recalculateVisible();
     this.attachSelectionListeners();
+  }
+
+  /** Force layout + soft render after panel becomes visible (tab switch / session restore). */
+  public relayout() {
+    this.measureLineHeight();
+    this.measureCharWidth();
+    this.updateLayout();
+    this.recalculateVisible();
+    this.applyPendingAnchor();
+    this.render(false);
   }
 
   private fractionFromScrollTop(scrollTop: number): number {
@@ -119,6 +144,14 @@ export class VirtualScroller {
     this.contentWidthPx = 0;
     this.viewport.scrollLeft = 0;
     this.applyContentWidth();
+  }
+
+  private scheduleMeasureContentWidth() {
+    if (this.measureWidthRaf) return;
+    this.measureWidthRaf = requestAnimationFrame(() => {
+      this.measureWidthRaf = 0;
+      this.measureContentWidth();
+    });
   }
 
   private measureContentWidth() {
@@ -305,24 +338,39 @@ export class VirtualScroller {
     this.render();
   }
 
+  private highlightTerms: { q: string; cls: string; isRegex?: boolean }[] = [];
+
   public setSearchQuery(query: string) {
-    if (this.currentSearchQuery === query) return;
+    if (this.currentSearchQuery === query && this.highlightTerms.length === 0) return;
     this.currentSearchQuery = query;
     this.rehighlightVisibleRows();
-    requestAnimationFrame(() => this.measureContentWidth());
+    this.scheduleMeasureContentWidth();
+  }
+
+  /** Extra highlight terms (secondary / nearby / exclude). Empty = primary only. */
+  public setHighlightTerms(terms: { q: string; cls: string; isRegex?: boolean }[]) {
+    this.highlightTerms = terms || [];
+    this.rehighlightVisibleRows();
   }
 
   private rehighlightVisibleRows() {
     const q = this.currentSearchQuery;
+    const terms = this.highlightTerms;
+    const termKey = terms.map((t) => t.q + t.cls).join('|');
     for (const [, node] of this.renderedNodes) {
       const raw = this.rowRawContent.get(node);
       if (raw === undefined) continue;
       const textEl = node.children[1] as HTMLElement | undefined;
       if (!textEl) continue;
       const sourceIndex = node.dataset.sourceIndex || '';
-      const key = `${sourceIndex}\0${q}`;
+      const key = `${sourceIndex}\0${q}\0${termKey}`;
       if (this.rowHighlightKey.get(node) === key) continue;
-      textEl.innerHTML = LogHighlighter.highlightLine(raw, q);
+      if (terms.length > 0) {
+        const all = [{ q, cls: 'search-highlight', isRegex: false }, ...terms].filter((t) => t.q);
+        textEl.innerHTML = LogHighlighter.highlightLineMulti(raw, all);
+      } else {
+        textEl.innerHTML = LogHighlighter.highlightLine(raw, q);
+      }
       this.rowHighlightKey.set(node, key);
     }
   }
@@ -369,11 +417,19 @@ export class VirtualScroller {
 
   /** Map a content anchor to pixel scrollTop for the current spacer metrics. */
   private scrollTopForAnchor(index: number, fraction: number): number {
+    const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
+    if (maxScroll <= 0) return 0;
+    if (this.wordWrap) {
+      let acc = 0;
+      const idx = Math.max(0, Math.min(this.totalLines - 1, Math.floor(index)));
+      for (let i = 0; i < idx; i++) acc += this.heightOf(i);
+      acc += Math.max(0, Math.min(1, fraction)) * this.heightOf(idx);
+      return Math.max(0, Math.min(maxScroll, acc));
+    }
     const maxFirst = Math.max(0, this.totalLines - this.visibleCount);
     if (maxFirst <= 0) return 0;
     const exact = Math.min(maxFirst, Math.max(0, index + fraction));
     const targetFrac = exact / maxFirst;
-    const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
     return targetFrac * maxScroll;
   }
 
@@ -415,13 +471,26 @@ export class VirtualScroller {
 
   public scrollToIndex(lineIndex: number) {
     if (lineIndex < 0 || lineIndex >= this.totalLines) return;
-    const maxFirst = Math.max(1, this.totalLines - this.visibleCount);
-    const targetFirst = Math.max(0, Math.min(maxFirst, lineIndex - Math.floor(this.visibleCount * 0.4)));
-    const frac = targetFirst / maxFirst;
     const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
-    this.viewport.scrollTop = Math.max(0, Math.min(maxScroll, frac * maxScroll));
+    let y: number;
+    if (this.wordWrap) {
+      // Approximate cumulative height — heightCache / avgHeight (no full force-recycle).
+      let acc = 0;
+      const target = Math.max(0, lineIndex);
+      for (let i = 0; i < target; i++) acc += this.heightOf(i);
+      y = acc - this.effectiveClientHeight() * 0.35;
+    } else {
+      const maxFirst = Math.max(1, this.totalLines - this.visibleCount);
+      const targetFirst = Math.max(0, Math.min(maxFirst, lineIndex - Math.floor(this.visibleCount * 0.4)));
+      const frac = maxFirst > 0 ? targetFirst / maxFirst : 0;
+      y = frac * maxScroll;
+    }
+    this.suppressScrollEvent = true;
+    this.viewport.scrollTop = Math.max(0, Math.min(maxScroll, y));
+    queueMicrotask(() => { this.suppressScrollEvent = false; });
     this.setHighlightedLine(lineIndex);
-    this.render(true);
+    // Soft render — keep existing rows to avoid flicker
+    this.render(false);
   }
 
   private windowFromScrollTop(scrollTop: number) {
@@ -503,7 +572,7 @@ export class VirtualScroller {
       this.positionRows(w.firstVisibleIndex, w.fractional);
       this.applyHighlighting();
       this.applySelectionStyle();
-      requestAnimationFrame(() => this.measureContentWidth());
+      this.scheduleMeasureContentWidth();
       return;
     }
 
@@ -540,11 +609,19 @@ export class VirtualScroller {
         const sourceIndex = line.index;
         numEl.textContent = String(sourceIndex + 1);
         rowNode.dataset.sourceIndex = String(sourceIndex);
+        // Only explicit false marks context neighbors (Go zero-value must not dim main log).
+        const isContext = (line as any).is_match === false || (line as any).isMatch === false;
+        rowNode.classList.toggle('context-line', isContext);
 
         const raw = line.content ?? '';
         this.rowRawContent.set(rowNode, raw);
         const hlKey = `${sourceIndex}\0${this.currentSearchQuery}`;
-        textEl.innerHTML = LogHighlighter.highlightLine(raw, this.currentSearchQuery);
+        if (this.highlightTerms.length > 0) {
+          const all = [{ q: this.currentSearchQuery, cls: 'search-highlight', isRegex: false }, ...this.highlightTerms].filter((t) => t.q);
+          textEl.innerHTML = LogHighlighter.highlightLineMulti(raw, all);
+        } else {
+          textEl.innerHTML = LogHighlighter.highlightLine(raw, this.currentSearchQuery);
+        }
         this.rowHighlightKey.set(rowNode, hlKey);
 
         rowNode.onclick = (e) => {
@@ -572,7 +649,7 @@ export class VirtualScroller {
 
       this.applyHighlighting();
       this.applySelectionStyle();
-      requestAnimationFrame(() => this.measureContentWidth());
+      this.scheduleMeasureContentWidth();
     }).catch((err) => {
       if (gen === this.generation) {
         console.error('Failed to fetch log lines for virtual render:', err);
@@ -630,7 +707,13 @@ export class VirtualScroller {
     // User-driven scroll — drop pending restore and report content anchor.
     this.pendingScrollTop = null;
     this.pendingAnchor = null;
-    this.onScrollPositionCallback?.(this.getViewAnchor());
+    if (this.onScrollPositionCallback) {
+      if (this.scrollPosRaf) cancelAnimationFrame(this.scrollPosRaf);
+      this.scrollPosRaf = requestAnimationFrame(() => {
+        this.scrollPosRaf = 0;
+        this.onScrollPositionCallback?.(this.getViewAnchor());
+      });
+    }
     if (!this.isRequestPending) {
       this.isRequestPending = true;
       requestAnimationFrame(() => {

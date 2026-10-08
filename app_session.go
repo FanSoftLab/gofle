@@ -248,6 +248,7 @@ func (a *App) GetSettings() (map[string]any, error) {
 		"default_search_case":      a.cfg.DefaultSearchCase,
 		"default_search_regex":     a.cfg.DefaultSearchRegex,
 		"default_search_invert":    a.cfg.DefaultSearchInvert,
+		"default_search_combine":   a.cfg.DefaultSearchCombine,
 		"max_recent_files":         a.cfg.MaxRecentFiles,
 		"confirm_close_tab":        a.cfg.ConfirmCloseTab,
 		"startup_behavior":         a.cfg.StartupBehavior,
@@ -260,6 +261,17 @@ func (a *App) GetSettings() (map[string]any, error) {
 		"default_ssh_port":         a.cfg.DefaultSSHPort,
 		"default_ftp_port":         a.cfg.DefaultFTPPort,
 		"max_history_size":         a.cfg.MaxHistorySize,
+		"ctx_before":               a.cfg.CtxBefore,
+		"ctx_after":                a.cfg.CtxAfter,
+		"nearby_mode":              a.cfg.NearbyMode,
+		"nearby_window":            a.cfg.NearbyWindow,
+		"exclude_regex_default":    a.cfg.ExcludeRegexDefault,
+		"time_require_stamp":       a.cfg.TimeRequireStamp,
+		"top_limit":                a.cfg.TopLimit,
+		"hl_primary":               a.cfg.HlPrimary,
+		"hl_secondary":             a.cfg.HlSecondary,
+		"hl_nearby":                a.cfg.HlNearby,
+		"hl_exclude":               a.cfg.HlExclude,
 		"startup_args":             a.startupArgs,
 	}, nil
 }
@@ -306,6 +318,9 @@ func (a *App) SaveAppSettings(settings map[string]any) error {
 	if v, ok := settings["default_search_invert"].(bool); ok {
 		a.cfg.DefaultSearchInvert = v
 	}
+	if v, ok := settings["default_search_combine"].(string); ok && (v == "and" || v == "or") {
+		a.cfg.DefaultSearchCombine = v
+	}
 	if v, ok := asIntSetting(settings["max_recent_files"]); ok && v > 0 {
 		a.cfg.MaxRecentFiles = v
 	}
@@ -341,6 +356,45 @@ func (a *App) SaveAppSettings(settings map[string]any) error {
 	}
 	if v, ok := asIntSetting(settings["conn_lockout_min"]); ok && v > 0 {
 		a.cfg.ConnLockoutMin = v
+	}
+	if v, ok := asIntSetting(settings["ctx_before"]); ok && v >= 0 {
+		if v > 50 {
+			v = 50
+		}
+		a.cfg.CtxBefore = v
+	}
+	if v, ok := asIntSetting(settings["ctx_after"]); ok && v >= 0 {
+		if v > 50 {
+			v = 50
+		}
+		a.cfg.CtxAfter = v
+	}
+	if v, ok := settings["nearby_mode"].(string); ok && v != "" {
+		a.cfg.NearbyMode = v
+	}
+	if v, ok := asIntSetting(settings["nearby_window"]); ok && v > 0 {
+		a.cfg.NearbyWindow = v
+	}
+	if v, ok := settings["exclude_regex_default"].(bool); ok {
+		a.cfg.ExcludeRegexDefault = v
+	}
+	if v, ok := settings["time_require_stamp"].(bool); ok {
+		a.cfg.TimeRequireStamp = v
+	}
+	if v, ok := asIntSetting(settings["top_limit"]); ok && v > 0 {
+		a.cfg.TopLimit = v
+	}
+	if v, ok := settings["hl_primary"].(bool); ok {
+		a.cfg.HlPrimary = v
+	}
+	if v, ok := settings["hl_secondary"].(bool); ok {
+		a.cfg.HlSecondary = v
+	}
+	if v, ok := settings["hl_nearby"].(bool); ok {
+		a.cfg.HlNearby = v
+	}
+	if v, ok := settings["hl_exclude"].(bool); ok {
+		a.cfg.HlExclude = v
 	}
 	if v, ok := asIntSetting(settings["default_ssh_port"]); ok && v > 0 {
 		a.cfg.DefaultSSHPort = v

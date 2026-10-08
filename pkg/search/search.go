@@ -37,9 +37,45 @@ type SearchOptions struct { //nolint:revive // renaming would break the public s
 	// InvertMatch) and SecondaryQuery. Flags IsRegex/CaseSensitive apply to
 	// both patterns.
 	SecondaryQuery string `json:"secondary_query,omitempty"`
+	// SecondaryMode is "and" (default) or "or" for combining primary and secondary.
+	SecondaryMode string `json:"secondary_mode,omitempty"`
 	IsRegex        bool   `json:"is_regex"`
 	CaseSensitive  bool   `json:"case_sensitive"`
 	InvertMatch    bool   `json:"invert_match"`
+
+	// --- Advanced filters (optional; empty = disabled) ---
+
+	// ExcludePatterns drop lines that match any pattern (after primary/secondary).
+	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
+	ExcludeIsRegex  bool     `json:"exclude_is_regex,omitempty"`
+
+	// NearbyQuery requires another pattern within NearbyWindow lines.
+	// NearbyMode: "before" | "after" | "either" (default either).
+	NearbyQuery  string `json:"nearby_query,omitempty"`
+	NearbyMode   string `json:"nearby_mode,omitempty"`
+	NearbyWindow int    `json:"nearby_window,omitempty"`
+
+	// Levels keeps only lines whose content looks like one of ERROR/WARN/INFO/DEBUG/OTHER.
+	Levels []string `json:"levels,omitempty"`
+
+	// LineStart/LineEnd limit the primary scan to [LineStart, LineEnd).
+	// Zero LineEnd means "until EOF". LineStart is 0-based.
+	LineStart int64 `json:"line_start,omitempty"`
+	LineEnd   int64 `json:"line_end,omitempty"`
+
+	// TimeFrom/TimeTo are inclusive wall-clock bounds (RFC3339 or "2006-01-02 15:04:05").
+	// Lines without a parseable timestamp are kept unless TimeRequireStamp is set.
+	TimeFrom         string `json:"time_from,omitempty"`
+	TimeTo           string `json:"time_to,omitempty"`
+	TimeRequireStamp bool   `json:"time_require_stamp,omitempty"`
+
+	// MatchAll returns every line in the search range without content matching
+	// (used for empty primary + advanced post-filters).
+	MatchAll bool `json:"match_all,omitempty"`
+
+	// ContextBefore / ContextAfter expand each match with neighboring lines in results.
+	ContextBefore int `json:"context_before,omitempty"`
+	ContextAfter  int `json:"context_after,omitempty"`
 }
 
 // Options is an alias for SearchOptions.
@@ -462,7 +498,7 @@ func (se *SearchEngine) matchRangeWithLevels(ctx context.Context, opts SearchOpt
 
 // matchRange runs a goroutine-pooled, chunked scan over [start, end) of the indexer, applies opts, and returns matched indices in ascending order. It honors ctx cancellation between chunks (not mid-chunk), caches compiled regexes, and does not store the result on the engine.
 func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, start, end int64, onProgress func(int64)) ([]int64, error) { //nolint:gocyclo,funlen // chunked pooled scan over the index is inherently branchy
-	if opts.Query == "" {
+	if opts.Query == "" && !opts.MatchAll {
 		return []int64{}, nil
 	}
 
@@ -473,6 +509,20 @@ func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, star
 
 	if start < 0 || start >= end {
 		return []int64{}, nil
+	}
+
+	// Fast path: materialize every line index in range (no content I/O).
+	// Skip when secondary is set — need per-line AND/OR evaluation.
+	if opts.MatchAll && opts.SecondaryQuery == "" {
+		n := end - start
+		out := make([]int64, n)
+		for i := int64(0); i < n; i++ {
+			out[i] = start + i
+		}
+		if onProgress != nil {
+			onProgress(n)
+		}
+		return out, nil
 	}
 
 	var re *regexp.Regexp
@@ -583,13 +633,20 @@ func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, star
 						isMatch = containsFoldRune(content, queryLowerRunes)
 					}
 
+					if opts.MatchAll {
+						isMatch = true
+					}
 					if opts.InvertMatch {
 						isMatch = !isMatch
 					}
-					// SecondaryQuery narrows whatever the primary produced
-					// (including its inversion): AND semantics.
-					if isMatch && secMatch != nil {
-						isMatch = secMatch(content)
+					// Secondary combines with primary: AND (narrow) or OR (union on same line).
+					if secMatch != nil {
+						secHit := secMatch(content)
+						if strings.EqualFold(opts.SecondaryMode, "or") {
+							isMatch = isMatch || secHit
+						} else if isMatch {
+							isMatch = secHit
+						}
 					}
 
 					if isMatch {
@@ -880,4 +937,330 @@ func foldRuneAt(content []byte, want []rune) bool {
 	}
 
 	return true
+}
+
+
+
+// ApplyAdvancedFilters post-processes primary match line indices in a single
+// pass where possible. Priority: low memory (no extra full-file structures) and
+// few indexer reads (small line cache for nearby windows).
+func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOptions, lines []int64) ([]int64, error) {
+	needExclude := len(opts.ExcludePatterns) > 0
+	needLevels := len(opts.Levels) > 0
+	needTime := opts.TimeFrom != "" || opts.TimeTo != ""
+	needNearby := opts.NearbyQuery != ""
+	if !needExclude && !needLevels && !needTime && !needNearby {
+		return lines, nil
+	}
+
+	var excludeMatchers []func([]byte) bool
+	if needExclude {
+		for _, p := range opts.ExcludePatterns {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			m, err := se.buildSecondaryMatcher(SearchOptions{
+				SecondaryQuery: p,
+				IsRegex:        opts.ExcludeIsRegex,
+				CaseSensitive:  opts.CaseSensitive,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("exclude pattern %q: %w", p, err)
+			}
+			excludeMatchers = append(excludeMatchers, m)
+		}
+		if len(excludeMatchers) == 0 {
+			needExclude = false
+		}
+	}
+
+	allowLevel := map[string]bool{}
+	if needLevels {
+		for _, l := range opts.Levels {
+			allowLevel[strings.ToUpper(strings.TrimSpace(l))] = true
+		}
+	}
+
+	var from, to time.Time
+	if needTime {
+		var err error
+		if opts.TimeFrom != "" {
+			from, err = parseFlexibleTime(opts.TimeFrom)
+			if err != nil {
+				return nil, fmt.Errorf("time_from: %w", err)
+			}
+		}
+		if opts.TimeTo != "" {
+			to, err = parseFlexibleTime(opts.TimeTo)
+			if err != nil {
+				return nil, fmt.Errorf("time_to: %w", err)
+			}
+		}
+	}
+
+	var nearbyMatch func([]byte) bool
+	win := opts.NearbyWindow
+	mode := strings.ToLower(strings.TrimSpace(opts.NearbyMode))
+	if needNearby {
+		if win <= 0 {
+			win = 10
+		}
+		if win > 200 {
+			win = 200 // hard cap — protects against pathological windows
+		}
+		if mode == "" {
+			mode = "either"
+		}
+		var err error
+		nearbyMatch, err = se.buildSecondaryMatcher(SearchOptions{
+			SecondaryQuery: opts.NearbyQuery,
+			IsRegex:        opts.IsRegex,
+			CaseSensitive:  opts.CaseSensitive,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("nearby query: %w", err)
+		}
+	}
+
+	// Tiny LRU-ish cache for nearby window reads (line index → content).
+	// Bounded to keep memory flat on huge match sets.
+	const cacheCap = 256
+	type cacheEntry struct {
+		ln  int64
+		txt string
+	}
+	cache := make([]cacheEntry, 0, cacheCap)
+	getLine := func(ln int64) (string, error) {
+		for i := len(cache) - 1; i >= 0; i-- {
+			if cache[i].ln == ln {
+				return cache[i].txt, nil
+			}
+		}
+		txt, err := se.indexer.GetLine(ln)
+		if err != nil {
+			return "", err
+		}
+		if len(cache) >= cacheCap {
+			// drop oldest half
+			cache = append(cache[:0], cache[cacheCap/2:]...)
+		}
+		cache = append(cache, cacheEntry{ln: ln, txt: txt})
+		return txt, nil
+	}
+
+	total := se.indexer.TotalLines()
+	out := make([]int64, 0, min(len(lines), 4096)) // modest growth; append grows as needed
+
+	for i, ln := range lines {
+		if i&0xff == 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+
+		content, err := getLine(ln)
+		if err != nil {
+			return nil, err
+		}
+		b := []byte(content)
+
+		if needExclude {
+			drop := false
+			for _, m := range excludeMatchers {
+				if m(b) {
+					drop = true
+					break
+				}
+			}
+			if drop {
+				continue
+			}
+		}
+
+		if needLevels && !allowLevel[lineLevel(content)] {
+			continue
+		}
+
+		if needTime {
+			ts, ok := parseLineTime(content)
+			if !ok {
+				if opts.TimeRequireStamp {
+					continue
+				}
+			} else {
+				if !from.IsZero() && ts.Before(from) {
+					continue
+				}
+				if !to.IsZero() && ts.After(to) {
+					continue
+				}
+			}
+		}
+
+		if needNearby {
+			var start, end int64
+			switch mode {
+			case "before":
+				start = ln - int64(win)
+				if start < 0 {
+					start = 0
+				}
+				end = ln
+			case "after":
+				start = ln + 1
+				end = ln + 1 + int64(win)
+			default:
+				start = ln - int64(win)
+				if start < 0 {
+					start = 0
+				}
+				end = ln + 1 + int64(win)
+			}
+			if end > total {
+				end = total
+			}
+			found := false
+			for j := start; j < end; j++ {
+				if j == ln {
+					continue
+				}
+				nb, e := getLine(j)
+				if e != nil {
+					continue
+				}
+				if nearbyMatch([]byte(nb)) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		out = append(out, ln)
+	}
+	return out, nil
+}
+
+
+// ExpandMatchesWithContext inserts neighboring line indices around each match.
+// Order is preserved; duplicates are removed. before/after are clamped to [0, 50].
+func ExpandMatchesWithContext(matches []int64, before, after int, totalLines int64) []int64 {
+	if len(matches) == 0 || totalLines <= 0 {
+		return matches
+	}
+	if before < 0 {
+		before = 0
+	}
+	if after < 0 {
+		after = 0
+	}
+	if before > 50 {
+		before = 50
+	}
+	if after > 50 {
+		after = 50
+	}
+	if before == 0 && after == 0 {
+		return matches
+	}
+	seen := make(map[int64]struct{}, len(matches)*(before+after+1))
+	out := make([]int64, 0, len(matches)*(before+after+1))
+	for _, m := range matches {
+		start := m - int64(before)
+		if start < 0 {
+			start = 0
+		}
+		end := m + int64(after)
+		if end >= totalLines {
+			end = totalLines - 1
+		}
+		for i := start; i <= end; i++ {
+			if _, ok := seen[i]; ok {
+				continue
+			}
+			seen[i] = struct{}{}
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func lineLevel(content string) string {
+	// Case-insensitive substring without allocating ToUpper of the whole line.
+	u := content
+	if len(u) > 200 {
+		u = u[:200]
+	}
+	if hasFold(u, "error") || hasFold(u, "fatal") || hasFold(u, "critical") {
+		return "ERROR"
+	}
+	if hasFold(u, "warn") {
+		return "WARN"
+	}
+	if hasFold(u, "info") {
+		return "INFO"
+	}
+	if hasFold(u, "debug") || hasFold(u, "trace") {
+		return "DEBUG"
+	}
+	return "OTHER"
+}
+
+func hasFold(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), sub)
+}
+
+var timeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.000Z07:00",
+	"2006-01-02 15:04:05.000",
+	"2006-01-02 15:04:05",
+	"2006/01/02 15:04:05",
+	"Jan _2 15:04:05",
+	"Jan 2 15:04:05",
+}
+
+func parseLineTime(content string) (time.Time, bool) {
+	prefix := content
+	if len(prefix) > 40 {
+		prefix = prefix[:40]
+	}
+	fields := strings.Fields(prefix)
+	var candidates []string
+	if len(fields) >= 1 {
+		candidates = append(candidates, fields[0])
+	}
+	if len(fields) >= 2 {
+		candidates = append(candidates, fields[0]+" "+fields[1])
+	}
+	if len(fields) >= 3 {
+		candidates = append(candidates, fields[0]+" "+fields[1]+" "+fields[2])
+	}
+	for _, c := range candidates {
+		for _, layout := range timeLayouts {
+			if t, err := time.Parse(layout, c); err == nil {
+				return t, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseFlexibleTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	for _, layout := range timeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("unrecognized time %q", s)
 }

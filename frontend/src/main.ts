@@ -12,6 +12,8 @@ import { SSHHandler } from './ssh_handler';
 import { InputHistory } from './input_history';
 import { SettingsManager, applyLogFontSize, getPrefs } from './settings_manager';
 import { ContextMenu } from './context_menu';
+import { AdvancedSearchBar } from './search_advanced';
+import { HelpModal } from './help_modal';
 
 type FileStatsResponse = any;
 
@@ -93,6 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         errSSH: document.getElementById('err-ssh-connection')!,
         updateUIState: () => {},
         triggerSearch: () => {},
+        syncSearchCombineUI: () => {},
         loadRecent: () => {},
         addOrUpdateTab: () => {},
         switchTab: () => {},
@@ -112,13 +115,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         return (api && ctx.activeTabId) ? api.GetLogLines(ctx.activeTabId, start, count) : Promise.resolve([] as LogLineData[]);
     });
 
-    const filterScroller = new VirtualScroller('viewport-filter', (start, count) => {
+    const filterScroller = new VirtualScroller('viewport-filter', async (start, count) => {
         const api = getApi();
-        return (api && ctx.activeTabId) ? api.GetFilteredLines(ctx.activeTabId, start, count) : Promise.resolve([] as LogLineData[]);
+        if (!api || !ctx.activeTabId) return [] as LogLineData[];
+        // Match rows only — no in-row context injection (breaks word-wrap layout).
+        return (await api.GetFilteredLines(ctx.activeTabId, start, count)) || [];
     });
 
-    ctx.mainScroller = mainScroller;
-    ctx.filterScroller = filterScroller;
 
     /** When true, updateUIState restores scroll from TabData (set by switchTab). */
     let pendingScrollRestore = false;
@@ -142,6 +145,117 @@ document.addEventListener('DOMContentLoaded', async () => {
     mainScroller.setOnScrollPosition((a) => persistActiveScroll('main', a));
     filterScroller.setOnScrollPosition((a) => persistActiveScroll('filter', a));
 
+    ctx.mainScroller = mainScroller;
+    ctx.filterScroller = filterScroller;
+
+    const runSearchApi = async (tabId: string, query: string, isRegex: boolean, caseSensitive: boolean, invertMatch: boolean, secondary: string, totalLines: number) => {
+        const api = getApi();
+        if (!api) return 0;
+        // Always sync advanced filter state (including empty) so cleared chips take effect.
+        const filter = advancedSearch.toFilterMap(totalLines);
+        const tab = ctx.tabs.get(tabId);
+        filter.secondary_mode = tab?.secondaryMode === 'and' ? 'and' : 'or';
+        const filterJSON = JSON.stringify(filter);
+        if (typeof (api as any).SearchLinesAdvanced === 'function') {
+            return (api as any).SearchLinesAdvanced(tabId, query, isRegex, caseSensitive, invertMatch, secondary, filterJSON);
+        }
+        console.warn('SearchLinesAdvanced is not bound — advanced filters ignored. Rebuild GUI bindings.');
+        return api.SearchLines(tabId, query, isRegex, caseSensitive, invertMatch, secondary);
+    };
+
+    const advancedSearch = new AdvancedSearchBar(
+
+        () => { ctx.triggerSearch(); },
+        () => {
+            try {
+                const a = mainScroller.getViewAnchor?.();
+                return a?.index ?? 0;
+            } catch { return 0; }
+        },
+    );
+
+    /** Normalize log line for Top unique grouping (strip timestamps / collapse noise). */
+    const topUniqueKey = (raw: string): string => {
+        let s = String(raw || '').trim();
+        // Leading date/time variants
+        s = s.replace(/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s*/, '');
+        s = s.replace(/^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s*/, ''); // syslog
+        s = s.replace(/\b\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b/g, '<TS>');
+        s = s.replace(/\b(?:0x)?[0-9a-fA-F]{8,}\b/g, '<HEX>');
+        s = s.replace(/\b\d{3,}\b/g, '<N>');
+        s = s.replace(/\s+/g, ' ').trim();
+        if (s.length > 240) s = s.slice(0, 240);
+        return s || String(raw || '').slice(0, 240);
+    };
+
+    const runTopAggregation = async (tabId: string, matchCount: number) => {
+        const panel0 = document.getElementById('top-agg-panel');
+        if (!advancedSearch.state.topMode) {
+            panel0?.classList.add('hidden');
+            return;
+        }
+        if (matchCount <= 0) {
+            panel0?.classList.add('hidden');
+            return;
+        }
+        const api = getApi();
+        if (!api) return;
+        const prefs = getPrefs() as any;
+        const limit = Math.min(prefs.topLimit || 100, 500);
+        const batch = 200;
+        const counts = new Map<string, number>();
+        let offset = 0;
+        while (offset < matchCount && offset < 8000) {
+            const n = Math.min(batch, matchCount - offset);
+            const lines = await api.GetFilteredLines(tabId, offset, n);
+            for (const l of lines || []) {
+                const key = topUniqueKey(String(l.content || ''));
+                counts.set(key, (counts.get(key) || 0) + 1);
+            }
+            offset += n;
+            // Bound memory: keep only current top-N by count
+            if (counts.size > limit * 3) {
+                const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+                counts.clear();
+                for (const [k, v] of top) counts.set(k, v);
+            }
+        }
+        const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+        let panel = document.getElementById('top-agg-panel');
+        if (!panel) {
+            const body = document.querySelector('.results-body') || document.getElementById('viewport-filter')?.parentElement;
+            panel = document.createElement('div');
+            panel.id = 'top-agg-panel';
+            panel.className = 'top-agg-panel';
+            body?.appendChild(panel);
+        }
+        // One row per unique key (Map guarantees uniqueness)
+        panel.innerHTML = ranked.map(([text, c]) =>
+            `<div class="top-agg-row" title="${String(text).replace(/"/g, '&quot;')}"><span class="top-agg-count">${c}×</span><span class="top-agg-text">${String(text).replace(/</g, '&lt;').slice(0, 160)}</span></div>`
+        ).join('') || '<div class="top-agg-row">No data</div>';
+        panel.classList.remove('hidden');
+    };
+
+    const applyHighlightTerms = () => {
+        const prefs = getPrefs() as any;
+        const s = advancedSearch.state;
+        const terms: { q: string; cls: string; isRegex?: boolean }[] = [];
+        if (prefs.hlSecondary !== false && ctx.activeTabId) {
+            const tab = ctx.tabs.get(ctx.activeTabId);
+            if (tab?.secondaryQuery) terms.push({ q: tab.secondaryQuery, cls: 'hl-secondary', isRegex: tab.isRegex });
+        }
+        if (prefs.hlNearby !== false && s.nearbyQuery) {
+            const tab = ctx.activeTabId ? ctx.tabs.get(ctx.activeTabId) : undefined;
+            terms.push({ q: s.nearbyQuery, cls: 'hl-nearby', isRegex: !!tab?.isRegex });
+        }
+        if (prefs.hlExclude && s.exclude.length) {
+            for (const ex of s.exclude) terms.push({ q: ex, cls: 'hl-exclude', isRegex: s.excludeRegex });
+        }
+        mainScroller.setHighlightTerms?.(terms);
+        filterScroller.setHighlightTerms?.(terms);
+    };
+
+
     // Reserve space at the bottom of each log viewport for the overlaid status
     // bar (it uses the accent/blue color) so the last visible row is never
     // hidden behind it.
@@ -155,12 +269,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     applyStatusbarInset();
     window.addEventListener('resize', applyStatusbarInset);
 
-    // U2: clicking a filter (search results) row jumps the main log to that line.
-    filterScroller.setOnRowClick((globalIndex) => {
-        if (globalIndex >= 0) {
-            mainScroller.scrollToIndex(globalIndex);
-        }
-    });
+    // Filter row click bound after navigateMatch (see bindFilterRowClick).
+    const bindFilterRowClick = () => {
+        filterScroller.setOnRowClick(async (matchIndex) => {
+            if (matchIndex < 0) return;
+            filterScroller.setHighlightedLine(matchIndex);
+            if (ctx.activeTabId && ctx.tabs.has(ctx.activeTabId)) {
+                const tab = ctx.tabs.get(ctx.activeTabId)!;
+                tab.currentMatchIndex = matchIndex;
+                updateSearchNavState();
+            }
+            const api = getApi();
+            if (!api || !ctx.activeTabId) return;
+            try {
+                const lines = await api.GetFilteredLines(ctx.activeTabId, matchIndex, 1);
+                const fileIdx = lines?.[0]?.index;
+                if (fileIdx != null && fileIdx >= 0) {
+                    mainScroller.scrollToIndex(fileIdx);
+                }
+            } catch (err) {
+                console.error('filter row click:', err);
+            }
+        });
+    };
 
     const tabManager = new TabManager(ctx);
     const sshHandler = new SSHHandler(ctx);
@@ -182,10 +313,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         filterScroller.setWordWrap(!!prefs.wordWrap);
     });
     const contextMenu = new ContextMenu(ctx);
+    const helpModal = new HelpModal();
+    void helpModal;
 
     tabManager.initGroupModalHandlers();
 
     // --- Orchestration functions (composition root) ---
+
+    
+    const syncCombineBtn = () => {
+        const btn = document.getElementById('btn-search-combine') as HTMLButtonElement | null;
+        const sec = document.getElementById('secondary-search-input') as HTMLInputElement | null;
+        if (!btn) return;
+        const mode = (ctx.activeTabId && ctx.tabs.get(ctx.activeTabId)?.secondaryMode) || (getPrefs() as any).defaultSearchCombine || 'or';
+        const isOr = mode === 'or';
+        btn.textContent = isOr ? 'OR' : 'AND';
+        btn.classList.toggle('mode-or', isOr);
+        btn.title = isOr ? 'OR' : 'AND';
+        if (sec) {
+            sec.placeholder = isOr ? (t('secondary_placeholder_or') || 'OR') : (t('secondary_placeholder_and') || 'AND');
+            sec.title = sec.placeholder;
+        }
+    };
 
     const updateSearchNavState = () => {
         const counter = document.getElementById('match-counter-text');
@@ -234,6 +383,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (targetMatchIndex < 0 || targetMatchIndex >= tab.matchedLines) return;
 
         tab.currentMatchIndex = targetMatchIndex;
+        filterScroller.setHighlightedLine(targetMatchIndex);
         filterScroller.scrollToIndex(targetMatchIndex);
 
         const api = getApi();
@@ -245,6 +395,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         updateSearchNavState();
     };
+    bindFilterRowClick();
 
     const saveSearchResults = async () => {
         if (!ctx.activeTabId) return;
@@ -317,8 +468,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             counter.textContent = `${matches} / ${tab.totalLines}${t('match_counter_suffix')}${suffix}`;
         }
         if (done) {
+            const prevHighlight = tab.currentMatchIndex;
             filterScroller.setTotalLines(matches);
-            filterScroller.setHighlightedLine(null);
+            // Keep selection if still in range; avoid null flash on every search finish.
+            if (prevHighlight >= 0 && prevHighlight < matches) {
+                filterScroller.setHighlightedLine(prevHighlight);
+            } else {
+                filterScroller.setHighlightedLine(matches > 0 ? 0 : null);
+                tab.currentMatchIndex = matches > 0 ? 0 : -1;
+            }
             mainScroller.setSearchQuery(query);
             updateSearchNavState();
             syncSearchClearBtn();
@@ -348,17 +506,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             const gen = (searchGenByTab.get(tabId) ?? 0) + 1;
             searchGenByTab.set(tabId, gen);
             try {
-                const matches = await api.SearchLines(
-                    tabId,
-                    tabNow.searchQuery,
-                    tabNow.isRegex,
-                    tabNow.caseSensitive,
-                    tabNow.invertMatch,
-                    tabNow.secondaryQuery || '',
-                );
+                const sec = tabNow.secondaryQuery || '';
+                const matches = await runSearchApi(tabId, tabNow.searchQuery, tabNow.isRegex, tabNow.caseSensitive, tabNow.invertMatch, sec, tabNow.totalLines);
                 // Drop stale response (a newer search was started).
                 if (searchGenByTab.get(tabId) !== gen) return;
                 applySearchResults(tabId, matches, tabNow.searchQuery, true);
+                applyHighlightTerms();
+                void runTopAggregation(tabId, matches);
             } catch (err) {
                 if (searchGenByTab.get(tabId) !== gen) return;
                 const msg = String((err as any)?.message ?? err);
@@ -387,16 +541,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const gen = (searchGenByTab.get(tabId) ?? 0) + 1;
         searchGenByTab.set(tabId, gen);
         try {
-            const matches = await api.SearchLines(
-                tabId,
-                tab.searchQuery,
-                tab.isRegex,
-                tab.caseSensitive,
-                tab.invertMatch,
-                tab.secondaryQuery || '',
-            );
+            const sec = tab.secondaryQuery || '';
+            const matches = await runSearchApi(tabId, tab.searchQuery, tab.isRegex, tab.caseSensitive, tab.invertMatch, sec, tab.totalLines);
             if (searchGenByTab.get(tabId) !== gen) return;
             applySearchResults(tabId, matches, tab.searchQuery, true);
+            applyHighlightTerms();
+            void runTopAggregation(tabId, matches);
         } catch (err) {
             if (searchGenByTab.get(tabId) !== gen) return;
             const msg = String((err as any)?.message ?? err);
@@ -454,6 +604,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         ctx.btnOptCase.classList.toggle('active', tab.caseSensitive);
         ctx.btnOptRegex.classList.toggle('active', tab.isRegex);
         ctx.btnOptInvert.classList.toggle('active', tab.invertMatch);
+        if (!tab.secondaryMode) tab.secondaryMode = ((getPrefs() as any).defaultSearchCombine === 'and' ? 'and' : 'or');
+        syncCombineBtn();
         ctx.btnFollow.classList.toggle('active', tab.autoScroll);
         ctx.mainContainer.classList.toggle('results-only', !!tab.resultsOnly);
         syncResultsOnlyBadge();
@@ -478,6 +630,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         validateRegexUI();
         updateSearchNavState();
+        // After tab switch / session restore the bottom pane may still have 0 height
+        // until flex layout settles — remeasure both scrollers on next frames.
+        requestAnimationFrame(() => {
+            mainScroller.relayout?.();
+            filterScroller.relayout?.();
+            requestAnimationFrame(() => {
+                mainScroller.relayout?.();
+                filterScroller.relayout?.();
+            });
+        });
     };
 
     /** Truncate a path in the middle so the status bar stays readable. */
@@ -628,6 +790,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Wire cross-manager callbacks into the shared context.
     ctx.updateUIState = updateUIState;
+    ctx.syncSearchCombineUI = () => {
+        const def = ((getPrefs() as any).defaultSearchCombine === 'and' ? 'and' : 'or') as 'and' | 'or';
+        const secEl = document.getElementById('secondary-search-input') as HTMLInputElement | null;
+        const secVal = (secEl?.value ?? '').trim();
+        // Active tab: only adopt default when secondary field is empty (unused).
+        if (ctx.activeTabId && ctx.tabs.has(ctx.activeTabId)) {
+            const tab = ctx.tabs.get(ctx.activeTabId)!;
+            const unused = !secVal && !(tab.secondaryQuery || '').trim();
+            if (unused) tab.secondaryMode = def;
+        }
+        // Idle tabs with empty secondary also pick up the new default.
+        ctx.tabs.forEach((tab) => {
+            if (!(tab.secondaryQuery || '').trim()) tab.secondaryMode = def;
+        });
+        syncCombineBtn();
+    };
+
     (ctx as any).requestScrollRestore = () => { pendingScrollRestore = true; };
     ctx.triggerSearch = triggerSearch;
     ctx.loadRecent = modalController.loadRecent;
@@ -1040,6 +1219,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         triggerSearch();
     });
 
+    document.getElementById('btn-search-combine')?.addEventListener('click', () => {
+        if (!ctx.activeTabId || !ctx.tabs.has(ctx.activeTabId)) return;
+        const tab = ctx.tabs.get(ctx.activeTabId)!;
+        tab.secondaryMode = tab.secondaryMode === 'or' ? 'and' : 'or';
+        syncCombineBtn();
+        void triggerSearch();
+    });
+
     ctx.btnGotoLineHeader.addEventListener('click', modalController.openGotoModal);
 
     ctx.btnNavFirst.addEventListener('click', () => navigateMatch(0));
@@ -1053,6 +1240,33 @@ document.addEventListener('DOMContentLoaded', async () => {
             navigateMatch(ctx.tabs.get(ctx.activeTabId)!.currentMatchIndex + 1);
         }
     });
+    const navFromHere = async (dir: 1 | -1) => {
+        if (!ctx.activeTabId || !ctx.tabs.has(ctx.activeTabId)) return;
+        const tab = ctx.tabs.get(ctx.activeTabId)!;
+        if (!tab.matchedLines || tab.matchedLines <= 0) return;
+        const cursor = mainScroller.getViewAnchor?.()?.index ?? 0;
+        // Walk filtered results to find nearest match beyond cursor.
+        const api = getApi();
+        if (!api) return;
+        const page = Math.min(tab.matchedLines, 5000);
+        const lines = await api.GetFilteredLines(ctx.activeTabId, 0, page);
+        const idxs = (lines || []).map((l: any) => l.index);
+        let target = -1;
+        if (dir > 0) {
+            target = idxs.find((i: number) => i > cursor) ?? -1;
+        } else {
+            for (let k = idxs.length - 1; k >= 0; k--) {
+                if (idxs[k] < cursor) { target = idxs[k]; break; }
+            }
+        }
+        if (target >= 0) {
+            mainScroller.scrollToIndex(target);
+            mainScroller.setHighlightedLine?.(target);
+        }
+    };
+    document.getElementById('btn-search-from-here-next')?.addEventListener('click', () => navFromHere(1));
+    document.getElementById('btn-search-from-here-prev')?.addEventListener('click', () => navFromHere(-1));
+
     ctx.btnNavLast.addEventListener('click', () => {
         if (ctx.activeTabId && ctx.tabs.has(ctx.activeTabId)) {
             navigateMatch(ctx.tabs.get(ctx.activeTabId)!.matchedLines - 1);
@@ -1466,13 +1680,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
+    // i18n first so restore/open paths can write live status text afterward.
+    applyI18n();
+    applyLogFontSize(localStorage.getItem('gofle.logFontSize') || '13');
+
     await restoreSavedSession();
 
     if (startupBehavior === 'open_dialog' && pendingStartupArgs.length === 0) {
-        // No OS file args — present the open dialog so the user can pick a log.
-        queueMicrotask(() => {
-            try { ctx.btnOpen.click(); } catch (e) { console.error('startup open dialog failed', e); }
-        });
+        // No tabs and user prefers dialog — only when nothing was restored.
+        if (ctx.tabs.size === 0) {
+            queueMicrotask(() => {
+                try { ctx.btnOpen.click(); } catch (e) { console.error('startup open dialog failed', e); }
+            });
+        }
     }
 
     if (pendingStartupArgs.length > 0) {
@@ -1490,6 +1710,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    applyI18n();
-    applyLogFontSize(localStorage.getItem('gofle.logFontSize') || '13');
+    // Final sync: with tabs → active file in status/scrollers; without tabs → "file none".
+    if (ctx.activeTabId && ctx.tabs.has(ctx.activeTabId)) {
+        pendingScrollRestore = true;
+        updateUIState();
+        requestAnimationFrame(() => {
+            mainScroller.relayout?.();
+            filterScroller.relayout?.();
+        });
+    } else {
+        ctx.activeTabId = null;
+        updateUIState();
+    }
 });

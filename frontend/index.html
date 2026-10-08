@@ -17,6 +17,9 @@
     <div class="tab-bar-container">
         <div class="tab-list" id="tab-list"></div>
         <div class="tab-actions">
+            <button class="btn-icon" id="btn-help" data-i18n-title="tooltip_help" title="Довідка">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </button>
             <button class="btn-icon" id="btn-settings" data-i18n-title="tooltip_settings">
                 <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>
@@ -66,10 +69,10 @@
             <svg class="icon" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         </button>
         <button class="btn-icon" id="btn-recent" data-i18n-title="btn_recent_title">
-            <svg class="icon" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         </button>
         <button class="btn-icon" id="btn-open-ssh" data-i18n-title="tooltip_open_ssh">
-            <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7" y2="7.5"/><line x1="7" y1="16.5" x2="7" y2="16.5"/></svg>
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><path d="M8 14h8"/><path d="M8 17h5"/></svg>
         </button>
         <span class="toolbar-sep"></span>
         
@@ -85,7 +88,7 @@
         <div class="phpstorm-search-box" id="search-box-container">
             <svg class="icon search-main-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
             <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" placeholder="Фільтр / Regex (натисніть /)">
-            <span class="search-and-sep" data-i18n="search_and_label" title="AND">AND</span>
+            <button type="button" class="search-and-sep" id="btn-search-combine" title="AND">AND</button>
             <input type="text" id="secondary-search-input" data-i18n-placeholder="secondary_placeholder" data-i18n-title="secondary_tooltip" placeholder="" title="" autocomplete="off">
             <button type="button" id="btn-clear-search" class="search-clear-btn hidden" data-i18n-title="btn_clear_search_title" title="Очистити пошук" aria-label="Clear search">×</button>
             <span id="regex-error-indicator" class="regex-error-badge hidden" title="">!</span>
@@ -110,12 +113,17 @@
             <button class="btn-nav" id="btn-search-last" disabled data-i18n-title="nav_last_title">
                 <svg class="icon" viewBox="0 0 24 24"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
             </button>
+            <button class="btn-nav" id="btn-search-from-here-prev" disabled data-i18n-title="nav_from_here_prev_title" title="Prev from here">
+                <svg class="icon" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/><line x1="6" y1="19" x2="18" y2="19"/></svg>
+            </button>
+            <button class="btn-nav" id="btn-search-from-here-next" disabled data-i18n-title="nav_from_here_next_title" title="Next from here">
+                <svg class="icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/><line x1="6" y1="5" x2="18" y2="5"/></svg>
+            </button>
             <button class="btn-nav" id="btn-save-search-results" disabled data-i18n-title="btn_save_search_results_title">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             </button>
         </div>
     </div>
-
     <!-- Dual Resizable Panels Container -->
     <div id="main-container">
         <!-- Top Panel: Full Log View -->
@@ -133,7 +141,23 @@
 
         <!-- Bottom Panel: Search Results View -->
         <div id="panel-bottom" class="panel">
-            <div id="viewport-filter" class="viewport"></div>
+            <div id="advanced-search-bar" class="advanced-search-bar results-adv-bar">
+                <div class="adv-chips-row">
+                    <span class="adv-bar-label" data-i18n="adv_bar_label">Фільтри</span>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-nearby" data-i18n="adv_nearby">Поруч</button>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-levels" data-i18n="adv_levels">Рівні</button>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-time" data-i18n="adv_time">Час</button>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-exclude" data-i18n="adv_exclude">Виключити</button>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-range" data-i18n="adv_range">Діапазон</button>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-top" data-i18n="adv_top">Топ</button>
+                    <button type="button" class="search-opt-btn adv-chip" id="btn-adv-presets" data-i18n="adv_presets">Пресети</button>
+                </div>
+                <div id="adv-dock-panel" class="adv-dock-panel hidden"></div>
+            </div>
+            <div class="results-body">
+                <div id="viewport-filter" class="viewport"></div>
+                <div id="top-agg-panel" class="top-agg-panel hidden"></div>
+            </div>
         </div>
     </div>
 
@@ -255,6 +279,25 @@
         </div>
     </div>
 
+    
+    <div id="help-modal" class="modal hidden">
+        <div class="modal-content settings-modal-content help-modal-content">
+            <div class="settings-header help-header">
+                <h3 data-i18n="help_modal_title">Довідка</h3>
+                <div class="help-search-wrap">
+                    <input type="search" id="help-search-input" class="adv-input" data-i18n-placeholder="help_search_placeholder" placeholder="Пошук у довідці…" autocomplete="off" />
+                </div>
+            </div>
+            <div class="settings-body help-body">
+                <nav class="settings-tabs" id="help-tabs" role="tablist"></nav>
+                <div class="settings-panels help-panels" id="help-panels"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="btn-close-help" class="btn-primary" data-i18n="btn_close">Закрити</button>
+            </div>
+        </div>
+    </div>
+
     <div id="settings-modal" class="modal hidden">
         <div class="modal-content settings-modal-content">
             <div class="settings-header">
@@ -264,8 +307,9 @@
                 <nav class="settings-tabs" role="tablist">
                     <button type="button" class="settings-tab active" data-settings-tab="appearance" data-i18n="settings_section_appearance">Вигляд</button>
                     <button type="button" class="settings-tab" data-settings-tab="viewer" data-i18n="settings_section_viewer">Перегляд</button>
+                    <button type="button" class="settings-tab" data-settings-tab="search" data-i18n="settings_tab_search">Пошук</button>
                     <button type="button" class="settings-tab" data-settings-tab="session" data-i18n="settings_section_session">Сесія</button>
-                    <button type="button" class="settings-tab" data-settings-tab="remote" data-i18n="settings_section_remote">Remote</button>
+                    <button type="button" class="settings-tab" data-settings-tab="remote" data-i18n="settings_section_remote">Віддалені</button>
                 </nav>
                 <div class="settings-panels">
                     <div class="settings-panel active" data-settings-panel="appearance">
@@ -383,7 +427,69 @@
                         </div>
                     </div>
 
-                    <div class="settings-panel" data-settings-panel="session">
+                    
+                    <div class="settings-panel" data-settings-panel="search">
+                        <div class="form-group">
+                            <label for="settings-default-search-combine" data-i18n="label_search_combine">Логіка AND/OR за замовчуванням</label>
+                            <select id="settings-default-search-combine">
+                                <option value="or" data-i18n="opt_combine_or">OR</option>
+                                <option value="and" data-i18n="opt_combine_and">AND</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-ctx-before" data-i18n="label_ctx_before">Контекст: рядків до</label>
+                                <input type="number" id="settings-ctx-before" min="0" max="50" step="1" />
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-ctx-after" data-i18n="label_ctx_after">Контекст: рядків після</label>
+                                <input type="number" id="settings-ctx-after" min="0" max="50" step="1" />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-nearby-mode" data-i18n="label_nearby_mode">Nearby за замовчуванням</label>
+                                <select id="settings-nearby-mode">
+                                    <option value="either" data-i18n="opt_nearby_either">будь-де</option>
+                                    <option value="before" data-i18n="opt_nearby_before">перед</option>
+                                    <option value="after" data-i18n="opt_nearby_after">після</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-nearby-window" data-i18n="label_nearby_window">Nearby вікно (рядки)</label>
+                                <input type="number" id="settings-nearby-window" min="1" max="500" step="1" />
+                            </div>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-exclude-regex" />
+                                <span data-i18n="label_exclude_regex">Exclude як regex за замовчуванням</span>
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="check-label">
+                                <input type="checkbox" id="settings-time-require" />
+                                <span data-i18n="label_time_require">Time: лише рядки з timestamp</span>
+                            </label>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="settings-top-limit" data-i18n="label_top_limit">Top: макс. унікальних</label>
+                                <input type="number" id="settings-top-limit" min="10" max="1000" step="10" />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <span data-i18n="label_highlight_terms">Підсвітка термів</span>
+                            <div class="form-row" style="margin-top:8px">
+                                <label class="check-label"><input type="checkbox" id="settings-hl-primary" checked /> <span data-i18n="label_hl_primary">Основний запит</span></label>
+                                <label class="check-label"><input type="checkbox" id="settings-hl-secondary" checked /> <span data-i18n="label_hl_secondary">AND</span></label>
+                                <label class="check-label"><input type="checkbox" id="settings-hl-nearby" checked /> <span data-i18n="label_hl_nearby">Поруч</span></label>
+                                <label class="check-label"><input type="checkbox" id="settings-hl-exclude" /> <span data-i18n="label_hl_exclude">Виключення</span></label>
+                            </div>
+                        </div>
+                    </div>
+<div class="settings-panel" data-settings-panel="session">
                         <div class="form-group checkbox-group">
                             <label class="check-label">
                                 <input type="checkbox" id="settings-save-tabs" checked />

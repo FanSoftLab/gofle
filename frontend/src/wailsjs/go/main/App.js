@@ -159,3 +159,6 @@ export function SaveSearchPaneLayout(arg1, arg2) {
 export function GetSearchPaneLayout() {
   return window['go']['main']['App']['GetSearchPaneLayout']();
 }
+export function SearchLinesAdvanced(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['SearchLinesAdvanced'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}

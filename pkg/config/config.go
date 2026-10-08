@@ -141,6 +141,20 @@ type AppConfig struct {
 	DefaultSearchCase  bool `json:"default_search_case"`
 	DefaultSearchRegex bool `json:"default_search_regex"`
 	DefaultSearchInvert bool `json:"default_search_invert"`
+	// DefaultSearchCombine is "and" or "or" for the secondary search field.
+	DefaultSearchCombine string `json:"default_search_combine"`
+	// Search context / advanced defaults (GUI).
+	CtxBefore           int    `json:"ctx_before"`
+	CtxAfter            int    `json:"ctx_after"`
+	NearbyMode          string `json:"nearby_mode"`
+	NearbyWindow        int    `json:"nearby_window"`
+	ExcludeRegexDefault bool   `json:"exclude_regex_default"`
+	TimeRequireStamp    bool   `json:"time_require_stamp"`
+	TopLimit            int    `json:"top_limit"`
+	HlPrimary           bool   `json:"hl_primary"`
+	HlSecondary         bool   `json:"hl_secondary"`
+	HlNearby            bool   `json:"hl_nearby"`
+	HlExclude           bool   `json:"hl_exclude"`
 	// MaxRecentFiles caps the recent-files list (separate from input history).
 	MaxRecentFiles int `json:"max_recent_files"`
 	// ConfirmCloseTab asks before closing a tab that is SSH/FTP or has an active stream.
@@ -203,6 +217,18 @@ type settingsFile struct {
 	DefaultSearchCase   *bool `json:"default_search_case"`
 	DefaultSearchRegex  *bool `json:"default_search_regex"`
 	DefaultSearchInvert *bool `json:"default_search_invert"`
+	DefaultSearchCombine string `json:"default_search_combine"`
+	CtxBefore           int    `json:"ctx_before"`
+	CtxAfter            int    `json:"ctx_after"`
+	NearbyMode          string `json:"nearby_mode"`
+	NearbyWindow        int    `json:"nearby_window"`
+	ExcludeRegexDefault *bool  `json:"exclude_regex_default"`
+	TimeRequireStamp    *bool  `json:"time_require_stamp"`
+	TopLimit            int    `json:"top_limit"`
+	HlPrimary           *bool  `json:"hl_primary"`
+	HlSecondary         *bool  `json:"hl_secondary"`
+	HlNearby            *bool  `json:"hl_nearby"`
+	HlExclude           *bool  `json:"hl_exclude"`
 	MaxRecentFiles    int    `json:"max_recent_files"`
 	ConfirmCloseTab   *bool  `json:"confirm_close_tab"`
 	StartupBehavior   string `json:"startup_behavior"`
@@ -306,7 +332,19 @@ func LoadConfig() (*AppConfig, error) {
 		DefaultFollow:     true,
 		DefaultSearchCase: false,
 		DefaultSearchRegex: false,
-		DefaultSearchInvert: false,
+		DefaultSearchInvert:  false,
+		CtxBefore:            0,
+		CtxAfter:             0,
+		NearbyMode:           "either",
+		NearbyWindow:         10,
+		ExcludeRegexDefault:  false,
+		TimeRequireStamp:     false,
+		TopLimit:             100,
+		HlPrimary:            true,
+		HlSecondary:          true,
+		HlNearby:             true,
+		HlExclude:            false,
+		DefaultSearchCombine: "or",
 		MaxRecentFiles:    20,
 		ConfirmCloseTab:   true,
 		StartupBehavior:   "session",
@@ -403,6 +441,42 @@ func (c *AppConfig) loadSettings() {
 	if sf.DefaultSearchInvert != nil {
 		c.DefaultSearchInvert = *sf.DefaultSearchInvert
 	}
+	if sf.DefaultSearchCombine == "and" || sf.DefaultSearchCombine == "or" {
+		c.DefaultSearchCombine = sf.DefaultSearchCombine
+	}
+	if sf.CtxBefore >= 0 {
+		c.CtxBefore = sf.CtxBefore
+	}
+	if sf.CtxAfter >= 0 {
+		c.CtxAfter = sf.CtxAfter
+	}
+	if sf.NearbyMode != "" {
+		c.NearbyMode = sf.NearbyMode
+	}
+	if sf.NearbyWindow > 0 {
+		c.NearbyWindow = sf.NearbyWindow
+	}
+	if sf.ExcludeRegexDefault != nil {
+		c.ExcludeRegexDefault = *sf.ExcludeRegexDefault
+	}
+	if sf.TimeRequireStamp != nil {
+		c.TimeRequireStamp = *sf.TimeRequireStamp
+	}
+	if sf.TopLimit > 0 {
+		c.TopLimit = sf.TopLimit
+	}
+	if sf.HlPrimary != nil {
+		c.HlPrimary = *sf.HlPrimary
+	}
+	if sf.HlSecondary != nil {
+		c.HlSecondary = *sf.HlSecondary
+	}
+	if sf.HlNearby != nil {
+		c.HlNearby = *sf.HlNearby
+	}
+	if sf.HlExclude != nil {
+		c.HlExclude = *sf.HlExclude
+	}
 	if sf.MaxRecentFiles > 0 {
 		c.MaxRecentFiles = sf.MaxRecentFiles
 	}
@@ -489,6 +563,18 @@ func (c *AppConfig) persistSettings() error {
 		WindowWidth:       c.WindowWidth,
 		WindowHeight:      c.WindowHeight,
 		WindowMaximized:   c.WindowMaximized,
+		DefaultSearchCombine: c.DefaultSearchCombine,
+		CtxBefore: c.CtxBefore,
+		CtxAfter: c.CtxAfter,
+		NearbyMode: c.NearbyMode,
+		NearbyWindow: c.NearbyWindow,
+		ExcludeRegexDefault: &c.ExcludeRegexDefault,
+		TimeRequireStamp: &c.TimeRequireStamp,
+		TopLimit: c.TopLimit,
+		HlPrimary: &c.HlPrimary,
+		HlSecondary: &c.HlSecondary,
+		HlNearby: &c.HlNearby,
+		HlExclude: &c.HlExclude,
 		MaxHistorySize:    c.MaxHistorySize,
 	}
 

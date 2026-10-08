@@ -18,6 +18,8 @@ export interface TabData {
     searchQuery: string;
     /** Second-level AND filter applied to the primary search results. */
     secondaryQuery: string;
+    /** "and" | "or" — combine primary with secondary field */
+    secondaryMode: 'and' | 'or';
     isRegex: boolean;
     caseSensitive: boolean;
     invertMatch: boolean;
@@ -127,6 +129,8 @@ export interface AppContext {
 
     updateUIState: () => void;
     triggerSearch: () => void;
+    /** Update AND/OR button from prefs when secondary field is unused */
+    syncSearchCombineUI: () => void;
     loadRecent: () => void;
     addOrUpdateTab: (stats: main.FileStatsResponse) => void;
     switchTab: (tabId: string) => void;
