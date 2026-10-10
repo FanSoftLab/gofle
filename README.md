@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/github/license/sankam-nikolya/GoFLE)](./LICENSE.md)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sankam-nikolya/GoFLE)](https://goreportcard.com/report/github.com/sankam-nikolya/GoFLE)
 
-**Fast Interactive Log Explorer** — a cross-platform desktop application for browsing,
+**Go Fast Log Explorer** — a cross-platform desktop application for browsing,
 searching, and tailing very large log files and remote (SSH) logs.
 
 GoFLE is a re-implementation of the classic [glogg](https://github.com/nickbnf/glogg)
@@ -644,6 +644,12 @@ go build ./cmd/gofle     # produces ./gofle next to the repo root
 | `gofle recent` | Interactive recent-file picker (shared with the GUI). |
 | `gofle recent open <n>` | Reopen recent entry `<n>` in the viewer (non-interactive). |
 | `gofle recent clear` | Clear the recent list. |
+| `gofle presets` / `list` | List shared search presets. |
+| `gofle presets import <file.json>` | Import GUI localStorage-format presets. |
+| `gofle presets export [file.json]` | Export presets (stdout or file, GUI-compatible JSON). |
+| `gofle session show` | List tabs in the saved session. |
+| `gofle session restore` | Open saved session and **auto-load all tabs**. |
+| `gofle session clear` | Clear the saved session. |
 
 **`--view` vs `--dump` (ssh / ftp only)**
 
@@ -685,9 +691,24 @@ When a viewer is open, the following keys apply:
 | --- | --- |
 | `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End` | Scroll. |
 | `/` | Start a search (`Alt+R` regex, `Alt+I` invert, `Alt+C` case). |
+| `\` | Secondary AND-filter within current results. |
+| `A` | **Advanced filters** form: Nearby, Exclude, Levels, Time, Line range, Context. |
+| *(highlight)* | Match lines color primary (gold), AND (green), nearby (cyan), exclude (red); toggles in Settings. |
+| `u` | **Top unique** — frequent match texts (jump with Enter). |
+| `P` | **Search presets** — load / save / delete (shared `search_presets.json`). |
+| `F2` / `,` | **Settings** — view mode, search defaults, context/nearby/top (shared `settings.json`). |
+| `Y` | **Restore tabs** from the shared saved session (`saved_session.json`). |
+| `G` | **Tab group** — name/color for the active tab (shown in the tab strip). |
+| `T` | Open recent list to open selection **as a new tab**. |
+| `t` | In recent picker: open highlighted entry as a **new tab**. |
+| `Ctrl+Tab` / `Ctrl+PgDn` | Next tab. |
+| `Ctrl+Shift+Tab` / `Ctrl+PgUp` | Previous tab. |
+| `1`…`9` | Jump to tab N. |
+| `Ctrl+W` | Close current tab (closing the last tab quits). |
 | `n` / `p` | Next / previous match. |
 | `[` / `]` | First / last match. |
 | `r` | Toggle results-only (filter) view. |
+| `s` / `m` | Split view / cycle view mode. |
 | `f` | Toggle follow/tail mode. |
 | `g` | Go to a line number. |
 | `e` | Export (whole file or matches) to a file. |
@@ -714,6 +735,7 @@ Files written there:
 | `settings.json` | Theme, language, save-tabs flag, window geometry, pane height, derived secret key. |
 | `recent.json` | Recent files list (SSH usernames/passwords stored **encrypted**). |
 | `saved_tabs.json` | Snapshot of open tabs (only when "save tabs on exit" is enabled). |
+| `search_presets.json` | Named advanced-search presets (shared by GUI and CLI). |
 
 Available settings (via the Settings dialog or `App.SaveSettings`):
 

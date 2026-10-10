@@ -162,3 +162,8 @@ export function GetSearchPaneLayout() {
 export function SearchLinesAdvanced(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['SearchLinesAdvanced'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
+
+export function GetVersion() {
+  return window["go"]["main"]["App"]["GetVersion"]();
+}
+

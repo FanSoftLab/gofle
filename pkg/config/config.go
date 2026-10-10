@@ -245,11 +245,12 @@ type settingsFile struct {
 }
 
 const (
-	recentFile       = "recent.json"
-	settingsFileNm   = "settings.json"
-	savedTabsFile    = "saved_tabs.json"
-	savedSessionFile = "saved_session.json"
-	historyFile      = "history.json"
+	recentFile        = "recent.json"
+	settingsFileNm    = "settings.json"
+	savedTabsFile     = "saved_tabs.json"
+	savedSessionFile  = "saved_session.json"
+	historyFile       = "history.json"
+	searchPresetsFile = "search_presets.json"
 	// secretKeyFile holds the AES key used to encrypt at-rest SSH credentials.
 	// It lives in its own 0600 file, separate from settings.json, so the key is
 	// not co-mingled with general config and the blast radius of a settings
@@ -1523,6 +1524,174 @@ func (c *AppConfig) DecryptSecret(encryptedHex string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// SearchPreset is a named snapshot of search + advanced filters, shared by the
+// GUI (previously localStorage) and the CLI TUI via search_presets.json.
+type SearchPreset struct {
+	Name            string   `json:"name"`
+	ExcludePatterns []string `json:"exclude_patterns,omitempty"`
+	ExcludeIsRegex  bool     `json:"exclude_is_regex,omitempty"`
+	NearbyQuery     string   `json:"nearby_query,omitempty"`
+	NearbyMode      string   `json:"nearby_mode,omitempty"`
+	NearbyWindow    int      `json:"nearby_window,omitempty"`
+	Levels          []string `json:"levels,omitempty"`
+	TimeFrom        string   `json:"time_from,omitempty"`
+	TimeTo          string   `json:"time_to,omitempty"`
+	TimeRequire     bool     `json:"time_require_stamp,omitempty"`
+	LineStart       int64    `json:"line_start,omitempty"`
+	LineEnd         int64    `json:"line_end,omitempty"`
+	CtxBefore       int      `json:"ctx_before,omitempty"`
+	CtxAfter        int      `json:"ctx_after,omitempty"`
+	Query           string   `json:"query,omitempty"`
+	SecondaryQuery  string   `json:"secondary_query,omitempty"`
+	IsRegex         bool     `json:"is_regex,omitempty"`
+	CaseSensitive   bool     `json:"case_sensitive,omitempty"`
+	InvertMatch     bool     `json:"invert_match,omitempty"`
+}
+
+// GetSearchPresets loads search_presets.json from the config directory.
+func (c *AppConfig) GetSearchPresets() []SearchPreset {
+	if c == nil {
+		return nil
+	}
+	path := filepath.Join(c.configDir, searchPresetsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var presets []SearchPreset
+	if err := json.Unmarshal(data, &presets); err != nil {
+		slog.Warn("search presets file is corrupt; ignoring", "file", searchPresetsFile, "err", err)
+		return nil
+	}
+	return presets
+}
+
+// AddSearchPreset appends or replaces a preset by name and persists the list.
+func (c *AppConfig) AddSearchPreset(p SearchPreset) error {
+	if c == nil {
+		return fmt.Errorf("nil config")
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		return fmt.Errorf("preset name is required")
+	}
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	presets := c.GetSearchPresets()
+	found := false
+	for i := range presets {
+		if strings.EqualFold(presets[i].Name, p.Name) {
+			presets[i] = p
+			found = true
+			break
+		}
+	}
+	if !found {
+		presets = append(presets, p)
+	}
+	return c.persistSearchPresets(presets)
+}
+
+// RemoveSearchPreset deletes a preset by name.
+func (c *AppConfig) RemoveSearchPreset(name string) error {
+	if c == nil {
+		return fmt.Errorf("nil config")
+	}
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	presets := c.GetSearchPresets()
+	filtered := presets[:0]
+	for _, p := range presets {
+		if !strings.EqualFold(p.Name, name) {
+			filtered = append(filtered, p)
+		}
+	}
+	return c.persistSearchPresets(filtered)
+}
+
+func (c *AppConfig) persistSearchPresets(presets []SearchPreset) error {
+	if presets == nil {
+		presets = []SearchPreset{}
+	}
+	data, err := json.MarshalIndent(presets, "", "  ")
+	if err != nil {
+		return fmt.Errorf("%s: %w", searchPresetsFile, err)
+	}
+	if err := os.WriteFile(filepath.Join(c.configDir, searchPresetsFile), data, 0o600); err != nil {
+		return fmt.Errorf("%s: %w", searchPresetsFile, err)
+	}
+	return nil
+}
+
+// ImportGUIPresets merges presets exported from the desktop localStorage format:
+//
+//	[{"name":"…","filter":{"exclude_patterns":[…],"nearby_query":"…",…}}]
+//
+// Unknown fields are ignored. Existing presets with the same name are replaced.
+func (c *AppConfig) ImportGUIPresets(raw []byte) (int, error) {
+	if c == nil {
+		return 0, fmt.Errorf("nil config")
+	}
+	var items []struct {
+		Name   string `json:"name"`
+		Filter struct {
+			ExcludePatterns []string `json:"exclude_patterns"`
+			ExcludeIsRegex  bool     `json:"exclude_is_regex"`
+			NearbyQuery     string   `json:"nearby_query"`
+			NearbyMode      string   `json:"nearby_mode"`
+			NearbyWindow    int      `json:"nearby_window"`
+			Levels          []string `json:"levels"`
+			TimeFrom        string   `json:"time_from"`
+			TimeTo          string   `json:"time_to"`
+			TimeRequire     bool     `json:"time_require_stamp"`
+			LineStart       int64    `json:"line_start"`
+			LineEnd         int64    `json:"line_end"`
+			CtxBefore       int      `json:"ctx_before"`
+			CtxAfter        int      `json:"ctx_after"`
+			Query           string   `json:"query"`
+			SecondaryQuery  string   `json:"secondary_query"`
+			IsRegex         bool     `json:"is_regex"`
+			CaseSensitive   bool     `json:"case_sensitive"`
+			InvertMatch     bool     `json:"invert_match"`
+		} `json:"filter"`
+	}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return 0, fmt.Errorf("parse GUI presets: %w", err)
+	}
+	n := 0
+	for _, it := range items {
+		name := strings.TrimSpace(it.Name)
+		if name == "" {
+			name = "imported"
+		}
+		p := SearchPreset{
+			Name:            name,
+			ExcludePatterns: it.Filter.ExcludePatterns,
+			ExcludeIsRegex:  it.Filter.ExcludeIsRegex,
+			NearbyQuery:     it.Filter.NearbyQuery,
+			NearbyMode:      it.Filter.NearbyMode,
+			NearbyWindow:    it.Filter.NearbyWindow,
+			Levels:          it.Filter.Levels,
+			TimeFrom:        it.Filter.TimeFrom,
+			TimeTo:          it.Filter.TimeTo,
+			TimeRequire:     it.Filter.TimeRequire,
+			LineStart:       it.Filter.LineStart,
+			LineEnd:         it.Filter.LineEnd,
+			CtxBefore:       it.Filter.CtxBefore,
+			CtxAfter:        it.Filter.CtxAfter,
+			Query:           it.Filter.Query,
+			SecondaryQuery:  it.Filter.SecondaryQuery,
+			IsRegex:         it.Filter.IsRegex,
+			CaseSensitive:   it.Filter.CaseSensitive,
+			InvertMatch:     it.Filter.InvertMatch,
+		}
+		if err := c.AddSearchPreset(p); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // NewTestConfig creates an AppConfig for testing with a temporary directory.

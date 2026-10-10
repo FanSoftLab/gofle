@@ -32,6 +32,7 @@ declare global {
                     SaveSearchResults(tabID: string): Promise<string>;
                     SaveFullLogAs(tabID: string): Promise<string>;
                     GetLevelStats(tabID: string): Promise<{ [key: string]: number }>;
+                    GetVersion(): Promise<string>;
                 };
             };
         };

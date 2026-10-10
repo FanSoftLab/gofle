@@ -33,6 +33,11 @@ func main() {
 	os.Exit(run())
 }
 
+// windowTitle is the OS window / about-dialog title.
+func windowTitle() string {
+	return "Go Fast Log Explorer"
+}
+
 // run starts the Wails application and returns the process exit code. The
 // deferred logging teardown runs when run returns, before os.Exit in main, so
 // startup failures and runtime logs are still flushed.
@@ -56,7 +61,7 @@ func run() int {
 	}
 
 	err = wails.Run(&options.App{
-		Title:            "GoFLE",
+		Title:            windowTitle(),
 		Width:            winWidth,
 		Height:           winHeight,
 		WindowStartState: startState,
@@ -103,8 +108,8 @@ func run() int {
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 			About: &mac.AboutInfo{
-				Title:   "GoFLE",
-				Message: "Fast Interactive Log Explorer",
+				Title:   windowTitle(),
+				Message: "Go Fast Log Explorer",
 				Icon:    appIcon,
 			},
 		},

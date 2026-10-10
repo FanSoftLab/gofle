@@ -76,39 +76,17 @@ func RunRecentPicker(items []config.RecentFileItem) (RecentPick, error) {
 // the viewer starts — notably an in-viewer reopen of an ssh:// entry, which
 // resolves synchronously and would otherwise hold the terminal for the full
 // dial/handshake/stall watchdogs with no way to give up.
-func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.SearchEngine, cleanup func(), cfg *config.AppConfig, target string) error {
+// autoRestore, when true, loads the remaining tabs from the shared saved session
+// after the primary target is open (used by `gofle session restore`).
+func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.SearchEngine, cleanup func(), cfg *config.AppConfig, target string, autoRestore bool) error {
 	if parent == nil {
 		parent = context.Background()
 	}
 
 	ctx, cancel := context.WithCancel(parent)
 
-	defer func() {
-		cancel()
-		// Tear down asynchronously but still give a healthy connection time to
-		// release its resources (temp file, SSH session) so we don't leak. The
-		// wait is bounded: a stuck SSH tail can make Streamer.Close block up to
-		// its close timeout, and we must never let that freeze application exit.
-		if cleanup != nil {
-			done := make(chan struct{})
-
-			go func() {
-				cleanup()
-				close(done)
-			}()
-
-			// Bound the wait so a stuck remote tail cannot freeze process exit.
-			// Streamer.Close itself is also bounded (streamCloseTimeout); keep this
-			// slightly above that so a healthy teardown almost always finishes
-			// silently and the WARN only fires on truly wedged connections.
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				slog.Warn("gofle: viewer cleanup did not finish promptly; exiting anyway",
-					"target", idx.FilePath())
-			}
-		}
-	}()
+	// Cleanup is performed after p.Run() so every open tab (multi-session MVP)
+	// is torn down, not only the originally opened target.
 
 	si := textinput.New()
 	si.Placeholder = "query ( /re, !inv, i:ci )"
@@ -118,6 +96,9 @@ func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.Search
 	gi.Placeholder = "line number"
 	ei := textinput.New()
 	ei.Placeholder = "path (~ expands)"
+	pni := textinput.New()
+	pni.Placeholder = "preset name"
+	pni.CharLimit = 64
 
 	// Remote connect form fields (protocol-agnostic): Protocol, Host, Port,
 	// User, Auth, Password, Key path, Remote path. The password field is masked
@@ -142,17 +123,21 @@ func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.Search
 	remoteForm := []textinput.Model{rfProto, rfHost, rfPort, rfUser, rfAuth, rfPass, rfKey, rfPath}
 
 	m := model{
-		idx:            idx,
-		se:             se,
-		cleanup:        cleanup,
-		cfg:            cfg,
-		height:         40,
-		width:          100,
-		searchInput:    si,
-		secondaryInput: seci,
-		gotoInput:      gi,
-		exportInput:    ei,
-		remoteForm:     remoteForm,
+		idx:             idx,
+		se:              se,
+		cleanup:         cleanup,
+		cfg:             cfg,
+		height:          40,
+		width:           100,
+		searchInput:     si,
+		secondaryInput:  seci,
+		gotoInput:       gi,
+		exportInput:     ei,
+		presetNameInput: pni,
+		advForm:         newAdvForm(),
+		settingsForm:    newSettingsForm(),
+		groupInput:      newGroupInput(),
+		remoteForm:      remoteForm,
 		// Default: case-insensitive search. Layout comes from shared settings
 		// (view_mode: normal | results | split; default split).
 		searchOpts: search.SearchOptions{CaseSensitive: false},
@@ -160,6 +145,16 @@ func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.Search
 		cancel:     cancel,
 	}
 	m.applyViewModeFromConfig()
+	m.seedAdvancedDefaults() // context/nearby defaults from shared settings.json
+	if cfg != nil {
+		m.searchOpts.CaseSensitive = cfg.DefaultSearchCase
+		m.searchOpts.IsRegex = cfg.DefaultSearchRegex
+		m.searchOpts.InvertMatch = cfg.DefaultSearchInvert
+		if cfg.DefaultFollow {
+			m.tailOn = true
+		}
+		m.wordWrap = cfg.WordWrap
+	}
 	// Seed remote credentials so "b" (other file on this server) works when the
 	// viewer was launched on an ssh:// or ftp:// target from the CLI.
 	if target != "" && cfg != nil {
@@ -171,8 +166,55 @@ func RunView(parent context.Context, idx *indexer.FileIndexer, se *search.Search
 		}
 	}
 
+	if autoRestore {
+		m.ensureSessionsInitialized()
+		m.restoreSessionTabs()
+	}
+
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
+	final, err := p.Run()
+	cancel()
+
+	if fm, ok := final.(model); ok {
+		fm.persistSessionOnExit()
+	}
+
+	// Tear down every open tab. Streamer.Close can block on a stuck SSH tail, so
+	// each cleanup runs in its own goroutine with a shared deadline.
+	cleanups := []func(){}
+	if fm, ok := final.(model); ok {
+		// Prefer the multi-tab list when present so each open file is closed once.
+		if len(fm.sessions) > 0 {
+			for _, s := range fm.sessions {
+				if s != nil && s.cleanup != nil {
+					c := s.cleanup
+					s.cleanup = nil
+					cleanups = append(cleanups, c)
+				}
+			}
+		} else if fm.cleanup != nil {
+			c := fm.cleanup
+			fm.cleanup = nil
+			cleanups = append(cleanups, c)
+		}
+	} else if cleanup != nil {
+		cleanups = append(cleanups, cleanup)
+	}
+
+	if len(cleanups) > 0 {
+		done := make(chan struct{})
+		go func() {
+			for _, c := range cleanups {
+				c()
+			}
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			slog.Warn("gofle: viewer cleanup did not finish promptly; exiting anyway")
+		}
+	}
 
 	return err
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -63,6 +64,61 @@ type model struct {
 	exportConfirm bool   // awaiting y/N to create a missing directory
 	exportTarget  string // resolved (absolute) export path pending confirmation
 
+	// Advanced filters (GUI parity). Applied via pkg/search.ApplyAdvancedFilters;
+	// the TUI only collects values into SearchOptions — no duplicated match logic.
+	advMode         bool // advanced filter form overlay open
+	advFocus        int  // focused field in advForm
+	advForm         []textinput.Model
+	advExclude      []string
+	advExcludeRegex bool
+	advNearbyQuery  string
+	advNearbyMode   string // before | after | either
+	advNearbyWindow int
+	advLevels       []string
+	advTimeFrom     string
+	advTimeTo       string
+	advTimeRequire  bool
+	advLineStart    int64
+	advLineEnd      int64
+	advCtxBefore    int
+	advCtxAfter     int
+
+	// Top unique overlay (GUI "Top" feature).
+	topMode    bool
+	topEntries []topUniqueEntry
+	topCursor  int
+
+	// Search presets (shared with GUI via pkg/config search_presets.json).
+	presetMode      bool
+	presetList      []config.SearchPreset
+	presetCursor    int
+	presetSaveMode  bool
+	presetNameInput textinput.Model
+
+	// Multi-tab MVP: inactive sessions stored here; active state lives on model.
+	sessions      []*fileSession
+	activeSession int
+	// openRecentAsTab: when true, Enter in recent picker opens a new tab.
+	openRecentAsTab bool
+	// Tab group for the active session (persisted into fileSession on snapshot).
+	tabGroupID    string
+	tabGroupTitle string
+	tabGroupColor string
+	// Group edit overlay.
+	groupMode  bool
+	groupInput textinput.Model
+
+	// Settings overlay (shared settings.json).
+	settingsMode  bool
+	settingsFocus int
+	settingsForm  []textinput.Model
+
+	// Async search state (progress in status bar).
+	searching     bool
+	searchGen     int
+	searchCancel  context.CancelFunc
+	searchProg    *atomic.Int64
+
 	onlyMatches  bool // results-only filter view
 	help         bool // help overlay open
 	recentMode   bool // recent-files picker overlay open
@@ -108,6 +164,10 @@ type model struct {
 	// the very top of the viewport. Only meaningful for the log pane (i.e. when
 	// m.top is a logical line, not a match index).
 	topWrap int
+	// wordWrap soft-wraps long lines to the pane width. When false, long lines
+	// are truncated and hOffset provides horizontal scrolling.
+	wordWrap bool
+	hOffset  int // horizontal column offset when !wordWrap (display cells)
 
 	tailOn bool
 
@@ -179,6 +239,7 @@ func (m model) effectiveSearchOptions() search.SearchOptions {
 	base.InvertMatch = base.InvertMatch || m.searchOpts.InvertMatch
 	base.CaseSensitive = base.CaseSensitive && m.searchOpts.CaseSensitive
 	base.SecondaryQuery = m.secondaryQuery
+	m.applyAdvancedToOpts(&base)
 
 	return base
 }
@@ -277,27 +338,140 @@ func (m *model) syncMatchToView() {
 	m.ensureResVisible()
 }
 
-// lastLine is the upper bound (inclusive) for m.top in the current viewing mode:
-// the last match index in results-only mode, otherwise the last log line.
+// lastLine is the last logical line index (or last match index in results-only).
 func (m model) lastLine() int64 {
 	if m.onlyMatches && len(m.matches) > 0 {
 		return int64(len(m.matches) - 1)
 	}
-
-	return m.idx.TotalLines() - 1
+	n := m.idx.TotalLines()
+	if n <= 0 {
+		return 0
+	}
+	return n - 1
 }
 
-// viewableEnd is the upper bound (inclusive) for m.top when paging to the end of
-// the view: the last match index in results-only mode, otherwise the last
-// fully-visible line (TotalLines - height) so the final screen is filled.
+// viewableEnd is the maximum m.top such that the viewport is still filled when
+// possible (no huge empty region below the last line).
 func (m model) viewableEnd() int64 {
 	if m.onlyMatches && len(m.matches) > 0 {
 		return int64(len(m.matches) - 1)
 	}
+	if m.wordWrap {
+		return m.viewableEndWrapped()
+	}
+	return max(m.idx.TotalLines()-int64(m.height), 0)
+}
 
-	last := max(m.idx.TotalLines()-int64(m.height), 0)
+// viewableEndWrapped finds the greatest (top) so that remaining visual rows from
+// (top, 0) are still at least m.height (or top=0 if the whole file is shorter).
+func (m model) viewableEndWrapped() int64 {
+	total := m.idx.TotalLines()
+	if total <= 0 || m.height <= 0 {
+		return 0
+	}
+	// Walk backward from EOF counting visual rows until we fill the viewport.
+	need := m.height
+	for ln := total - 1; ln >= 0; ln-- {
+		wr := m.wrapRows(ln)
+		if wr < 1 {
+			wr = 1
+		}
+		need -= wr
+		if need <= 0 {
+			// top should be this line; topWrap may be >0 for partial first line.
+			return ln
+		}
+	}
+	return 0
+}
 
-	return last
+// remainingVisualRows counts display rows from (top, topWrap) to EOF (capped
+// just above height so callers can test "fills the viewport").
+func (m model) remainingVisualRows() int {
+	if m.idx == nil {
+		return 0
+	}
+	total := m.idx.TotalLines()
+	if total <= 0 {
+		return 0
+	}
+	rows := 0
+	capN := m.height + 1
+	if capN < 2 {
+		capN = 2
+	}
+	for ln := m.top; ln < total; ln++ {
+		wr := m.wrapRows(ln)
+		if wr < 1 {
+			wr = 1
+		}
+		start := 0
+		if ln == m.top {
+			start = m.topWrap
+			if start > wr {
+				start = wr
+			}
+			if start < 0 {
+				start = 0
+			}
+		}
+		rows += wr - start
+		if rows >= capN {
+			return rows
+		}
+	}
+	return rows
+}
+
+// clampViewport ensures top/topWrap stay within a range that keeps content on screen.
+func (m *model) clampViewport() {
+	if m.onlyMatches {
+		last := m.lastLine()
+		if m.top > last {
+			m.top = last
+		}
+		if m.top < 0 {
+			m.top = 0
+		}
+		m.topWrap = 0
+		return
+	}
+	if m.top < 0 {
+		m.top = 0
+	}
+	last := m.lastLine()
+	if m.top > last {
+		m.top = last
+	}
+	if m.wordWrap {
+		wr := m.wrapRows(m.top)
+		if wr < 1 {
+			wr = 1
+		}
+		if m.topWrap >= wr {
+			m.topWrap = wr - 1
+		}
+		if m.topWrap < 0 {
+			m.topWrap = 0
+		}
+		// If we overshot past the filled viewport, walk back.
+		for m.remainingVisualRows() < m.height && (m.top > 0 || m.topWrap > 0) {
+			if m.topWrap > 0 {
+				m.topWrap--
+			} else if m.top > 0 {
+				m.top--
+				m.topWrap = max(0, m.wrapRows(m.top)-1)
+			} else {
+				break
+			}
+		}
+	} else {
+		m.topWrap = 0
+		maxTop := m.viewableEnd()
+		if m.top > maxTop {
+			m.top = maxTop
+		}
+	}
 }
 
 // logPaneWidth returns the width (in cells) of the log/content pane that the
@@ -318,6 +492,9 @@ func (m model) logPaneWidth() int {
 // wrapRows returns how many visual rows the given logical line occupies once
 // hard-wrapped to the current log pane width.
 func (m model) wrapRows(ln int64) int {
+	if !m.wordWrap {
+		return 1
+	}
 	content, e := m.idx.GetLine(ln)
 	if e != nil {
 		content = ""
@@ -327,7 +504,11 @@ func (m model) wrapRows(ln int64) int {
 
 	avail := max(m.logPaneWidth()-gutterW-3, 1)
 
-	return len(wrapSegments(content, avail, nil))
+	n := len(wrapSegmentsOpts(content, avail, nil, true, 0))
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // Init implements tea.Model: focus the search box off and start the follow tick.
@@ -352,7 +533,7 @@ func (m model) followTick() (tea.Model, tea.Cmd) {
 		m.err = err
 	} else {
 		m.err = nil
-		if n > 0 && len(m.query) > 0 {
+		if n > 0 && (len(m.query) > 0 || m.hasAdvancedFilters() || m.secondaryQuery != "") {
 			m.extendSearch(prevTotal)
 		}
 	}
@@ -367,12 +548,17 @@ func (m model) followTick() (tea.Model, tea.Cmd) {
 
 // extendSearch scans the lines appended since prevTotal and appends their
 // matches to the current result set. The cached primary matches are extended
-// too, so the set stays in sync for future filter refinement (H2); the secondary
-// AND-filter is then applied to derive the visible matches.
+// too, so the set stays in sync for future filter refinement (H2); secondary
+// AND and advanced post-filters are then applied via pkg/search.
 func (m *model) extendSearch(prevTotal int64) {
 	opts := m.effectiveSearchOptions()
-	if opts.Query == "" {
+	if opts.Query == "" && !m.hasAdvancedFilters() && opts.SecondaryQuery == "" {
 		return
+	}
+	if opts.Query == "" {
+		opts.MatchAll = true
+		opts.IsRegex = false
+		opts.InvertMatch = false
 	}
 
 	primaryOpts := opts
@@ -381,7 +567,6 @@ func (m *model) extendSearch(prevTotal int64) {
 	newPrimary, err := m.se.SearchRange(m.ctx, primaryOpts, prevTotal, m.idx.TotalLines())
 	if err != nil {
 		m.err = fmt.Errorf("failed to extend search over appended lines: %w", err)
-
 		return
 	}
 
@@ -392,7 +577,20 @@ func (m *model) extendSearch(prevTotal int64) {
 		newMatches, err = m.se.FilterLines(m.ctx, opts, newPrimary)
 		if err != nil {
 			m.err = fmt.Errorf("failed to extend search over appended lines: %w", err)
+			return
 		}
+	}
+
+	newMatches, err = m.se.ApplyAdvancedFilters(m.ctx, opts, newMatches)
+	if err != nil {
+		m.err = fmt.Errorf("failed to extend search over appended lines: %w", err)
+		return
+	}
+
+	// Context expansion for live appends: expand only the new hits so we do not
+	// re-expand the whole result set on every tail tick.
+	if m.hasContextExpand() {
+		newMatches = search.ExpandMatchesWithContext(newMatches, m.advCtxBefore, m.advCtxAfter, m.idx.TotalLines())
 	}
 
 	m.matches = append(m.matches, newMatches...)

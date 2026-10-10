@@ -2511,30 +2511,45 @@ body.theme-light .adv-datetime-row input[type="time"]::-webkit-calendar-picker-i
 .help-modal-content .help-panels {
     overflow-y: auto;
     padding: 16px 18px 20px;
-    user-select: text;
-    -webkit-user-select: text;
+    user-select: text !important;
+    -webkit-user-select: text !important;
     cursor: text;
 }
+.help-modal-content .help-panels * {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+/* Tab labels stay non-selectable; panel content is copyable (Ctrl+C) */
+.help-modal-content .settings-tabs,
+.help-modal-content .settings-tab {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+/* Section headers — accent-aligned, high contrast for scanning */
 .help-section-title {
     margin: 0 0 14px 0;
     font-size: 15px;
     font-weight: 600;
-    color: var(--text-color);
+    color: var(--log-info, #58a6ff);
     user-select: text;
+    -webkit-user-select: text;
 }
 .help-item {
     margin-bottom: 18px;
     padding-bottom: 14px;
     border-bottom: 1px solid var(--border-color);
     user-select: text;
+    -webkit-user-select: text;
 }
 .help-item:last-child { border-bottom: none; margin-bottom: 0; }
+/* Item titles — primary accent */
 .help-item-title {
     margin: 0 0 8px 0;
     font-size: 13px;
     font-weight: 600;
     color: var(--accent-color);
     user-select: text;
+    -webkit-user-select: text;
 }
 ul.help-body {
     margin: 0;
@@ -2543,6 +2558,7 @@ ul.help-body {
     line-height: 1.5;
     color: var(--text-color);
     user-select: text;
+    -webkit-user-select: text;
 }
 ul.help-body li { margin-bottom: 5px; }
 .help-example {
@@ -2550,15 +2566,20 @@ ul.help-body li { margin-bottom: 5px; }
     padding: 10px 12px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
+    border-left: 3px solid var(--log-notice, #3fb950);
     border-radius: 4px;
     user-select: text;
+    -webkit-user-select: text;
 }
 .help-example-label {
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--log-notice, #3fb950);
     margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    font-weight: 600;
+    user-select: text;
+    -webkit-user-select: text;
 }
 .help-example pre {
     margin: 0;
@@ -2566,8 +2587,9 @@ ul.help-body li { margin-bottom: 5px; }
     font-size: 12px;
     line-height: 1.4;
     white-space: pre-wrap;
-    color: var(--text-color);
+    color: var(--log-warn, #d29922);
     user-select: text;
+    -webkit-user-select: text;
 }
 .help-mark {
     background: rgba(14, 99, 156, 0.4);
@@ -2584,6 +2606,103 @@ ul.help-body li { margin-bottom: 5px; }
     flex-shrink: 0;
     padding: 12px 20px;
     border-top: 1px solid var(--border-color);
+}
+
+/* About tab */
+.help-about {
+    user-select: text;
+    -webkit-user-select: text;
+}
+.help-about-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.help-about-logo {
+    width: 72px;
+    height: 72px;
+    border-radius: 14px;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+.help-about-meta {
+    min-width: 0;
+}
+.help-about-name {
+    margin-bottom: 8px !important;
+}
+.help-about-line {
+    margin: 4px 0;
+    font-size: 13px;
+    color: var(--text-color);
+    user-select: text;
+    -webkit-user-select: text;
+}
+.help-about-label {
+    color: var(--text-muted);
+    margin-right: 6px;
+}
+.help-about-value {
+    color: var(--accent-color);
+    font-weight: 600;
+}
+.help-about-desc {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-color);
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* Licenses tab */
+.help-licenses-note {
+    margin: 0 0 12px 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    user-select: text;
+    -webkit-user-select: text;
+}
+.help-licenses-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    user-select: text;
+    -webkit-user-select: text;
+}
+.help-licenses-table th {
+    text-align: left;
+    padding: 6px 10px 6px 0;
+    color: var(--log-info, #58a6ff);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+}
+.help-licenses-table td {
+    padding: 7px 10px 7px 0;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: top;
+    color: var(--text-color);
+}
+.help-lic-name {
+    font-weight: 600;
+    color: var(--accent-color);
+    white-space: nowrap;
+}
+.help-lic-url a {
+    color: var(--log-info, #58a6ff);
+    text-decoration: none;
+    word-break: break-all;
+}
+.help-lic-url a:hover {
+    text-decoration: underline;
+    color: var(--accent-hover);
+}
+.help-lic-spdx {
+    color: var(--log-notice, #3fb950);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 

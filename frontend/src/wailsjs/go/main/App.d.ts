@@ -85,3 +85,4 @@ export function SaveSearchPaneLayout(arg1:string,arg2:string):Promise<void>;
 export function GetSearchPaneLayout():Promise<{[key: string]: string}>;
 
 export function SearchLinesAdvanced(arg1:string,arg2:string,arg3:boolean,arg4:boolean,arg5:boolean,arg6:string,arg7:string):Promise<number>;
+export function GetVersion():Promise<string>;

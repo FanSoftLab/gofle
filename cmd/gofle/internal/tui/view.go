@@ -157,6 +157,16 @@ func (m model) overlayView() (view string, ok bool) {
 	switch {
 	case m.help:
 		return m.helpView(), true
+	case m.advMode:
+		return m.advancedFormView(), true
+	case m.settingsMode:
+		return m.settingsFormView(), true
+	case m.groupMode:
+		return m.groupEditorView(), true
+	case m.topMode:
+		return m.topUniqueView(), true
+	case m.presetMode:
+		return m.presetView(), true
 	case m.recentMode:
 		return m.recentView(), true
 	case m.remoteMode:
@@ -250,6 +260,9 @@ func (m model) renderStatus() string {
 	l := m.buildLayout()
 
 	var parts []string
+	if bar := m.tabsBar(); bar != "" {
+		parts = append(parts, bar)
+	}
 	parts = append(parts, file)
 	if l.compact {
 		// Minimal bar: file · matches · mode
@@ -265,12 +278,24 @@ func (m model) renderStatus() string {
 	parts = append(parts, tr(m, "status_lines")+" "+val(strconv.FormatInt(m.idx.TotalLines(), 10)))
 	parts = append(parts, tr(m, "status_top")+" "+val(strconv.FormatInt(m.top+1, 10)))
 	parts = append(parts, "tail "+onOff(m.tailOn))
-	parts = append(parts, tr(m, "status_filter")+" "+onOff(m.onlyMatches))
+	// "search" = query / AND / advanced filters active (not results-only view).
+	searchOn := m.query != "" || m.secondaryQuery != "" || m.hasAdvancedFilters() || len(m.matches) > 0
+	parts = append(parts, "search "+onOff(searchOn))
+	parts = append(parts, "results "+onOff(m.onlyMatches))
+	if m.wordWrap {
+		parts = append(parts, "wrap "+statusOnStyle.Render("ON"))
+	} else if m.hOffset > 0 {
+		parts = append(parts, fmt.Sprintf("col %d", m.hOffset+1))
+	}
 	parts = append(parts, tr(m, "status_matches")+" "+val(matchIdx))
 
 	if m.selActive {
 		lo, hi, _ := m.selectionBounds()
 		parts = append(parts, "sel "+val(fmt.Sprintf("%d–%d (%d)", lo+1, hi+1, hi-lo+1)))
+	}
+
+	if sum := m.advancedSummary(); sum != "" {
+		parts = append(parts, infoStyle.Render(sum))
 	}
 
 	if m.effectiveSplit() {
@@ -337,7 +362,7 @@ func (m model) recentView() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("Open recent") + "\n\n")
 	b.WriteString(renderRecentList(m.recentList, m.recentCursor))
-	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  b browse other file on server  ·  esc cancel"))
+	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  t new tab  ·  b browse server  ·  esc cancel"))
 
 	return b.String()
 }
@@ -538,7 +563,7 @@ func (m model) matchOnlyRows(layout rowLayout) []string {
 			content = fmt.Sprintf("<error reading line %d>", ln)
 		}
 
-		for si, seg := range wrapSegments(content, layout.avail, segs) {
+		for si, seg := range wrapSegmentsOpts(content, layout.avail, segs, m.wordWrap, m.hOffset) {
 			if len(rows) >= m.height {
 				break
 			}
@@ -553,8 +578,8 @@ func (m model) matchOnlyRows(layout rowLayout) []string {
 			case i == m.matchCursor:
 				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, matchCursorStyle)
 			default:
-				// In results-only every row is a match — keep them tinted.
-				line = m.wrapLineStyled(layout.gutterW, ln, seg, si == 0, matchStyle)
+				// Multi-term highlight (primary / AND / nearby / exclude).
+				line = m.wrapLineMatch(layout.gutterW, ln, seg, si == 0)
 			}
 			rows = appendRow(rows, line)
 		}
@@ -564,10 +589,11 @@ func (m model) matchOnlyRows(layout rowLayout) []string {
 }
 
 // fullLogRows renders the full log (normal view and the left pane of split
-// view). One logical line = one screen row; topWrap is ignored (no soft-wrap).
+// view). With wordWrap, one logical line may span multiple screen rows and
+// topWrap selects which visual row of m.top is first. Without wrap, hOffset
+// scrolls horizontally and each logical line is one screen row.
 func (m model) fullLogRows(layout rowLayout) []string {
 	rows := make([]string, 0, m.height)
-
 	var segs []string
 	for ln := m.top; ln < m.idx.TotalLines() && len(rows) < m.height; ln++ {
 		content, e := m.idx.GetLine(ln)
@@ -575,29 +601,33 @@ func (m model) fullLogRows(layout rowLayout) []string {
 			content = fmt.Sprintf("<error reading line %d>", ln)
 		}
 
-		// wrapSegments returns exactly one segment (truncate, never wrap).
-		segList := wrapSegments(content, layout.avail, segs)
-		seg := ""
-		if len(segList) > 0 {
-			seg = segList[0]
+		segList := wrapSegmentsOpts(content, layout.avail, segs, m.wordWrap, m.hOffset)
+		startSeg := 0
+		if m.wordWrap && ln == m.top {
+			startSeg = m.topWrap
+			if startSeg >= len(segList) {
+				startSeg = max(0, len(segList)-1)
+			}
 		}
-
-		var line string
-		switch {
-		case layout.selOK && ln >= layout.selLo && ln <= layout.selHi:
-			line = m.wrapLineStyled(layout.gutterW, ln, seg, true, selectionStyle)
-		case m.isMatchCursorLine(ln):
-			line = m.wrapLineStyled(layout.gutterW, ln, seg, true, matchCursorStyle)
-		case isMatchLine(m.matches, ln):
-			line = m.wrapLineStyled(layout.gutterW, ln, seg, true, matchStyle)
-		default:
-			line = m.wrapLine(layout.gutterW, ln, seg, true)
+		for si := startSeg; si < len(segList) && len(rows) < m.height; si++ {
+			seg := segList[si]
+			first := si == 0
+			var line string
+			switch {
+			case layout.selOK && ln >= layout.selLo && ln <= layout.selHi:
+				line = m.wrapLineStyled(layout.gutterW, ln, seg, first, selectionStyle)
+			case m.isMatchCursorLine(ln):
+				line = m.wrapLineStyled(layout.gutterW, ln, seg, first, matchCursorStyle)
+			case isMatchLine(m.matches, ln):
+				line = m.wrapLineMatch(layout.gutterW, ln, seg, first)
+			default:
+				line = m.wrapLine(layout.gutterW, ln, seg, first)
+			}
+			if i := strings.IndexByte(line, '\n'); i >= 0 {
+				line = line[:i]
+			}
+			rows = append(rows, line)
 		}
-		// Never let embedded newlines expand one logical line into many rows.
-		if i := strings.IndexByte(line, '\n'); i >= 0 {
-			line = line[:i]
-		}
-		rows = append(rows, line)
 	}
 
 	// Pad to exact viewport height so the terminal never keeps ghost rows
@@ -621,6 +651,13 @@ func (m model) isMatchCursorLine(ln int64) bool {
 func (m model) wrapLineStyled(gutterW int, ln int64, seg string, first bool, style lipgloss.Style) string {
 	seg = style.Render(seg)
 	return m.wrapLine(gutterW, ln, seg, first)
+}
+
+// wrapLineMatch renders a matched line with multi-term colors (primary/AND/nearby/exclude).
+// Cursor and selection still use whole-line styles for clear focus.
+func (m model) wrapLineMatch(gutterW int, ln int64, seg string, first bool) string {
+	painted := m.paintSearchTerms(seg)
+	return m.wrapLine(gutterW, ln, painted, first)
 }
 
 // wrapLine formats one log row: fixed-width line number + continuous vertical
@@ -801,7 +838,7 @@ func (m model) resultRows(width int) []string {
 			content = fmt.Sprintf("<error reading line %d>", ln)
 		}
 
-		for si, seg := range wrapSegments(content, avail, segs) {
+		for si, seg := range wrapSegmentsOpts(content, avail, segs, m.wordWrap, m.hOffset) {
 			if len(rows) >= m.height {
 				break
 			}
@@ -813,8 +850,8 @@ func (m model) resultRows(width int) []string {
 			if i == m.matchCursor {
 				line = m.wrapLineStyled(gutterW, ln, seg, si == 0, matchCursorStyle)
 			} else {
-				// Other hits in the results pane stay lightly highlighted.
-				line = m.wrapLineStyled(gutterW, ln, seg, si == 0, matchStyle)
+				// Multi-term highlight on other result hits.
+				line = m.wrapLineMatch(gutterW, ln, seg, si == 0)
 			}
 			rows = appendRow(rows, line)
 		}
@@ -1098,7 +1135,14 @@ func runeWidth(r rune) int {
 // terminal rows between line numbers (vertical gaps / "shifted" rows). Long
 // lines are hard-truncated to `width` cells instead — one logical line always
 // occupies exactly one screen row.
+// wrapSegments prepares visual row(s) for one logical log line.
+// When doWrap is true the line is hard-wrapped to width cells; otherwise a
+// single segment is returned, optionally starting at hOffset (horizontal scroll).
 func wrapSegments(content string, width int, segs []string) []string {
+	return wrapSegmentsOpts(content, width, segs, false, 0)
+}
+
+func wrapSegmentsOpts(content string, width int, segs []string, doWrap bool, hOffset int) []string {
 	// Drop file-embedded ANSI first — our own styles are applied later.
 	content = sanitizeLogDisplay(stripANSI(content))
 	// Neutralize RTL / complex scripts so bidi cannot disturb layout.
@@ -1106,10 +1150,93 @@ func wrapSegments(content string, width int, segs []string) []string {
 	if width <= 0 {
 		return append(segs[:0], content)
 	}
+	if doWrap {
+		return hardWrapSegments(content, width, segs)
+	}
+	// No wrap: apply horizontal offset, then truncate to pane width.
+	if hOffset > 0 {
+		content = sliceDisplayWidth(content, hOffset, -1)
+	}
 	if runewidth.StringWidth(content) > width {
 		content = runewidth.Truncate(content, width, "")
 	}
 	return append(segs[:0], content)
+}
+
+// hardWrapSegments splits s into chunks of at most width display cells.
+func hardWrapSegments(s string, width int, segs []string) []string {
+	out := segs[:0]
+	if s == "" {
+		return append(out, "")
+	}
+	for s != "" {
+		chunk, rest := takeDisplayWidth(s, width)
+		out = append(out, chunk)
+		s = rest
+		if chunk == "" && rest != "" {
+			// Avoid infinite loop on pathological zero-width content.
+			out = append(out, rest)
+			break
+		}
+	}
+	return out
+}
+
+// takeDisplayWidth returns the prefix of s that fits in width cells and the rest.
+func takeDisplayWidth(s string, width int) (string, string) {
+	if width <= 0 || s == "" {
+		return "", s
+	}
+	w := 0
+	for i, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if rw <= 0 {
+			rw = 1
+		}
+		if w+rw > width {
+			return s[:i], s[i:]
+		}
+		w += rw
+	}
+	return s, ""
+}
+
+// sliceDisplayWidth skips skip display cells, then takes at most maxW cells
+// (maxW < 0 means to the end).
+func sliceDisplayWidth(s string, skip, maxW int) string {
+	if skip <= 0 && maxW < 0 {
+		return s
+	}
+	w := 0
+	start := 0
+	for i, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if rw <= 0 {
+			rw = 1
+		}
+		if w+rw > skip {
+			start = i
+			break
+		}
+		w += rw
+		start = i + len(string(r))
+	}
+	if skip > 0 && w < skip && start >= len(s) {
+		return ""
+	}
+	s = s[start:]
+	if maxW < 0 {
+		return s
+	}
+	chunk, _ := takeDisplayWidth(s, maxW)
+	return chunk
+}
+
+// contentDisplayWidth returns the display width of sanitized log content.
+func contentDisplayWidth(content string) int {
+	content = sanitizeLogDisplay(stripANSI(content))
+	content = isolateLTR(content)
+	return runewidth.StringWidth(content)
 }
 
 // ansiReset restores default SGR attributes. Appended after any hard truncate
@@ -1291,60 +1418,156 @@ func (m model) navHint() string {
 	}
 }
 
-// helpKey formats one help row: fixed-width key column + description.
+// helpKey formats one help row: colored key column + muted description.
 func helpKey(keys, desc string) string {
-	return "  " + keyStyle.Render(fmt.Sprintf("%-22s", keys)) + "  " + desc
+	return "  " + helpKeyStyle.Render(fmt.Sprintf("%-18s", keys)) + " " + helpDescStyle.Render(desc)
 }
 
-// helpView renders the full-screen help overlay with a clear two-column layout.
+// helpSection is a titled block of help rows with a colored section header.
+func helpSection(title string, rows ...string) []string {
+	out := make([]string, 0, len(rows)+2)
+	out = append(out, helpSectionStyle.Render("▸ "+title))
+	out = append(out, rows...)
+	out = append(out, "")
+	return out
+}
+
+// helpExample formats a labeled example/note line (distinct color from keys).
+func helpExample(label, value string) string {
+	return "  " + helpExampleLabelStyle.Render(fmt.Sprintf("%-18s", label)) + " " + helpExampleStyle.Render(value)
+}
+
+// helpView renders a scannable full-screen help overlay.
+// Wide terminals (≥100 cols) get two columns; narrow terminals get one.
 func (m model) helpView() string {
-	lines := []string{
-		headerStyle.Render("GoFLE  ·  keyboard shortcuts"),
+	nav := helpSection("Navigation",
+		helpKey("↑ ↓  j k", "scroll (visual row)"),
+		helpKey("← →  h l", "horizontal scroll"),
+		helpKey("PgUp PgDn", "page"),
+		helpKey("Ctrl+U/D", "page (alt)"),
+		helpKey("Home  End  G", "top / bottom"),
+		helpKey("g", "go to line"),
+	)
+	search := helpSection("Search",
+		helpKey("/", "search"),
+		helpKey("\\", "AND-filter results"),
+		helpKey("Tab", "swap primary ↔ AND"),
+		helpKey("Alt+R I C", "regex · invert · case"),
+		helpKey("A", "advanced filters"),
+		helpKey("u", "top unique texts"),
+		helpKey("P", "presets"),
+		helpKey("n  p  F3", "next / prev match"),
+		helpKey("[  ]", "first / last match"),
+		helpKey("x  Esc", "clear search"),
+	)
+	view := helpSection("View",
+		helpKey("m", "cycle layout"),
+		helpKey("s", "split on/off"),
+		helpKey("r", "results-only"),
+		helpKey("w", "word wrap on/off"),
+		helpKey("Tab", "focus other pane"),
+		helpKey("f", "follow / tail"),
+	)
+	select_ := helpSection("Select & export",
+		helpKey("v", "select lines"),
+		helpKey("c", "copy selection"),
+		helpKey("e", "export to file"),
+	)
+	tabs := helpSection("Tabs",
+		helpKey("o", "recent (replace)"),
+		helpKey("T  t", "recent → new tab"),
+		helpKey("Ctrl+Tab", "next tab"),
+		helpKey("Ctrl+⇧Tab", "previous tab"),
+		helpKey("1…9", "jump to tab N"),
+		helpKey("Ctrl+W", "close tab"),
+		helpKey("G", "tab group"),
+		helpKey("Y", "restore session"),
+	)
+	other := helpSection("Other",
+		helpKey("F2  ,", "settings"),
+		helpKey("S", "remote connect"),
+		helpKey("b", "other remote file"),
+		helpKey("?  F1", "this help"),
+		helpKey("q  Ctrl+C", "quit"),
+	)
+
+	footer := []string{
+		helpSectionStyle.Render("▸ Examples & notes"),
+		helpExample("Colors", "primary=gold  AND=green  nearby=cyan  exclude=red"),
+		helpExample("Prefixes", "/pat regex ·  !pat invert ·  i:pat ignore-case"),
+		helpExample("Local", "gofle /var/log/app.log"),
+		helpExample("SSH", "gofle ssh://user@host/var/log/sys.log"),
 		"",
-		keyStyle.Render("▸ Navigation"),
-		helpKey("↑ ↓   j k", "line up / down"),
-		helpKey("PgUp PgDn", "page up / down"),
-		helpKey("Ctrl+U / Ctrl+D", "page up / down (alt)"),
-		helpKey("Home / End   G", "top / bottom of file"),
-		helpKey("g", "go to line number"),
-		"",
-		keyStyle.Render("▸ Search"),
-		helpKey("/", "search  (Enter run, Esc cancel)"),
-		helpKey("\\", "AND-filter inside current results"),
-		helpKey("Tab", "swap primary ↔ AND prompt"),
-		helpKey("Alt+R  Alt+I  Alt+C", "regex · invert · match-case"),
-		helpKey("/pat  !pat  i:pat", "prefix: regex · invert · ignore-case"),
-		helpKey("n / p    F3 / ⇧F3", "next / previous match"),
-		helpKey("[ / ]", "first / last match"),
-		helpKey("x   Esc", "clear search"),
-		"",
-		keyStyle.Render("▸ View"),
-		helpKey("m", "cycle  normal → results-only → split"),
-		helpKey("s", "split view on/off  (log | results)"),
-		helpKey("r", "results-only on/off"),
-		helpKey("Tab", "focus other pane  (in split)"),
-		helpKey("f", "follow / live-tail on/off"),
-		"",
-		keyStyle.Render("▸ Select & export"),
-		helpKey("v", "start or cancel line selection"),
-		helpKey("c", "copy selection to clipboard"),
-		helpKey("e", "export file or matches to path"),
-		"",
-		keyStyle.Render("▸ Other"),
-		helpKey("o", "open recent file"),
-		helpKey("b", "other file on this server  (SSH/FTP)"),
-		helpKey("S", "remote connect  (SSH / FTP)"),
-		helpKey("?   F1", "this help"),
-		helpKey("q   Ctrl+C", "quit"),
-		"",
-		dimStyle.Render("Examples"),
-		dimStyle.Render("  gofle /var/log/app.log"),
-		dimStyle.Render("  gofle ssh://user@host/var/log/sys.log"),
-		"",
-		infoStyle.Render("Close help:  ?  ·  Esc  ·  q"),
+		helpCloseStyle.Render("  Close help:  ?  ·  Esc  ·  q"),
 	}
 
-	return strings.Join(lines, "\n")
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+
+	var body []string
+	if w >= 100 {
+		// Two-column layout: left = nav+search+view, right = select+tabs+other
+		left := append(append(nav, search...), view...)
+		right := append(append(select_, tabs...), other...)
+		// Pad shorter side
+		for len(left) < len(right) {
+			left = append(left, "")
+		}
+		for len(right) < len(left) {
+			right = append(right, "")
+		}
+		colW := (w - 4) / 2
+		if colW < 36 {
+			colW = 36
+		}
+		for i := range left {
+			l := padHelpCol(left[i], colW)
+			r := right[i]
+			body = append(body, l+r)
+		}
+	} else {
+		body = append(body, nav...)
+		body = append(body, search...)
+		body = append(body, view...)
+		body = append(body, select_...)
+		body = append(body, tabs...)
+		body = append(body, other...)
+	}
+
+	title := helpTitleStyle.Render("  GoFLE  ·  keyboard reference")
+	rule := helpRuleStyle.Render("  " + strings.Repeat("─", minInt(w-4, 56)))
+	out := []string{title, rule, ""}
+	out = append(out, body...)
+	out = append(out, footer...)
+
+	// Clip to terminal height so the footer stays visible.
+	maxLines := m.height
+	if maxLines <= 0 {
+		maxLines = 40
+	}
+	if len(out) > maxLines {
+		out = out[:maxLines-1]
+		out = append(out, dimStyle.Render("  … (widen terminal for full list)"))
+	}
+	return strings.Join(out, "\n")
+}
+
+// padHelpCol pads a help cell to colW display cells (ANSI-aware width).
+func padHelpCol(s string, colW int) string {
+	dw := displayWidthNoANSI(s)
+	if dw >= colW {
+		return forceFitWidth(s, colW)
+	}
+	return s + strings.Repeat(" ", colW-dw)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // styles (dark theme, tuned for clarity and hierarchy).
@@ -1406,6 +1629,29 @@ var (
 
 	// dimStyle: inactive / secondary text (empty states, examples).
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#7f849c"))
+
+	// Help overlay palette — distinct roles so the page is easy to scan.
+	helpTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#cba6f7")).
+			Bold(true)
+	helpRuleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#585b70"))
+	helpSectionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f9e2af")).
+				Bold(true)
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#89b4fa")).
+			Bold(true)
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6adc8"))
+	helpExampleLabelStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#94e2d5")).
+				Bold(true)
+	helpExampleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#a6e3a1"))
+	helpCloseStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#fab387")).
+			Bold(true)
 
 	// gutterStyle: line numbers + vertical rule — low contrast so they never
 	// compete with log text or match highlights.

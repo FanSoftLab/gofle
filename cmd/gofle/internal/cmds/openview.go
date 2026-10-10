@@ -24,6 +24,16 @@ import (
 // It is the single entry point used by `gofle <target>` (root RunE),
 // `gofle recent open <n>` and `gofle ssh --view`.
 func OpenViewer(cmd *cobra.Command, target string) error {
+	return openViewer(cmd, target, false)
+}
+
+// OpenViewerRestore is like OpenViewer but also restores remaining tabs from the
+// shared saved session once the primary target is open (`gofle session restore`).
+func OpenViewerRestore(cmd *cobra.Command, target string) error {
+	return openViewer(cmd, target, true)
+}
+
+func openViewer(cmd *cobra.Command, target string, autoRestore bool) error {
 	if strings.TrimSpace(target) == "" {
 		return errors.New("no target specified")
 	}
@@ -77,7 +87,7 @@ func OpenViewer(cmd *cobra.Command, target string) error {
 		slog.Warn("failed to persist recent entry", "target", target, "err", rerr)
 	}
 
-	return tui.RunView(ctx, idx, se, cleanup, cfg, target)
+	return tui.RunView(ctx, idx, se, cleanup, cfg, target, autoRestore)
 }
 
 // confirmHostKey surfaces an unknown SSH host key's fingerprint, asks the user

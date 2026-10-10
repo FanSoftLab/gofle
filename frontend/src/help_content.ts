@@ -619,6 +619,74 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
     ],
   },
+  {
+    id: 'about',
+    title: { uk: 'Про додаток', en: 'About' },
+    items: [
+      {
+        title: { uk: 'Go Fast Log Explorer', en: 'Go Fast Log Explorer' },
+        body: {
+          uk: [
+            'Швидкий інтерактивний переглядач дуже великих лог-файлів.',
+            'Локальні шляхи, SSH і FTP/FTPS, кілька вкладок, live-follow, пошук і фільтри.',
+            'Ліцензія додатку: MIT.',
+            'Повний список сторонніх бібліотек — вкладка «Ліцензії» та файл LICENSES.md у репозиторії.',
+          ],
+          en: [
+            'Fast interactive viewer for very large log files.',
+            'Local paths, SSH and FTP/FTPS, multiple tabs, live follow, search and filters.',
+            'Application license: MIT.',
+            'Full third-party list — the Licenses tab and LICENSES.md in the repository.',
+          ],
+        },
+      },
+    ],
+  },
+  {
+    id: 'licenses',
+    title: { uk: 'Ліцензії', en: 'Licenses' },
+    items: [
+      {
+        title: { uk: 'Сторонні бібліотеки', en: 'Third-party libraries' },
+        body: {
+          uk: [
+            'Нижче перелічені основні залежності (назва, посилання, ліцензія).',
+            'Повний опис — у файлі LICENSES.md у корені проєкту.',
+          ],
+          en: [
+            'Main dependencies are listed below (name, link, license).',
+            'Full descriptions are in LICENSES.md at the project root.',
+          ],
+        },
+      },
+    ],
+  },
+];
+
+/** Libraries shown on the Licenses help tab (name, url, license). */
+export type LicenseEntry = {
+  name: string;
+  url: string;
+  license: string;
+};
+
+export const LICENSE_ENTRIES: LicenseEntry[] = [
+  { name: 'wails/v2', url: 'https://github.com/wailsapp/wails', license: 'MIT' },
+  { name: 'charmbracelet/bubbletea', url: 'https://github.com/charmbracelet/bubbletea', license: 'MIT' },
+  { name: 'charmbracelet/bubbles', url: 'https://github.com/charmbracelet/bubbles', license: 'MIT' },
+  { name: 'charmbracelet/lipgloss', url: 'https://github.com/charmbracelet/lipgloss', license: 'MIT' },
+  { name: 'spf13/cobra', url: 'https://github.com/spf13/cobra', license: 'Apache-2.0' },
+  { name: 'jlaffaye/ftp', url: 'https://github.com/jlaffaye/ftp', license: 'ISC' },
+  { name: 'golang.org/x/crypto', url: 'https://pkg.go.dev/golang.org/x/crypto', license: 'BSD-3-Clause' },
+  { name: 'golang.org/x/term', url: 'https://pkg.go.dev/golang.org/x/term', license: 'BSD-3-Clause' },
+  { name: 'golang.org/x/sync', url: 'https://pkg.go.dev/golang.org/x/sync', license: 'BSD-3-Clause' },
+  { name: 'mattn/go-runewidth', url: 'https://github.com/mattn/go-runewidth', license: 'MIT' },
+  { name: 'muesli/termenv', url: 'https://github.com/muesli/termenv', license: 'MIT' },
+  { name: 'JetBrains Mono', url: 'https://www.jetbrains.com/lp/mono/', license: 'OFL-1.1' },
+  { name: 'Fira Code', url: 'https://github.com/tonsky/FiraCode', license: 'OFL-1.1' },
+  { name: 'Cascadia Code', url: 'https://github.com/microsoft/cascadia-code', license: 'OFL-1.1' },
+  { name: 'Vite', url: 'https://vitejs.dev/', license: 'MIT' },
+  { name: 'TypeScript', url: 'https://www.typescriptlang.org/', license: 'Apache-2.0' },
 ];
 
 export function helpLangFromApp(lang: string): HelpLang {

@@ -33,50 +33,8 @@ var versionCmd = &cobra.Command{
 var rootCmd = &cobra.Command{
 	Use:   "gofle [target]",
 	Short: "GoFLE terminal companion — open logs locally or over SSH/FTP in an interactive viewer",
-	Long: `GoFLE terminal viewer — open local or remote logs interactively.
-
-  Same backend as the desktop app. Config is shared
-  (~/.config/GoFLE/): theme, language, pane layout, view mode, recent files.
-
-USAGE
-  gofle <file>                 open local log in the viewer
-  gofle ssh://user@host/path   open over SSH in the viewer
-  gofle ftp://user@host/path   open over FTP/FTPS in the viewer
-  gofle                        this help
-
-COMMANDS
-  ssh      connect via SSH, stream a remote file (viewer by default; --dump for stdout)
-  ftp      connect via FTP/FTPS, stream a remote file (viewer by default; --dump for stdout)
-  recent   open recent files (interactive picker)
-  version  print version
-
-VIEWER KEYS  (press ? inside the viewer for the full list)
-  ↑↓ j k     scroll line          PgUp/PgDn  page
-  /          search               \          AND-filter in results
-  n p        next / prev match    [ ]        first / last match
-  m          cycle view mode      s          split   r  results-only
-  f          follow / tail        g          go to line
-  e          export               o          recent files
-  S          remote connect       q          quit
-
-VIEW MODES  (saved in settings.json → view_mode)
-  split      log | results   (default)
-  results    matching lines only
-  normal     full log`,
-	Example: `  # local
-  gofle /var/log/app.log
-
-  # remote URLs (always open the interactive viewer)
-  gofle ssh://user@host/var/log/sys.log
-  gofle ftp://user@host/var/log/sys.log
-
-  # ssh/ftp subcommands: default opens the viewer; add --dump for stdout
-  gofle ssh user@host --remote /var/log/x.log
-  gofle ssh user@host --remote /var/log/x.log --dump
-  gofle ftp user@host --tls explicit --remote /var/log/x.log
-
-  # history
-  gofle recent`,
+	// Long/Example are filled in init() so section headers and samples can use
+	// the same palette as the interactive TUI help when stdout is a terminal.
 	Args:         cmds.UsageArgs(cobra.MaximumNArgs(1)),
 	SilenceUsage: true,
 	// Errors are printed exactly once — by main() below. Cobra's own printer
@@ -90,7 +48,92 @@ VIEW MODES  (saved in settings.json → view_mode)
 	},
 }
 
+// help palette (Catppuccin Mocha) — matches cmd/gofle/internal/tui help styles.
+const (
+	ansiReset   = "\033[0m"
+	ansiTitle   = "\033[1;38;2;203;166;247m" // #cba6f7 bold
+	ansiSection = "\033[1;38;2;249;226;175m" // #f9e2af bold
+	ansiExample = "\033[38;2;166;227;161m"   // #a6e3a1
+	ansiMuted   = "\033[38;2;166;173;200m"   // #a6adc8
+)
+
+func rootHelpLong(color bool) string {
+	h := func(s string) string {
+		if !color {
+			return s
+		}
+		return ansiSection + s + ansiReset
+	}
+	title := "GoFLE terminal viewer — open local or remote logs interactively."
+	if color {
+		title = ansiTitle + title + ansiReset
+	}
+	note := "  Same backend as the desktop app. Config is shared (~/.config/GoFLE/)."
+	if color {
+		note = ansiMuted + note + ansiReset
+	}
+	return title + "\n\n" + note + "\n\n" +
+		h("USAGE") + `
+  gofle <file>                 local log
+  gofle ssh://user@host/path   remote SSH
+  gofle ftp://user@host/path   remote FTP/FTPS
+
+` + h("COMMANDS") + `
+  ssh / ftp     stream a remote file (viewer by default; --dump for stdout)
+  recent        interactive recent-files picker
+  presets       list / import / export search presets
+  session       show / restore / clear saved tabs
+  version       print version
+
+` + h("VIEWER") + `  (press ? inside the viewer)
+  Navigation    ↑↓ jk · PgUp/PgDn · g · Home/End
+  Search        /  \  A  u  P · n p · x
+  View          m  s  r  f
+  Tabs          T  Ctrl+Tab  1–9  Ctrl+W  G  Y
+  Other         F2 settings · S remote · q quit
+
+` + h("VIEW MODES") + `  (settings.json → view_mode)
+  split      log | results   (default)
+  results    matching lines only
+  normal     full log`
+}
+
+func rootHelpExample(color bool) string {
+	ex := func(s string) string {
+		if !color {
+			return s
+		}
+		return ansiExample + s + ansiReset
+	}
+	cmt := func(s string) string {
+		if !color {
+			return s
+		}
+		return ansiMuted + s + ansiReset
+	}
+	return cmt("  # local") + "\n" +
+		ex("  gofle /var/log/app.log") + "\n\n" +
+		cmt("  # remote URLs (always open the interactive viewer)") + "\n" +
+		ex("  gofle ssh://user@host/var/log/sys.log") + "\n" +
+		ex("  gofle ftp://user@host/var/log/sys.log") + "\n\n" +
+		cmt("  # ssh/ftp subcommands: default opens the viewer; add --dump for stdout") + "\n" +
+		ex("  gofle ssh user@host --remote /var/log/x.log") + "\n" +
+		ex("  gofle ssh user@host --remote /var/log/x.log --dump") + "\n" +
+		ex("  gofle ftp user@host --tls explicit --remote /var/log/x.log") + "\n\n" +
+		cmt("  # history") + "\n" +
+		ex("  gofle recent") + "\n\n" +
+		cmt("  # presets & session (shared with desktop)") + "\n" +
+		ex("  gofle presets list") + "\n" +
+		ex("  gofle presets import ./presets-export.json") + "\n" +
+		ex("  gofle session show") + "\n" +
+		ex("  gofle session restore")
+}
+
 func init() {
+	color := shared.IsTTY() && os.Getenv("NO_COLOR") == ""
+	rootCmd.Long = rootHelpLong(color)
+	rootCmd.Example = rootHelpExample(color)
+
 	// Flag parse failures (unknown flag, bad value) are usage errors: main()
 	// maps them to exit code 2. Children inherit the root's flag error func.
 	rootCmd.SetFlagErrorFunc(cmds.FlagErrorFunc())
@@ -99,6 +142,8 @@ func init() {
 		cmds.SSHCmd,
 		cmds.FTPCmd,
 		cmds.RecentCmd,
+		cmds.PresetsCmd,
+		cmds.SessionCmd,
 	)
 
 	// Add custom version flags

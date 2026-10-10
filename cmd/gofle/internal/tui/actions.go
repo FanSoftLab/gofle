@@ -68,6 +68,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case remoteListedMsg:
 		m.applyRemoteListed(msg)
+
+	case searchProgressMsg:
+		cmd = m.applySearchProgress(msg)
+
+	case searchDoneMsg:
+		m.applySearchDone(msg)
 	}
 
 	// Footer lines (status, prompts, errors) can change on any update; keep
@@ -109,6 +115,16 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpKey(msg)
 
 		return m, nil
+	case m.advMode:
+		return m.advancedFormKey(msg)
+	case m.settingsMode:
+		return m.settingsFormKey(msg)
+	case m.groupMode:
+		return m.groupEditorKey(msg)
+	case m.topMode:
+		return m.topUniqueKey(msg)
+	case m.presetMode:
+		return m.presetKey(msg)
 	case m.searchMode || m.secondaryMode:
 		return m.searchPromptKey(msg)
 	case m.gotoMode:
@@ -151,11 +167,9 @@ func (m *model) searchPromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case msg.Type == tea.KeyEnter:
-		m.runSearch()
 		m.searchMode = false
 		m.secondaryMode = false
-
-		return *m, nil
+		return *m, m.startSearchCmd()
 	case msg.Type == tea.KeyEsc:
 		m.searchMode = false
 		m.secondaryMode = false
@@ -315,7 +329,16 @@ func (m *model) recentPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.recentCursor = (m.recentCursor + 1) % len(m.recentList)
 		}
 	case keyEnter:
-		m.openSelectedRecent()
+		if m.openRecentAsTab {
+			m.openSelectedRecentAsTab()
+		} else {
+			m.openSelectedRecent()
+		}
+		m.openRecentAsTab = false
+	case "t":
+		// Open selected recent entry in a new tab (keep current file open).
+		m.openSelectedRecentAsTab()
+		m.openRecentAsTab = false
 	case "b":
 		// Browse another file on the same remote server (SSH/FTP recent only).
 		if len(m.recentList) == 0 {
@@ -364,6 +387,15 @@ func (m *model) openSelectedRecent() {
 // single function carries the whole keymap.
 func (m *model) navKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if m.searching && (key == keyEsc || key == "ctrl+c") {
+		if m.searchCancel != nil {
+			m.searchCancel()
+			m.searchCancel = nil
+		}
+		m.searching = false
+		m.status = "search cancelled"
+		return *m, nil
+	}
 	if key == "q" || key == "ctrl+c" {
 		// RunView tears the target down asynchronously after the program has
 		// left the alternate screen. Doing it here on the event loop would
@@ -396,6 +428,14 @@ func (m *model) navKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.resultsPaneKey(key) {
+		return *m, nil
+	}
+
+	if key == "ctrl+w" {
+		return *m, m.closeActiveSession()
+	}
+
+	if m.tabKey(key) {
 		return *m, nil
 	}
 
@@ -491,13 +531,41 @@ func (m *model) promptKey(key string) (cmd tea.Cmd, ok bool) {
 
 		return nil, true
 	case "o":
+		m.openRecentAsTab = false
 		m.openRecentPicker()
 
+		return nil, true
+	case "T":
+		// Open recent list with intent to open selection in a new tab.
+		m.openRecentAsTab = true
+		m.openRecentPicker()
+		if m.recentMode {
+			m.status = "recent → new tab (Enter or t)"
+		}
 		return nil, true
 	case "b":
 		// Browse another file on the same remote server (SSH/FTP).
 		cmd := m.browseSameServer()
 		return cmd, true
+	case "A":
+		// Advanced filters form (GUI parity: Nearby, Exclude, Levels, Time, Range, Context).
+		return m.openAdvancedForm(), true
+	case "f2", ",":
+		// Settings (shared settings.json). Comma is a fallback when F2 is captured by the terminal.
+		return m.openSettingsForm(), true
+	case "Y":
+		// Restore additional tabs from shared saved session.
+		m.restoreSessionTabs()
+		return nil, true
+	case "G":
+		// Assign / clear tab group for the active tab.
+		return m.openGroupEditor(), true
+	case "u":
+		m.openTopUnique()
+		return nil, true
+	case "P":
+		m.openPresetPicker()
+		return nil, true
 	}
 
 	return nil, false
@@ -540,10 +608,15 @@ func (m *model) scrollKey(key string) bool {
 		m.scrollToTop()
 	case "end", "G":
 		m.scrollToEnd()
+	case "left", "h":
+		m.scrollLeft()
+	case "right", "l":
+		m.scrollRight()
 	default:
 		return false
 	}
 
+	m.clampViewport()
 	if m.splitView {
 		m.syncMatchToView()
 	}
@@ -551,62 +624,166 @@ func (m *model) scrollKey(key string) bool {
 	return true
 }
 
-// scrollUp moves the viewport up one logical line (one screen row).
+// scrollUp moves the viewport up one screen row (visual row when word-wrap is on).
 func (m *model) scrollUp() {
-	m.topWrap = 0
 	if m.onlyMatches {
 		m.top = max(0, m.top-1)
+		m.topWrap = 0
 		return
 	}
+	if m.wordWrap {
+		if m.topWrap > 0 {
+			m.topWrap--
+			return
+		}
+		if m.top > 0 {
+			m.top--
+			m.topWrap = max(0, m.wrapRows(m.top)-1)
+		}
+		return
+	}
+	m.topWrap = 0
 	if m.top > 0 {
 		m.top--
 	}
 }
 
-// scrollDown moves the viewport down one logical line (one screen row).
+// scrollDown moves the viewport down one screen row.
 func (m *model) scrollDown() {
-	m.topWrap = 0
 	last := max(m.lastLine(), 0)
 	if m.onlyMatches {
 		m.top = min(m.top+1, last)
+		m.topWrap = 0
 		return
 	}
-	if m.top < last {
+	if m.wordWrap {
+		// Stop once the remaining content no longer fills the viewport.
+		if m.remainingVisualRows() <= m.height {
+			return
+		}
+		wr := m.wrapRows(m.top)
+		if wr < 1 {
+			wr = 1
+		}
+		if m.topWrap < wr-1 {
+			m.topWrap++
+			return
+		}
+		if m.top < last {
+			m.top++
+			m.topWrap = 0
+		}
+		return
+	}
+	m.topWrap = 0
+	maxTop := m.viewableEnd()
+	if m.top < maxTop {
 		m.top++
 	}
 }
 
-// pageUp scrolls up one screenful.
+// pageUp scrolls up roughly one screenful of visual rows.
 func (m *model) pageUp() {
-	m.top = max(0, m.top-int64(m.height))
-	if !m.onlyMatches {
+	if m.onlyMatches || !m.wordWrap {
+		m.top = max(0, m.top-int64(m.height))
 		m.topWrap = 0
+		return
+	}
+	steps := m.height
+	for steps > 0 && (m.top > 0 || m.topWrap > 0) {
+		m.scrollUp()
+		steps--
 	}
 }
 
-// pageDown scrolls down one screenful, stopping on the last full screen.
+// pageDown scrolls down roughly one screenful of visual rows.
 func (m *model) pageDown() {
-	last := max(m.viewableEnd(), 0)
-	m.top = min(m.top+int64(m.height), last)
-
-	if !m.onlyMatches {
+	if m.onlyMatches || !m.wordWrap {
+		last := max(m.viewableEnd(), 0)
+		m.top = min(m.top+int64(m.height), last)
 		m.topWrap = 0
+		return
+	}
+	steps := m.height
+	for steps > 0 {
+		prevTop, prevWrap := m.top, m.topWrap
+		m.scrollDown()
+		if m.top == prevTop && m.topWrap == prevWrap {
+			break
+		}
+		steps--
 	}
 }
 
 // scrollToTop jumps to the first line (first match in results-only mode).
 func (m *model) scrollToTop() {
 	m.top = 0
-	if !m.onlyMatches {
-		m.topWrap = 0
-	}
+	m.topWrap = 0
+	m.hOffset = 0
 }
 
 // scrollToEnd jumps to the last screenful (last match in results-only mode).
 func (m *model) scrollToEnd() {
-	m.top = max(m.viewableEnd(), 0)
-	if !m.onlyMatches {
+	if m.onlyMatches {
+		m.top = max(m.viewableEnd(), 0)
 		m.topWrap = 0
+		return
+	}
+	if m.wordWrap {
+		m.top = m.viewableEndWrapped()
+		m.topWrap = 0
+		// Advance topWrap so the last visual row sits near the bottom.
+		for m.remainingVisualRows() > m.height {
+			wr := m.wrapRows(m.top)
+			if m.topWrap < wr-1 {
+				m.topWrap++
+			} else {
+				break
+			}
+		}
+		m.clampViewport()
+		return
+	}
+	m.top = max(m.viewableEnd(), 0)
+	m.topWrap = 0
+}
+
+// scrollLeft moves the horizontal viewport left (no-op when word-wrap is on).
+func (m *model) scrollLeft() {
+	if m.wordWrap {
+		return
+	}
+	step := 8
+	if m.hOffset < step {
+		m.hOffset = 0
+	} else {
+		m.hOffset -= step
+	}
+}
+
+// scrollRight moves the horizontal viewport right (no-op when word-wrap is on).
+func (m *model) scrollRight() {
+	if m.wordWrap {
+		return
+	}
+	m.hOffset += 8
+}
+
+// toggleWordWrap switches soft-wrap ↔ horizontal scroll and persists the preference.
+func (m *model) toggleWordWrap() {
+	m.wordWrap = !m.wordWrap
+	m.topWrap = 0
+	m.hOffset = 0
+	if m.wordWrap {
+		m.status = "word wrap ON"
+	} else {
+		m.status = "word wrap OFF · ←→ horizontal scroll"
+	}
+	if m.cfg != nil {
+		m.cfg.Mu.Lock()
+		m.cfg.WordWrap = m.wordWrap
+		m.cfg.Mu.Unlock()
+		m.cfg.SaveDebounced()
 	}
 }
 
@@ -616,6 +793,8 @@ func (m *model) viewModeKey(key string) bool {
 	switch key {
 	case "f":
 		m.toggleTail()
+	case "w":
+		m.toggleWordWrap()
 	case "m":
 		m.cycleViewMode()
 		m.persistViewMode()
@@ -646,7 +825,9 @@ func (m *model) viewModeKey(key string) bool {
 // effectiveSplit is true when split mode is preferred AND there are matches
 // for the right pane. Without matches we keep a full-width log (no divider).
 func (m model) effectiveSplit() bool {
-	return m.splitView && len(m.matches) > 0
+	// Split preference is independent of whether a search has hits; an empty
+	// results pane shows a placeholder (see resultRows).
+	return m.splitView
 }
 
 // applyViewModeFromConfig sets splitView / onlyMatches from the shared
@@ -739,20 +920,16 @@ func (m *model) toggleSplitView() {
 	m.enableSplitView()
 }
 
-// enableSplitView turns on the two-pane log|results layout, which needs an
-// active search to have anything to show in the right pane.
+// enableSplitView turns on the two-pane log|results layout.
+// Matches are optional — without them the results pane shows a placeholder.
 func (m *model) enableSplitView() {
-	if len(m.matches) == 0 {
-		m.status = tr(*m, "no_matches_mode")
-
-		return
-	}
-
 	m.onlyMatches = false
 	m.splitView = true
 	m.splitFocus = 0
-	m.ensureResVisible()
-	m.keepMatchVisible()
+	if len(m.matches) > 0 {
+		m.ensureResVisible()
+		m.keepMatchVisible()
+	}
 	m.status = tr(*m, "mode_split")
 }
 
@@ -932,7 +1109,7 @@ func (m *model) applyRemoteListed(msg remoteListedMsg) {
 	m.remoteCurrentPath = msg.path
 }
 
-// clearSearch clears the search query, matches, and secondary filter.
+// clearSearch clears the search query, matches, secondary filter, and advanced filters.
 func (m *model) clearSearch() {
 	m.query = ""
 	m.secondaryQuery = ""
@@ -943,17 +1120,22 @@ func (m *model) clearSearch() {
 	m.primaryKey = ""
 	m.matchCursor = 0
 	m.searchOpts = search.SearchOptions{CaseSensitive: false}
+	m.clearAdvancedFilters()
 	m.onlyMatches = false
-	m.splitView = false
 	m.splitFocus = 0
+	// Keep split preference if user had split on; results-only drops to normal/split preference.
+	if m.cfg != nil && m.cfg.ViewMode == "results" {
+		m.splitView = false
+	}
+	// else leave m.splitView as-is so 's' state survives a search clear
 	m.top = 0
 	m.status = "search cleared"
 }
 
 // searchPrimaryKey returns a stable identity for the primary portion of opts —
 // query text plus the regex/case/invert flags, excluding the secondary AND
-// filter. runSearch compares it across calls to detect whether only the
-// secondary filter changed (H2).
+// filter and advanced post-filters. runSearch compares it across calls to
+// detect whether only the secondary filter changed (H2).
 func searchPrimaryKey(opts search.SearchOptions) string {
 	return fmt.Sprintf("%v|%v|%v|%v", opts.Query, opts.IsRegex, opts.CaseSensitive, opts.InvertMatch)
 }
@@ -976,66 +1158,106 @@ func (m *model) applyMatchResult(matches []int64) {
 
 	m.topWrap = 0
 	if len(matches) > 0 {
-		m.status = fmt.Sprintf("found %d matches", len(matches))
+		sum := m.advancedSummary()
+		if sum != "" {
+			m.status = fmt.Sprintf("found %d matches · %s", len(matches), sum)
+		} else {
+			m.status = fmt.Sprintf("found %d matches", len(matches))
+		}
 	} else {
 		m.status = "no matches"
 	}
 }
 
 // runSearch executes the current search-box query and jumps to the first match.
-// When only the secondary AND-filter (filter-in-filter) changed since the last
-// search, it refines the cached primary matches via SearchEngine.FilterLines
-// instead of re-scanning the whole file — O(matches) instead of O(totalLines)
-// (H2).
+// Pipeline mirrors the GUI (app_tabs.SearchLines):
+//  1. primary scan (optional LineStart/LineEnd range, MatchAll when only advanced)
+//  2. secondary AND via FilterLines
+//  3. ApplyAdvancedFilters (exclude / nearby / levels / time)
+//  4. optional ExpandMatchesWithContext for display
+//
+// When only the secondary AND-filter changed and advanced filters are unchanged,
+// it refines the cached primary matches in O(matches) instead of O(totalLines).
 func (m *model) runSearch() {
 	m.query = m.searchInput.Value()
 	m.secondaryQuery = strings.TrimSpace(m.secondaryInput.Value())
 
 	opts := m.effectiveSearchOptions()
-	if opts.Query == "" {
+	hasAdv := m.hasAdvancedFilters()
+
+	if opts.Query == "" && !hasAdv && opts.SecondaryQuery == "" {
 		m.matches = nil
 		m.primaryMatches = nil
 		m.primaryKey = ""
 		m.matchCursor = 0
-
 		return
 	}
 
+	// Empty primary + advanced (and/or secondary) → MatchAll indices, then post-filter.
+	if opts.Query == "" {
+		opts.MatchAll = true
+		opts.IsRegex = false
+		opts.InvertMatch = false
+	}
+
 	key := searchPrimaryKey(opts)
-	secondaryOnly := m.primaryMatches != nil && key == m.primaryKey
+	// secondaryOnly refine only when advanced filters are stable (same key path as GUI).
+	secondaryOnly := m.primaryMatches != nil && key == m.primaryKey &&
+		!hasAdv && opts.SecondaryQuery != ""
+
+	var res []int64
+	var err error
 
 	if secondaryOnly {
-		filtered, err := m.se.FilterLines(m.ctx, opts, m.primaryMatches)
+		res, err = m.se.FilterLines(m.ctx, opts, m.primaryMatches)
 		if err != nil {
 			m.err = err
 			return
 		}
-
-		m.applyMatchResult(filtered)
-
+		if m.hasContextExpand() {
+			res = search.ExpandMatchesWithContext(res, m.advCtxBefore, m.advCtxAfter, m.idx.TotalLines())
+		}
+		m.applyMatchResult(res)
 		return
 	}
 
-	// Primary changed (or first search): run the full primary scan without the
-	// secondary filter, cache it, then apply the secondary filter on top.
 	primaryOpts := opts
 	primaryOpts.SecondaryQuery = ""
 
-	res, err := m.se.SearchWithContext(m.ctx, primaryOpts)
+	if opts.LineStart > 0 || opts.LineEnd > 0 {
+		end := opts.LineEnd
+		if end <= 0 {
+			end = m.idx.TotalLines()
+		}
+		res, err = m.se.SearchRange(m.ctx, primaryOpts, opts.LineStart, end)
+	} else {
+		res, err = m.se.SearchWithContext(m.ctx, primaryOpts)
+	}
 	if err != nil {
 		m.err = err
 		return
 	}
 
 	m.primaryMatches = slices.Clone(res)
-
 	m.primaryKey = key
+
 	if opts.SecondaryQuery != "" {
 		res, err = m.se.FilterLines(m.ctx, opts, res)
 		if err != nil {
 			m.err = err
 			return
 		}
+	}
+
+	// Advanced post-filters live in pkg/search — TUI never reimplements them.
+	res, err = m.se.ApplyAdvancedFilters(m.ctx, opts, res)
+	if err != nil {
+		m.err = err
+		return
+	}
+
+	if m.hasContextExpand() {
+		res = search.ExpandMatchesWithContext(res, m.advCtxBefore, m.advCtxAfter, m.idx.TotalLines())
 	}
 
 	m.applyMatchResult(res)
@@ -1405,6 +1627,10 @@ func (m *model) reopen(target string) error {
 		}
 	}
 	m.status = "opened " + idx.FilePath()
+	// Keep multi-tab list in sync: replace the active session snapshot.
+	if len(m.sessions) > 0 && m.activeSession >= 0 && m.activeSession < len(m.sessions) {
+		m.sessions[m.activeSession] = m.snapshotSession()
+	}
 
 	return nil
 }
