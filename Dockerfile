@@ -23,7 +23,7 @@ ARG BUILD_TARGET=all
 # ---------- system packages (stable stage) ----------
 # No build-args here. This layer is reused until the package list or base image
 # changes — not on every code/version rebuild.
-FROM golang:1.26-bookworm AS system
+FROM golang:1.27-bookworm AS system
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -47,6 +47,7 @@ RUN ln -sf /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
     ln -sf /usr/lib/pkgconfig/webkit2gtk-4.1.pc \
            /usr/lib/pkgconfig/webkit2gtk-4.0.pc 2>/dev/null || true
 
+
 # ---------- build stage ----------
 FROM system AS builder
 
@@ -61,8 +62,8 @@ ARG BUILD_TIME
 ARG BUILD_COMMIT
 ARG BUILD_SOURCE
 ARG BUILD_TARGET
-ARG TARGET_UID=0
-ARG TARGET_GID=0
+ARG TARGET_UID=1000
+ARG TARGET_GID=1000
 
 # Version ldflags for injection into binaries (changes every build — declared
 # only after apt so it cannot invalidate the system package layer).
@@ -116,8 +117,10 @@ RUN --mount=type=cache,target=/root/.npm \
     if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
         cd frontend && npm run build && cd ..; \
     else \
-        mkdir -p frontend/dist && echo '<!DOCTYPE html><html><body></body></html>' > frontend/dist/index.html; \
-    fi
+        mkdir -p frontend/dist/assets && echo '<!DOCTYPE html><html><body></body></html>' > frontend/dist/index.html; \
+    fi && \
+    mkdir -p frontend/dist/assets && \
+    chown -R "${TARGET_UID}:${TARGET_GID}" frontend/dist
 
 # Generate bindings once on the host platform (Linux) — required before any
 # cross-compile that uses -skipbindings
@@ -237,13 +240,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM builder AS chowned
 ARG TARGET_UID
 ARG TARGET_GID
-RUN if [ -d "/app/frontend/node_modules" ] || [ -d "/app/frontend/dist" ] || [ -d "/app/frontend/.vite" ]; then \
-        rm -rf /app/frontend/node_modules /app/frontend/dist /app/frontend/.vite \
-        && rm -rf /root/.npm /root/.cache; \
-    fi
-RUN if [ "${TARGET_UID}" != "0" ] || [ "${TARGET_GID}" != "0" ]; then \
-        chown -R "${TARGET_UID}:${TARGET_GID}" /app; \
-    fi
+RUN rm -rf /app/frontend/node_modules /app/frontend/.vite /root/.npm /root/.cache 2>/dev/null || true
+# Keep frontend/dist (incl. assets) and set ownership for host UID/GID (default 1000:1000)
+RUN mkdir -p /app/frontend/dist/assets && \
+    chown -R "${TARGET_UID}:${TARGET_GID}" /app
 
 FROM scratch AS exporter
 COPY --from=chowned /app/ /

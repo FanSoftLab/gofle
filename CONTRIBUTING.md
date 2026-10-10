@@ -10,7 +10,7 @@ covers building and testing both.
 
 ## Prerequisites
 
-- **Go 1.26+**
+- **Go 1.27+**
 - **Node.js 18+** and npm
 - **Wails CLI v2**: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 - **git**

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 APP_NAME="GoFLE"
 CLI_APP_NAME="gofle"
@@ -32,10 +32,16 @@ Usage: $0 [options]
 
 Notes:
   • CLI is fully cross-compiled (linux/windows/darwin × amd64/arm64).
-  • GUI Linux  — native (webkit2gtk).
-  • GUI Windows — cross-compiled via MinGW.
+  • GUI Linux  — native binary (webkit2gtk).
+  • GUI Windows — cross-compiled via MinGW (amd64 only; arm64 not available in Debian bookworm).
   • GUI macOS  — NOT supported from Linux (Wails v2 limitation).
     Use a real Mac or Wails v3 for macOS GUI.
+  • BuildKit cache is enabled by default. Layers re-run only when:
+      - apt packages: system stage changes (rare)
+      - go.mod/go.sum change: Go module re-download
+      - package-lock.json change: npm ci re-run
+      - code-only change: reuse all deps, rebuild app
+  • Use -no-cache for a completely clean build.
 EOF
 }
 
@@ -57,13 +63,25 @@ done
 # Validate mode
 case "$MODE" in
     dev|prod) ;;
-    *) echo "Invalid -mode: $MODE (use dev or prod)"; exit 1;;
+    *) echo "Invalid -mode: $MODE (use dev or prod)" >&2; exit 1;;
 esac
 
 # Validate target
 case "$BUILD_TARGET" in
     cli|gui|all) ;;
-    *) echo "Invalid -target: $BUILD_TARGET (use cli|gui|all)"; exit 1;;
+    *) echo "Invalid -target: $BUILD_TARGET (use cli|gui|all)" >&2; exit 1;;
+esac
+
+# Validate OS
+case "$TARGET_OS" in
+    linux|mac|darwin|windows|all) ;;
+    *) echo "Invalid -os: $TARGET_OS (use linux|mac|windows|all)" >&2; exit 1;;
+esac
+
+# Validate arch
+case "$TARGET_ARCH" in
+    amd64|arm64|all) ;;
+    *) echo "Invalid -arch: $TARGET_ARCH (use amd64|arm64|all)" >&2; exit 1;;
 esac
 
 # Expand OS targets
@@ -72,7 +90,6 @@ case "$TARGET_OS" in
     mac|darwin) OS_LIST=(darwin);;
     windows) OS_LIST=(windows);;
     all) OS_LIST=(linux windows darwin);;
-    *) echo "Invalid -os: $TARGET_OS (use linux|mac|windows|all)"; exit 1;;
 esac
 
 # Expand architecture targets
@@ -80,7 +97,6 @@ case "$TARGET_ARCH" in
     amd64) ARCH_LIST=(amd64);;
     arm64) ARCH_LIST=(arm64);;
     all) ARCH_LIST=(amd64 arm64);;
-    *) echo "Invalid -arch: $TARGET_ARCH (use amd64|arm64|all)"; exit 1;;
 esac
 
 # Build the GOOS/GOARCH platform list (comma-separated)
@@ -109,6 +125,7 @@ if [ "$PLATFORMS" = "linux/amd64" ] && [ "$MODE" = "prod" ]; then
 else
     MULTI=true
 fi
+
 
 # ─── Version derivation ────────────────────────────────────────────
 # Priority: 1) explicit -v/--version, 2) git tag (vX.Y.Z), 3) git describe (dev-<commit>)
@@ -143,6 +160,13 @@ echo "  version:   $CLI_VERSION"
 echo "  source:    $BUILD_SOURCE"
 echo "  time:      $BUILD_TIME"
 echo "  commit:    $BUILD_COMMIT"
+
+# Verify required files exist
+if [ ! -f "Dockerfile" ]; then
+    echo "ERROR: Dockerfile not found in project root" >&2
+    exit 1
+fi
+
 
 CDPATH= cd -- "$(dirname -- "$0")" && pwd > /dev/null
 

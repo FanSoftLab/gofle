@@ -70,7 +70,7 @@ Minimal terminal example (after building the binary):
 
 **Prerequisites**
 
-- **Go 1.26+**
+- **Go 1.27+**
 - **Node.js 18+** and npm
 - **Wails CLI v2**: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 - **Linux only**: CGO enabled plus the GTK/WebKit system libraries (see
@@ -321,7 +321,7 @@ and the `gofle` CLI, writing to stderr and `gofle.log` beside the config dir.
     ├── main.go                 # Wails app entrypoint: window options, asset embedding, bindings
     ├── app.go                 # Backend core: App struct, tab lifecycle, polling, search orchestration
     ├── wails.json             # Wails project config (frontend dir, build scripts, metadata)
-    ├── go.mod / go.sum        # Go module (Go 1.26, Wails v2, golang.org/x/crypto)
+    ├── go.mod / go.sum        # Go module (Go 1.27, Wails v2, golang.org/x/crypto)
     ├── build.sh               # Reproducible multi-platform build via Docker
     ├── Dockerfile             # Build image: Go + GTK/WebKit + Node, runs wails build
 ├── scripts/install.sh     # Linux install helper: copies binary + icon, generates the .desktop entry
@@ -376,7 +376,7 @@ and the `gofle` CLI, writing to stderr and `gofle.log` beside the config dir.
 ## Requirements
 
 ### All platforms
-- **Go 1.26+**
+- **Go 1.27+**
 - **Node.js 18+** and npm (for the frontend build)
 - **Wails CLI v2**: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
