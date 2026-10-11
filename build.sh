@@ -258,7 +258,7 @@ chown -R "${TARGET_UID}:${TARGET_GID}" . 2>/dev/null || true
 # Collect artefacts
 if [ -d "$OUT_DIR/build/bin" ]; then
     if [ "$MULTI" = "false" ]; then
-        # Single linux/amd64 prod → place binaries in project root
+        # Single linux/amd64 prod
         if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then
             # Prefer the normalised name, fall back to plain name
             src=""
@@ -268,24 +268,24 @@ if [ -d "$OUT_DIR/build/bin" ]; then
                 src="$OUT_DIR/build/bin/$APP_NAME"
             fi
             if [ -n "$src" ]; then
-                cp -f "$src" "./$APP_NAME" || {
+                cp -f "$src" "dist/$APP_NAME" || {
                     echo "ERROR: failed to install ./$APP_NAME — close the running instance and re-run."
                     exit 1
                 }
-                chmod +x "./$APP_NAME" 2>/dev/null || true
+                chmod +x "dist/$APP_NAME" 2>/dev/null || true
             fi
         fi
         if [ "$BUILD_TARGET" = "cli" ] || [ "$BUILD_TARGET" = "all" ]; then
             if [ -f "$OUT_DIR/build/bin/$CLI_APP_NAME" ]; then
-                cp -f "$OUT_DIR/build/bin/$CLI_APP_NAME" "./$CLI_APP_NAME" || {
+                cp -f "$OUT_DIR/build/bin/$CLI_APP_NAME" "dist/$CLI_APP_NAME" || {
                     echo "ERROR: failed to install ./$CLI_APP_NAME — close the running instance and re-run."
                     exit 1
                 }
-                chmod +x "./$CLI_APP_NAME" 2>/dev/null || true
+                chmod +x "dist/$CLI_APP_NAME" 2>/dev/null || true
             fi
         fi
     else
-        # Multi-target → everything goes under dist/
+        # Multi-target
         mkdir -p dist
         cp -f "$OUT_DIR/build/bin/"* dist/ 2>/dev/null || true
         echo ""
@@ -298,9 +298,5 @@ fi
 
 echo "──────────────────────────────────────────────────"
 echo "Build complete. Working directory: $(pwd)"
-if [ "$MULTI" = "true" ]; then
-    echo "Binaries are in ./dist/"
-else
-    echo "Binaries are in the project root."
-fi
+echo "Binaries are in ./dist/"
 echo "──────────────────────────────────────────────────"

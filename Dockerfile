@@ -10,6 +10,7 @@
 # by version/commit/time that change on every build).
 ARG RUN_TESTS=false
 ARG APP_NAME=GoFLE
+ARG GO_VERSION=1.27
 ARG BUILD_MODE=prod
 ARG PLATFORMS=linux/amd64
 ARG MULTI=false
@@ -23,7 +24,7 @@ ARG BUILD_TARGET=all
 # ---------- system packages (stable stage) ----------
 # No build-args here. This layer is reused until the package list or base image
 # changes — not on every code/version rebuild.
-FROM golang:1.27-bookworm AS system
+FROM golang:${GO_VERSION}-bookworm AS system
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \

@@ -26,5 +26,5 @@ frontend/node_modules
 # Wails build outputs exported from the container by build.sh (build/appicon.png
 # is committed source and must NOT be ignored).
 build/bin/
-dist/
+dist/*
 *.log
