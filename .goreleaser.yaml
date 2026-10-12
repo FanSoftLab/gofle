@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# GoReleaser v2 — packaging + GitHub Release only.
+# Binaries come from ./build.sh (Docker). Platforms: linux + windows only.
+# macOS is omitted: Wails GUI cannot be cross-built from Linux without extra setup.
+#
+#   ./scripts/release.sh v2.1.0
+version: 2
+
+project_name: gofle
+
+builds:
+  - id: gofle-cli
+    builder: prebuilt
+    binary: gofle
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    prebuilt:
+      # dist/gofle-linux-amd64
+      # dist/gofle-windows-amd64.exe
+      path: "dist/gofle-{{.Os}}-{{.Arch}}{{.Ext}}"
+
+archives:
+  - id: gofle-cli-archive
+    builds:
+      - gofle-cli
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE.md
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: sankam-nikolya
+    name: GoFLE
+  name_template: "v{{ .Version }}"
+  extra_files:
+    - glob: ./dist/GoFLE*
+  footer: |
+    ---
+    Built with `./build.sh` (linux + windows), packaged by [GoReleaser](https://goreleaser.com).
+
+snapshot:
+  version_template: "{{ .Version }}-next"

@@ -479,6 +479,37 @@ handler for `.log`/`.txt` files. The installer looks for the binary first next t
 itself and then at the repository root (`scripts/install.sh` lives one level under
 the repo root), so run `./build.sh` (which produces `./GoFLE` at the root) first.
 
+### Releasing (local only)
+
+Релізи **лише з локальної машини** — без GitHub Actions, без deb/rpm, **без macOS**.
+
+Платформи: **linux + windows** (amd64/arm64). macOS прибрано: Wails GUI з Linux
+просто так не крос-компілюється.
+
+1. **`./build.sh`** збирає CLI + GUI у `dist/`.
+2. **GoReleaser** пакує готові CLI (`builder: prebuilt`), checksums і публікує Release;
+   GUI з `dist/GoFLE*` — як `extra_files`.
+
+```bash
+export GITHUB_TOKEN=ghp_…   # classic PAT, scope: repo
+
+./scripts/release.sh v2.1.0              # build.sh + package + publish
+./scripts/release.sh v2.1.0 --snapshot   # без публікації
+./scripts/release.sh v2.1.0 --skip-build # тільки pack існуючого dist/
+```
+
+Вручну:
+
+```bash
+./build.sh -os linux -arch all -target all -v 2.1.0
+./build.sh -os windows -arch all -target all -v 2.1.0
+git tag -a v2.1.0 -m "v2.1.0" && git push origin v2.1.0
+export GITHUB_TOKEN=ghp_… GORELEASER_CURRENT_TAG=v2.1.0
+goreleaser release --clean
+```
+
+Конфіг: `.goreleaser.yaml`. Оркестратор: `scripts/release.sh`.
+
 ---
 
 ## Running
