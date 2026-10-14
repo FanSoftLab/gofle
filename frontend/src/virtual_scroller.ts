@@ -608,6 +608,8 @@ export class VirtualScroller {
         const textEl = rowNode.children[1] as HTMLElement;
         const sourceIndex = line.index;
         numEl.textContent = String(sourceIndex + 1);
+        // Logical index in this scroller (match index in filter pane, line index in main).
+        rowNode.dataset.index = String(logicalIndex);
         rowNode.dataset.sourceIndex = String(sourceIndex);
         // Only explicit false marks context neighbors (Go zero-value must not dim main log).
         const isContext = (line as any).is_match === false || (line as any).isMatch === false;
@@ -625,7 +627,8 @@ export class VirtualScroller {
         this.rowHighlightKey.set(rowNode, hlKey);
 
         rowNode.onclick = (e) => {
-          if (e.shiftKey) return;
+          // Modifier clicks are handled by attachSelectionListeners (range / toggle).
+          if (e.shiftKey || e.ctrlKey || e.metaKey) return;
           this.onRowClickCallback?.(logicalIndex);
         };
 
@@ -884,9 +887,11 @@ export class VirtualScroller {
       if (!target.closest('.log-row')) return;
 
       // Allow native text selection inside a single row with plain drag;
-      // line-range selection uses Shift or starts from gutter.
+      // line-range selection uses Shift / Ctrl(Cmd) or starts from gutter.
       const inGutter = !!target.closest('.log-num');
-      if (!e.shiftKey && !inGutter) {
+      const withShift = e.shiftKey;
+      const withCtrl = e.ctrlKey || e.metaKey;
+      if (!withShift && !withCtrl && !inGutter) {
         // Don't clear native selection mid-drag; only clear our line selection
         // when starting a new non-shift click on gutter next time.
         return;
@@ -897,15 +902,40 @@ export class VirtualScroller {
 
       e.preventDefault();
       this.viewport.focus();
-      this.isSelecting = true;
 
-      if (e.shiftKey && this.selectionAnchor !== null) {
-        this.selectionEnd = idx;
-      } else {
+      // Ctrl/Cmd+click: select only the clicked line (new anchor).
+      if (withCtrl && !withShift) {
+        this.isSelecting = false;
         this.selectionAnchor = idx;
         this.selectionStart = idx;
         this.selectionEnd = idx;
+        this.applySelectionStyle();
+        return;
       }
+
+      // Shift+click: extend from existing anchor, or from the highlighted line
+      // when no range has been started yet (so Shift works without a prior
+      // gutter click).
+      if (withShift) {
+        this.isSelecting = false;
+        if (this.selectionAnchor === null) {
+          const anchor =
+            this.highlightedLineIndex !== null ? this.highlightedLineIndex : idx;
+          this.selectionAnchor = anchor;
+          this.selectionStart = Math.min(anchor, idx);
+          this.selectionEnd = Math.max(anchor, idx);
+        } else {
+          this.selectionEnd = idx;
+        }
+        this.applySelectionStyle();
+        return;
+      }
+
+      // Gutter click (no modifiers): start a range; drag extends via mousemove.
+      this.isSelecting = true;
+      this.selectionAnchor = idx;
+      this.selectionStart = idx;
+      this.selectionEnd = idx;
       this.applySelectionStyle();
     });
 

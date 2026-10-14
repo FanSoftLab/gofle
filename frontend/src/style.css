@@ -690,13 +690,13 @@ body.theme-light select option {
     white-space: pre;
     user-select: text !important;
     -webkit-user-select: text !important;
-    cursor: pointer;
+    cursor: text;
     width: max-content;
     min-width: 100%;
     overflow: visible;
-    /* Isolate each row's paint so highlight/selection class toggles and
-       innerHTML updates don't force a full sticky-layer repaint (reduces flicker). */
-    contain: layout style;
+    /* layout only — `style` containment breaks native ::selection painting
+       across inner <span>/<mark> highlight tokens in Chromium/WebView. */
+    contain: layout;
 }
 
 .log-row:hover {
@@ -708,12 +708,20 @@ body.theme-light select option {
     border-left: 3px solid #facc15;
 }
 
+/* Soften current-match line without forcing every token to the same color
+   (that made selection look broken on syntax/search-highlighted text). */
 .log-row.highlighted .log-text {
-    color: #fef9c3;
+    color: inherit;
 }
 
 .log-row.selected {
     background-color: rgba(96, 165, 250, 0.28) !important;
+    border-left: 3px solid #60a5fa;
+}
+
+/* Line-range selection wins over current-match highlight. */
+.log-row.selected.highlighted {
+    background-color: rgba(96, 165, 250, 0.32) !important;
     border-left: 3px solid #60a5fa;
 }
 
@@ -724,8 +732,14 @@ body.theme-light select option {
     text-align: right;
     padding-right: 12px;
     user-select: none;
+    cursor: pointer;
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
+}
+
+.log-row.selected .log-num {
+    background-color: rgba(96, 165, 250, 0.2);
+    color: var(--text-primary, #e6e6e6);
 }
 
 .log-text {
@@ -735,6 +749,26 @@ body.theme-light select option {
     white-space: pre;
     user-select: text !important;
     -webkit-user-select: text !important;
+}
+
+/* Override the global `* { user-select: none }` so syntax/search highlight
+   spans and marks remain selectable and copyable inside log lines. */
+.log-text *,
+.log-text mark {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+
+/* Native character selection must paint through colored tokens and marks. */
+.log-text::selection,
+.log-text *::selection {
+    background: rgba(96, 165, 250, 0.55) !important;
+    color: inherit !important;
+}
+.log-text::-moz-selection,
+.log-text *::-moz-selection {
+    background: rgba(96, 165, 250, 0.55) !important;
+    color: inherit !important;
 }
 
 /* Level colors only — no bold (dense monospace stays readable). */
@@ -765,12 +799,35 @@ body.theme-light select option {
 .hl-metric { color: #56d4dd; }
 .hl-pid    { color: var(--text-muted); font-style: italic; }
 
-mark.search-highlight {
+/* Primary search hit — <mark> (single-query) and <span> (multi-term path). */
+mark.search-highlight,
+span.search-highlight {
     background: rgba(250, 204, 21, 0.55);
     color: #fefce8;
     border-radius: 2px;
     padding: 0 2px;
     box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.35);
+}
+
+/* Range-selected line: keep term highlights readable, don't cover blue. */
+.log-row.selected mark.search-highlight,
+.log-row.selected mark.search-highlight-active,
+.log-row.selected span.search-highlight {
+    background: rgba(250, 204, 21, 0.28);
+    box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.45);
+    color: inherit;
+}
+.log-row.selected .hl-secondary {
+    background: rgba(56, 189, 248, 0.25);
+    color: inherit;
+}
+.log-row.selected .hl-nearby {
+    background: rgba(167, 139, 250, 0.25);
+    color: inherit;
+}
+.log-row.selected .hl-exclude {
+    background: rgba(239, 68, 68, 0.15);
+    color: inherit;
 }
 
 mark.search-highlight-active {
@@ -779,6 +836,30 @@ mark.search-highlight-active {
     border-radius: 2px;
     padding: 0 2px;
     box-shadow: 0 0 0 1px #facc15;
+}
+
+/* ::selection wins over mark/span backgrounds while dragging text. */
+mark.search-highlight::selection,
+mark.search-highlight-active::selection,
+span.search-highlight::selection,
+.hl-secondary::selection,
+.hl-nearby::selection,
+.hl-exclude::selection,
+.log-text mark::selection,
+.log-text span::selection {
+    background: rgba(96, 165, 250, 0.55) !important;
+    color: inherit !important;
+}
+mark.search-highlight::-moz-selection,
+mark.search-highlight-active::-moz-selection,
+span.search-highlight::-moz-selection,
+.hl-secondary::-moz-selection,
+.hl-nearby::-moz-selection,
+.hl-exclude::-moz-selection,
+.log-text mark::-moz-selection,
+.log-text span::-moz-selection {
+    background: rgba(96, 165, 250, 0.55) !important;
+    color: inherit !important;
 }
 
 .modal {
