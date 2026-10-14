@@ -81,7 +81,7 @@ type Config struct {
 	TLSMode string `json:"tls_mode,omitempty"`
 	// KnownHostsPath points at the FTPS certificate trust store (one
 	// "host:port <sha256-fingerprint>" line per host). Defaults to
-	// ~/.config/GoFLE/ftp_certs when empty.
+	// ~/.config/gofle/ftp_certs when empty.
 	KnownHostsPath string `json:"known_hosts_path,omitempty"`
 	// Progress, when set, receives open-stage updates: ("connecting",0,0) before
 	// the dial and throttled ("downloading", doneBytes, totalBytes) during the
@@ -155,17 +155,17 @@ const (
 )
 
 // resolveCertStore returns the trust store path to use: cfg.KnownHostsPath when
-// set, otherwise ~/.config/GoFLE/ftp_certs.
+// set, otherwise ~/.config/gofle/ftp_certs (architecture-agnostic app dir).
 func resolveCertStore(cfg Config) string {
 	if cfg.KnownHostsPath != "" {
 		return cfg.KnownHostsPath
 	}
 
 	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "GoFLE", "ftp_certs")
+		return filepath.Join(d, "gofle", "ftp_certs")
 	}
 
-	return filepath.Join(os.TempDir(), "GoFLE", "ftp_certs")
+	return filepath.Join(os.TempDir(), "gofle", "ftp_certs")
 }
 
 // certStoreKey returns the store line key ("host:port") for an address.

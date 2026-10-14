@@ -390,7 +390,7 @@ func sshConfigFrom(rcfg remote.Config, knownHosts string) ssh.Config {
 
 // ftpConfigFrom maps the unified remote.Config onto an ftp.Config. The cert
 // trust store is taken from certsStore when set; otherwise the config's own
-// path (which itself defaults to ~/.config/GoFLE/ftp_certs).
+// path (which itself defaults to ~/.config/gofle/ftp_certs).
 func ftpConfigFrom(rcfg remote.Config, certsStore string) ftp.Config {
 	kp := certsStore
 	if kp == "" {

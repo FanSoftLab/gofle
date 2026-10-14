@@ -61,6 +61,8 @@ export class VirtualScroller {
   private selectionEnd: number | null = null;
   private isSelecting = false;
   private selectionAnchor: number | null = null;
+  /** Pending plain mousedown on text — promote to line-range once the pointer leaves the start row. */
+  private pendingLineSelect: { startIdx: number; startY: number } | null = null;
 
   private rowRawContent = new WeakMap<HTMLElement, string>();
   private rowHighlightKey = new WeakMap<HTMLElement, string>();
@@ -886,25 +888,18 @@ export class VirtualScroller {
       const target = e.target as HTMLElement;
       if (!target.closest('.log-row')) return;
 
-      // Allow native text selection inside a single row with plain drag;
-      // line-range selection uses Shift / Ctrl(Cmd) or starts from gutter.
       const inGutter = !!target.closest('.log-num');
       const withShift = e.shiftKey;
       const withCtrl = e.ctrlKey || e.metaKey;
-      if (!withShift && !withCtrl && !inGutter) {
-        // Don't clear native selection mid-drag; only clear our line selection
-        // when starting a new non-shift click on gutter next time.
-        return;
-      }
-
       const idx = this.indexFromPoint(e.clientY);
       if (idx === null) return;
 
-      e.preventDefault();
       this.viewport.focus();
 
       // Ctrl/Cmd+click: select only the clicked line (new anchor).
       if (withCtrl && !withShift) {
+        e.preventDefault();
+        this.pendingLineSelect = null;
         this.isSelecting = false;
         this.selectionAnchor = idx;
         this.selectionStart = idx;
@@ -913,10 +908,10 @@ export class VirtualScroller {
         return;
       }
 
-      // Shift+click: extend from existing anchor, or from the highlighted line
-      // when no range has been started yet (so Shift works without a prior
-      // gutter click).
+      // Shift+click: extend from existing anchor, or from the highlighted line.
       if (withShift) {
+        e.preventDefault();
+        this.pendingLineSelect = null;
         this.isSelecting = false;
         if (this.selectionAnchor === null) {
           const anchor =
@@ -931,15 +926,48 @@ export class VirtualScroller {
         return;
       }
 
-      // Gutter click (no modifiers): start a range; drag extends via mousemove.
-      this.isSelecting = true;
-      this.selectionAnchor = idx;
-      this.selectionStart = idx;
-      this.selectionEnd = idx;
-      this.applySelectionStyle();
+      // Gutter click: start line-range selection immediately; drag extends.
+      if (inGutter) {
+        e.preventDefault();
+        this.pendingLineSelect = null;
+        this.isSelecting = true;
+        this.selectionAnchor = idx;
+        this.selectionStart = idx;
+        this.selectionEnd = idx;
+        this.applySelectionStyle();
+        return;
+      }
+
+      // Plain mousedown on text: keep native character selection for a
+      // single-row drag; promote to line-range selection once the pointer
+      // moves onto another row (or a clear vertical drag).
+      this.pendingLineSelect = { startIdx: idx, startY: e.clientY };
+      this.isSelecting = false;
     });
 
     window.addEventListener('mousemove', (e) => {
+      // Promote pending text-drag into multi-line selection.
+      if (this.pendingLineSelect && !this.isSelecting) {
+        const idx = this.indexFromPoint(e.clientY);
+        const dy = Math.abs(e.clientY - this.pendingLineSelect.startY);
+        const leftStartRow =
+          idx !== null && idx !== this.pendingLineSelect.startIdx;
+        // ~half a line height — enough to mean "select lines", not "select chars".
+        if (leftStartRow || dy >= Math.max(8, this.lineHeight * 0.45)) {
+          const startIdx = this.pendingLineSelect.startIdx;
+          this.pendingLineSelect = null;
+          // Clear any native character selection that started on the first row.
+          const native = window.getSelection();
+          if (native && !native.isCollapsed) native.removeAllRanges();
+          this.isSelecting = true;
+          this.selectionAnchor = startIdx;
+          this.selectionStart = startIdx;
+          this.selectionEnd = idx ?? startIdx;
+          this.applySelectionStyle();
+        }
+        return;
+      }
+
       if (!this.isSelecting) return;
       const idx = this.indexFromPoint(e.clientY);
       if (idx === null) return;
@@ -947,7 +975,25 @@ export class VirtualScroller {
       this.applySelectionStyle();
     });
 
-    window.addEventListener('mouseup', () => {
+    window.addEventListener('mouseup', (e) => {
+      // Plain click (no drag) on a log line → select that one line so Ctrl+C
+      // and the context menu have a range. Horizontal char-selection drag
+      // that stayed on one row leaves pendingLineSelect set until here without
+      // promoting — do not overwrite an intentional native text selection.
+      if (this.pendingLineSelect && !this.isSelecting) {
+        const idx = this.pendingLineSelect.startIdx;
+        const dy = Math.abs(e.clientY - this.pendingLineSelect.startY);
+        const native = window.getSelection();
+        const hasNative = !!(native && !native.isCollapsed && (native.toString()?.length ?? 0) > 0);
+        // Click without meaningful native selection → select the line.
+        if (!hasNative && dy < Math.max(8, this.lineHeight * 0.45)) {
+          this.selectionAnchor = idx;
+          this.selectionStart = idx;
+          this.selectionEnd = idx;
+          this.applySelectionStyle();
+        }
+      }
+      this.pendingLineSelect = null;
       this.isSelecting = false;
     });
   }

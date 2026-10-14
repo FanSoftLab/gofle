@@ -41,7 +41,7 @@ func remotePathDisplay(proto, host string, port int, path string) string {
 
 // resolveFTPCertStore returns the FTPS certificate trust store path to use for a
 // connection: cfg.KnownHostsPath when set, otherwise the same default location
-// pkg/ftp uses (~/.config/GoFLE/ftp_certs, or the temp dir if UserConfigDir is
+// pkg/ftp uses (~/.config/gofle/ftp_certs, or the temp dir if UserConfigDir is
 // unavailable). It is mirrored here so AckFTPCert can write to the exact path
 // the dial pinned against, without reaching into pkg/ftp internals.
 func resolveFTPCertStore(cfg remote.Config) string {
@@ -50,10 +50,10 @@ func resolveFTPCertStore(cfg remote.Config) string {
 	}
 
 	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "GoFLE", "ftp_certs")
+		return filepath.Join(d, config.AppDirName, "ftp_certs")
 	}
 
-	return filepath.Join(os.TempDir(), "GoFLE", "ftp_certs")
+	return filepath.Join(os.TempDir(), config.AppDirName, "ftp_certs")
 }
 
 // OpenRemoteFile streams a remote log (ssh or ftp) into a local index and

@@ -217,7 +217,7 @@ each implement them. A URL of either scheme opens identically in the GUI
 
 Streams the remote file to a local temp file and tails it live. Host keys are
 verified against the OpenSSH `known_hosts` file
-(`~/.config/GoFLE/known_hosts`). An unknown key is shown (host + SHA256
+(`~/.config/gofle/known_hosts`). An unknown key is shown (host + SHA256
 fingerprint) and must be confirmed before it is persisted; a key that changes
 after being trusted is rejected as a possible MITM. See
 [Usage Examples](#3-tail-a-remote-log-over-ssh).
@@ -239,7 +239,7 @@ bytes every 30 s (`streamProbeInterval`); the indexer treats the temp file like
 any local file.
 
 **Certificate trust.** The server's FTPS certificate is pinned against a local
-trust store at `~/.config/GoFLE/ftp_certs` (one `host:port <sha256-fingerprint>`
+trust store at `~/.config/gofle/ftp_certs` (one `host:port <sha256-fingerprint>`
 line per host). On first contact an unknown certificate surfaces as a
 `CertUnknownError`: the GUI/CLI shows the host and fingerprint and asks you to
 confirm; on acceptance the line is written via `ftp.WriteCertTrust` and the
@@ -281,7 +281,7 @@ them through the generated `wailsjs` bridge and renders the results.
         │                   │  recent, tabs) │                           │               │
         │                   └────────────────┘                           │               │
         │                         │                                     │               │
-        │                   ~/.config/GoFLE/*                        │               │
+        │                   ~/.config/gofle/*                        │               │
         │                                                              local temp file    │
         └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -755,9 +755,9 @@ Settings live in the OS user config directory under `GoFLE/`:
 
 | Platform | Path |
 | --- | --- |
-| Linux | `~/.config/GoFLE/` |
-| macOS | `~/Library/Application Support/GoFLE/` |
-| Windows | `%APPDATA%\GoFLE\` |
+| Linux | `~/.config/gofle/` |
+| macOS | `~/Library/Application Support/gofle/` |
+| Windows | `%APPDATA%\gofle\` |
 
 Files written there:
 
@@ -789,7 +789,7 @@ Available settings (via the Settings dialog or `App.SaveSettings`):
   (`SecretKey`) generated once and stored in `settings.json`. The key never leaves the
   machine. Decryption happens only to re-open a "Recent" SSH entry for the same user.
 - **SSH host key verification.** Server host keys are verified against an OpenSSH
-  `known_hosts` file (`~/.config/GoFLE/known_hosts`). On first connect to an unknown
+  `known_hosts` file (`~/.config/gofle/known_hosts`). On first connect to an unknown
   host, the app shows the SHA256 fingerprint and asks for explicit confirmation before
   persisting it; a key that changes after being trusted is treated as a potential MITM
   and rejected.

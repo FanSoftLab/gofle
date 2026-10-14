@@ -480,7 +480,7 @@ func TestLoadSavedSessionMigratesLegacyTabs(t *testing.T) {
 }
 
 func TestLoadConfigFirstRun(t *testing.T) {
-	// LoadConfig resolves os.UserConfigDir()/GoFLE. Without this redirect the
+	// LoadConfig resolves os.UserConfigDir()/gofle. Without this redirect the
 	// test reads the developer's real settings.json and fails on any machine
 	// whose theme/language differ from the defaults.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

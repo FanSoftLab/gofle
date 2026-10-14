@@ -266,24 +266,44 @@ type secretKeyData struct {
 	Salt string `json:"salt"` // hex-encoded 16-byte salt for Argon2id
 }
 
+// AppDirName is the single, architecture-agnostic directory name used under
+// the OS user config/cache roots (e.g. ~/.config/gofle). Prefer lowercase so
+// the path matches the CLI binary name and stays consistent across platforms.
+const AppDirName = "gofle"
+
+// legacyAppDirName is the pre-rename config folder. DefaultDir migrates it
+// once when the new path does not yet exist.
+const legacyAppDirName = "GoFLE"
+
 // DefaultDir returns the configuration directory used by LoadConfig
-// (<os.UserConfigDir>/GoFLE), falling back to the current directory when the
+// (<os.UserConfigDir>/gofle), falling back to the current directory when the
 // user config dir cannot be determined. It is exported so both binaries can
 // place their log file beside the config before LoadConfig runs.
 //
-// Returns the path to the GoFLE configuration directory.
+// On first run after the rename, an existing legacy <UserConfigDir>/GoFLE
+// directory is renamed to gofle so settings, known_hosts and secrets are kept.
 //
 // Example:
 //
 //	fmt.Println(config.DefaultDir())
-//	// Output: /home/user/.config/GoFLE
+//	// Output: /home/user/.config/gofle
 func DefaultDir() string {
 	userConfig, err := os.UserConfigDir()
 	if err != nil {
 		return "."
 	}
 
-	return filepath.Join(userConfig, "GoFLE")
+	dir := filepath.Join(userConfig, AppDirName)
+	legacy := filepath.Join(userConfig, legacyAppDirName)
+	if _, err := os.Stat(dir); err != nil {
+		if _, legErr := os.Stat(legacy); legErr == nil {
+			if renErr := os.Rename(legacy, dir); renErr != nil {
+				// Fall back to the legacy path if rename fails (e.g. cross-device).
+				return legacy
+			}
+		}
+	}
+	return dir
 }
 
 // LoadConfig loads (or initializes) the application configuration. A random

@@ -83,7 +83,7 @@ type Config struct {
 	KeyPassphrase  string `json:"key_passphrase,omitempty"`
 	RemoteFilePath string `json:"remote_file_path"`
 	// KnownHostsPath points at the OpenSSH known_hosts file used to verify the
-	// server's host key. Defaults to ~/.config/GoFLE/known_hosts when empty.
+	// server's host key. Defaults to ~/.config/gofle/known_hosts when empty.
 	KnownHostsPath string `json:"known_hosts_path,omitempty"`
 	// Progress, when set, receives open-stage updates: ("connecting",0,0)
 	// before the dial and throttled ("downloading", doneBytes, totalBytes)

@@ -24,7 +24,7 @@ var presetsImportCmd = &cobra.Command{
 
   [{"name":"errors","filter":{"exclude_patterns":["debug"],"nearby_query":"timeout",...}}]
 
-Presets are merged into ~/.config/GoFLE/search_presets.json (same store as the
+Presets are merged into ~/.config/gofle/search_presets.json (same store as the
 desktop app and the in-viewer P key). Existing names are replaced.`,
 	Args: UsageArgs(cobra.ExactArgs(1)),
 	RunE: runPresetsImport,

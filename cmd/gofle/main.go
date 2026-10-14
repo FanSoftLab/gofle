@@ -68,7 +68,7 @@ func rootHelpLong(color bool) string {
 	if color {
 		title = ansiTitle + title + ansiReset
 	}
-	note := "  Same backend as the desktop app. Config is shared (~/.config/GoFLE/)."
+	note := "  Same backend as the desktop app. Config is shared (~/.config/gofle/)."
 	if color {
 		note = ansiMuted + note + ansiReset
 	}

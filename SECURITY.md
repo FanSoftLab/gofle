@@ -44,14 +44,14 @@ local user is trusted. Key security measures include:
 |------|----------------|
 | **SSH credentials** | Encrypted at rest with AES-GCM (256-bit key, random per-install) |
 | **SSH host keys** | Verified against OpenSSH `known_hosts`; TOFU on first connect with fingerprint confirmation |
-| **FTPS certificates** | Pinned in `~/.config/GoFLE/ftp_certs`; unknown certs require explicit trust |
+| **FTPS certificates** | Pinned in `~/.config/gofle/ftp_certs`; unknown certs require explicit trust |
 | **Temp files** | Remote logs streamed to `os.CreateTemp()` with `GoFLE-ssh-*.log` prefix; auto-deleted on tab close |
 | **No telemetry** | Zero network calls except explicit SSH/FTP connections initiated by user |
 | **No auto-update** | No background update checks or binary downloads |
 
 ## Known Limitations
 
-- **Local user trust model**: Anyone with access to your user account can read the config directory (`~/.config/GoFLE/`) and decrypt stored SSH credentials.
+- **Local user trust model**: Anyone with access to your user account can read the config directory (`~/.config/gofle/`) and decrypt stored SSH credentials.
 - **No sandboxing**: The app runs with your user privileges; a compromised log file (e.g., malicious escape sequences) could theoretically exploit terminal parsing bugs in the frontend. We mitigate this by sanitizing output and using a webview renderer.
 - **WebView dependencies**: Linux uses WebKitGTK; Windows uses WebView2. Keep your OS updated for WebView security patches.
 
@@ -59,7 +59,7 @@ local user is trusted. Key security measures include:
 
 Users can enhance security by:
 
-- Setting restrictive permissions on `~/.config/GoFLE/` (`chmod 700`)
+- Setting restrictive permissions on `~/.config/gofle/` (`chmod 700`)
 - Using SSH key auth instead of passwords
 - Regularly reviewing `known_hosts` and `ftp_certs` for unexpected entries
 - Running the app under a dedicated low-privilege user if processing untrusted logs

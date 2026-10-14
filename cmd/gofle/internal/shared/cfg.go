@@ -12,7 +12,7 @@ import (
 var appConfig *config.AppConfig
 
 // LoadCLIConfig loads the shared GoFLE application configuration (the same
-// ~/.config/GoFLE store the desktop app uses) and caches it for later access.
+// ~/.config/gofle store the desktop app uses) and caches it for later access.
 func LoadCLIConfig() (*config.AppConfig, error) {
 	c, err := config.LoadConfig()
 	if err != nil {
