@@ -35,7 +35,13 @@ export class ContextMenu {
         setLabel('ctx-filter-copy', lineKey);
     }
 
-    private selectionCount(range: { start: number; end: number } | null): number {
+    private selectionCount(
+        range: { start: number; end: number } | null,
+        scroller?: { getSelectedIndices?: () => number[] },
+    ): number {
+        // Prefer exact multi-select size (Ctrl+click can leave gaps).
+        const idxs = scroller?.getSelectedIndices?.();
+        if (idxs && idxs.length > 0) return idxs.length;
         if (!range) return 0;
         return Math.max(0, range.end - range.start + 1);
     }
@@ -69,7 +75,7 @@ export class ContextMenu {
                     (this as any)._selRange = null;
                     (this as any)._selScroller = null;
                 }
-                this.updateCopyLabels(this.selectionCount((this as any)._selRange));
+                this.updateCopyLabels(this.selectionCount((this as any)._selRange, (this as any)._selScroller));
                 ctxMenuMain.style.left = `${e.clientX}px`;
                 ctxMenuMain.style.top = `${e.clientY}px`;
                 ctxMenuMain.classList.remove('hidden');
@@ -102,7 +108,7 @@ export class ContextMenu {
                     (this as any)._selRange = null;
                     (this as any)._selScroller = null;
                 }
-                this.updateCopyLabels(this.selectionCount((this as any)._selRange));
+                this.updateCopyLabels(this.selectionCount((this as any)._selRange, (this as any)._selScroller));
                 ctxMenuFilter.style.left = `${e.clientX}px`;
                 ctxMenuFilter.style.top = `${e.clientY}px`;
                 ctxMenuFilter.classList.remove('hidden');
@@ -133,7 +139,7 @@ export class ContextMenu {
         document.getElementById('ctx-main-copy')?.addEventListener('click', async () => {
             const scroller = ((this as any)._selScroller as typeof mainScroller) || mainScroller;
             const range = (this as any)._selRange as { start: number; end: number } | null;
-            const count = this.selectionCount(range);
+            const count = this.selectionCount(range, scroller);
             const label = count > 1 ? t('ctx_copy_line_plural') : t('ctx_copy_line');
             if (range) {
                 const ok = await scroller.copySelection();
@@ -153,7 +159,7 @@ export class ContextMenu {
         document.getElementById('ctx-main-copy-numbered')?.addEventListener('click', async () => {
             const scroller = ((this as any)._selScroller as typeof mainScroller) || mainScroller;
             const range = (this as any)._selRange as { start: number; end: number } | null;
-            const count = this.selectionCount(range);
+            const count = this.selectionCount(range, scroller);
             const label = count > 1 ? t('ctx_copy_numbered_plural') : t('ctx_copy_numbered');
             if (range) {
                 // Ensure scroller selection matches the range captured at menu open.
@@ -198,7 +204,7 @@ export class ContextMenu {
         document.getElementById('ctx-filter-copy')?.addEventListener('click', async () => {
             const scroller = ((this as any)._selScroller as typeof filterScroller) || filterScroller;
             const range = (this as any)._selRange as { start: number; end: number } | null;
-            const count = this.selectionCount(range);
+            const count = this.selectionCount(range, scroller);
             const label = count > 1 ? t('ctx_copy_line_plural') : t('ctx_copy_line');
             if (range) {
                 const ok = await scroller.copySelection();

@@ -61,6 +61,12 @@ export class VirtualScroller {
   private selectionEnd: number | null = null;
   private isSelecting = false;
   private selectionAnchor: number | null = null;
+  /** Non-contiguous selection (Ctrl/Cmd+click/drag). When non-empty, takes priority over the range. */
+  private selectedLines = new Set<number>();
+  /** Ctrl/Cmd drag: base set at mousedown + range being added on top. */
+  private ctrlAddBase: Set<number> | null = null;
+  private ctrlAddStart: number | null = null;
+  private ctrlAddMoved = false;
   /** Pending plain mousedown on text — promote to line-range once the pointer leaves the start row. */
   private pendingLineSelect: { startIdx: number; startY: number } | null = null;
 
@@ -768,41 +774,137 @@ export class VirtualScroller {
     }
   }
 
-  public getSelectedRange(): { start: number; end: number } | null {
-    if (this.selectionStart === null || this.selectionEnd === null) return null;
+  /** Sorted logical indices currently selected (multi-select or contiguous range). */
+  public getSelectedIndices(): number[] {
+    if (this.selectedLines.size > 0) {
+      return Array.from(this.selectedLines).sort((a, b) => a - b);
+    }
+    if (this.selectionStart === null || this.selectionEnd === null) return [];
     const start = Math.min(this.selectionStart, this.selectionEnd);
     const end = Math.max(this.selectionStart, this.selectionEnd);
-    return { start, end };
+    const out: number[] = [];
+    for (let i = start; i <= end; i++) out.push(i);
+    return out;
+  }
+
+  public getSelectedRange(): { start: number; end: number } | null {
+    const idxs = this.getSelectedIndices();
+    if (idxs.length === 0) return null;
+    return { start: idxs[0], end: idxs[idxs.length - 1] };
   }
 
   public clearSelection() {
-    if (this.selectionStart !== null || this.selectionEnd !== null) {
-      this.selectionStart = null;
-      this.selectionEnd = null;
+    const had =
+      this.selectedLines.size > 0 ||
+      this.selectionStart !== null ||
+      this.selectionEnd !== null;
+    this.selectedLines.clear();
+    this.selectionStart = null;
+    this.selectionEnd = null;
+    this.selectionAnchor = null;
+    if (had) this.applySelectionStyle();
+  }
+
+  /** Move a contiguous range into the multi-select set (clears range fields). */
+  private promoteRangeToSet() {
+    if (this.selectionStart === null || this.selectionEnd === null) return;
+    const lo = Math.min(this.selectionStart, this.selectionEnd);
+    const hi = Math.max(this.selectionStart, this.selectionEnd);
+    for (let i = lo; i <= hi; i++) this.selectedLines.add(i);
+    this.selectionStart = null;
+    this.selectionEnd = null;
+  }
+
+  /** Replace multi-select with a contiguous range (also used by context menu). */
+  private setRangeSelection(start: number, end: number) {
+    this.selectedLines.clear();
+    this.ctrlAddBase = null;
+    this.ctrlAddStart = null;
+    this.ctrlAddMoved = false;
+    const lo = Math.max(0, Math.min(start, this.totalLines - 1));
+    const hi = Math.max(0, Math.min(end, this.totalLines - 1));
+    this.selectionStart = lo;
+    this.selectionEnd = hi;
+    this.selectionAnchor = lo;
+  }
+
+  /** Snapshot current selection into a Set (range and/or multi). */
+  private snapshotSelection(): Set<number> {
+    const snap = new Set<number>(this.selectedLines);
+    if (this.selectionStart !== null && this.selectionEnd !== null) {
+      const lo = Math.min(this.selectionStart, this.selectionEnd);
+      const hi = Math.max(this.selectionStart, this.selectionEnd);
+      for (let i = lo; i <= hi; i++) snap.add(i);
+    }
+    return snap;
+  }
+
+  /** Add a contiguous range onto a base set → becomes the active multi-select. */
+  private applyCtrlAddRange(base: Set<number>, start: number, end: number) {
+    const lo = Math.max(0, Math.min(start, end, this.totalLines - 1));
+    const hi = Math.min(
+      this.totalLines - 1,
+      Math.max(0, start, end),
+    );
+    const next = new Set<number>(base);
+    for (let i = lo; i <= hi; i++) next.add(i);
+    this.selectedLines = next;
+    this.selectionStart = null;
+    this.selectionEnd = null;
+    this.selectionAnchor = end;
+  }
+
+  /** Toggle a single line in the multi-select set (Ctrl+click without drag). */
+  private toggleLineInSelection(idx: number) {
+    this.promoteRangeToSet();
+    if (this.selectedLines.has(idx)) {
+      this.selectedLines.delete(idx);
+    } else {
+      this.selectedLines.add(idx);
+    }
+    this.selectionAnchor = idx;
+    if (this.selectedLines.size === 0) {
       this.selectionAnchor = null;
-      this.applySelectionStyle();
     }
   }
 
-  private async selectionLineTexts(): Promise<{ texts: string[]; start: number } | null> {
-    const range = this.getSelectedRange();
-    if (!range) return null;
-    const count = range.end - range.start + 1;
-    const lines = await this.fetchCallback(range.start, count);
-    const parts: string[] = new Array(count).fill('');
-    for (let i = 0; i < lines.length && i < count; i++) {
-      parts[i] = lines[i]?.content ?? '';
+  private async selectionLineTexts(): Promise<{ texts: string[]; indices: number[] } | null> {
+    const indices = this.getSelectedIndices();
+    if (indices.length === 0) return null;
+
+    // Fetch contiguous spans to minimize round-trips when the set is sparse.
+    const parts = new Map<number, string>();
+    let i = 0;
+    while (i < indices.length) {
+      const spanStart = indices[i];
+      let spanEnd = spanStart;
+      while (i + 1 < indices.length && indices[i + 1] === spanEnd + 1) {
+        i++;
+        spanEnd = indices[i];
+      }
+      const count = spanEnd - spanStart + 1;
+      const lines = await this.fetchCallback(spanStart, count);
+      for (let j = 0; j < lines.length && j < count; j++) {
+        parts.set(spanStart + j, lines[j]?.content ?? '');
+      }
+      i++;
     }
-    for (let i = range.start; i <= range.end; i++) {
-      const node = this.renderedNodes.get(i);
+
+    // Prefer live DOM text for visible rows (already highlighted/sanitized).
+    for (const idx of indices) {
+      const node = this.renderedNodes.get(idx);
       if (!node) continue;
       const textEl = node.querySelector('.log-text') as HTMLElement | null;
       const domText = textEl?.textContent;
       if (domText != null && domText.length > 0) {
-        parts[i - range.start] = domText;
+        parts.set(idx, domText);
       }
     }
-    return { texts: parts, start: range.start };
+
+    return {
+      indices,
+      texts: indices.map((idx) => parts.get(idx) ?? ''),
+    };
   }
 
   public async copySelection(): Promise<boolean> {
@@ -824,7 +926,7 @@ export class VirtualScroller {
       const data = await this.selectionLineTexts();
       if (!data) return false;
       const text = data.texts
-        .map((line, i) => `${data.start + i + 1}: ${line}`)
+        .map((line, i) => `${data.indices[i] + 1}: ${line}`)
         .join('\n');
       if (!text) return false;
       await navigator.clipboard.writeText(text);
@@ -836,25 +938,26 @@ export class VirtualScroller {
   }
 
   public setSelection(start: number, end: number) {
-    this.selectionStart = Math.max(0, Math.min(start, this.totalLines - 1));
-    this.selectionEnd = Math.max(0, Math.min(end, this.totalLines - 1));
-    this.selectionAnchor = this.selectionStart;
+    this.setRangeSelection(start, end);
     this.applySelectionStyle();
   }
 
   public extendSelection(end: number) {
-    if (this.selectionAnchor === null) {
+    if (this.selectionAnchor === null && this.selectedLines.size === 0) {
       this.setSelection(end, end);
       return;
     }
-    this.selectionEnd = Math.max(0, Math.min(end, this.totalLines - 1));
+    // Contiguous extend from anchor; drop multi-set in favour of a range.
+    const anchor = this.selectionAnchor ?? end;
+    this.setRangeSelection(anchor, end);
+    this.selectionAnchor = anchor;
     this.applySelectionStyle();
   }
 
   private applySelectionStyle() {
-    const range = this.getSelectedRange();
+    const selected = new Set(this.getSelectedIndices());
     for (const [idx, node] of this.renderedNodes) {
-      if (range && idx >= range.start && idx <= range.end) {
+      if (selected.has(idx)) {
         node.classList.add('selected');
       } else {
         node.classList.remove('selected');
@@ -896,32 +999,36 @@ export class VirtualScroller {
 
       this.viewport.focus();
 
-      // Ctrl/Cmd+click: select only the clicked line (new anchor).
+      // Ctrl/Cmd+click or drag: add line/range to the existing selection.
       if (withCtrl && !withShift) {
         e.preventDefault();
         this.pendingLineSelect = null;
-        this.isSelecting = false;
+        this.ctrlAddBase = this.snapshotSelection();
+        this.ctrlAddStart = idx;
+        this.ctrlAddMoved = false;
+        this.isSelecting = true; // drag will extend the added range
         this.selectionAnchor = idx;
-        this.selectionStart = idx;
-        this.selectionEnd = idx;
+        // Preview: add the start line immediately.
+        this.applyCtrlAddRange(this.ctrlAddBase, idx, idx);
         this.applySelectionStyle();
         return;
       }
 
-      // Shift+click: extend from existing anchor, or from the highlighted line.
+      // Shift+click: extend contiguous range from anchor / highlighted line.
       if (withShift) {
         e.preventDefault();
         this.pendingLineSelect = null;
+        this.ctrlAddBase = null;
+        this.ctrlAddStart = null;
         this.isSelecting = false;
-        if (this.selectionAnchor === null) {
-          const anchor =
-            this.highlightedLineIndex !== null ? this.highlightedLineIndex : idx;
-          this.selectionAnchor = anchor;
-          this.selectionStart = Math.min(anchor, idx);
-          this.selectionEnd = Math.max(anchor, idx);
-        } else {
-          this.selectionEnd = idx;
-        }
+        const anchor =
+          this.selectionAnchor !== null
+            ? this.selectionAnchor
+            : this.highlightedLineIndex !== null
+              ? this.highlightedLineIndex
+              : idx;
+        this.setRangeSelection(anchor, idx);
+        this.selectionAnchor = anchor;
         this.applySelectionStyle();
         return;
       }
@@ -930,10 +1037,10 @@ export class VirtualScroller {
       if (inGutter) {
         e.preventDefault();
         this.pendingLineSelect = null;
+        this.ctrlAddBase = null;
+        this.ctrlAddStart = null;
         this.isSelecting = true;
-        this.selectionAnchor = idx;
-        this.selectionStart = idx;
-        this.selectionEnd = idx;
+        this.setRangeSelection(idx, idx);
         this.applySelectionStyle();
         return;
       }
@@ -941,6 +1048,8 @@ export class VirtualScroller {
       // Plain mousedown on text: keep native character selection for a
       // single-row drag; promote to line-range selection once the pointer
       // moves onto another row (or a clear vertical drag).
+      this.ctrlAddBase = null;
+      this.ctrlAddStart = null;
       this.pendingLineSelect = { startIdx: idx, startY: e.clientY };
       this.isSelecting = false;
     });
@@ -960,9 +1069,7 @@ export class VirtualScroller {
           const native = window.getSelection();
           if (native && !native.isCollapsed) native.removeAllRanges();
           this.isSelecting = true;
-          this.selectionAnchor = startIdx;
-          this.selectionStart = startIdx;
-          this.selectionEnd = idx ?? startIdx;
+          this.setRangeSelection(startIdx, idx ?? startIdx);
           this.applySelectionStyle();
         }
         return;
@@ -971,11 +1078,40 @@ export class VirtualScroller {
       if (!this.isSelecting) return;
       const idx = this.indexFromPoint(e.clientY);
       if (idx === null) return;
-      this.selectionEnd = idx;
+
+      // Ctrl/Cmd drag: union base selection with the drag range.
+      if (this.ctrlAddBase !== null && this.ctrlAddStart !== null) {
+        this.ctrlAddMoved = true;
+        this.applyCtrlAddRange(this.ctrlAddBase, this.ctrlAddStart, idx);
+        this.applySelectionStyle();
+        return;
+      }
+
+      // Plain drag-extend: contiguous range (replaces multi-set).
+      const anchor = this.selectionAnchor ?? idx;
+      this.setRangeSelection(anchor, idx);
+      this.selectionAnchor = anchor;
       this.applySelectionStyle();
     });
 
     window.addEventListener('mouseup', (e) => {
+      // Ctrl/Cmd click without drag: toggle the line on the base set.
+      if (this.ctrlAddBase !== null && this.ctrlAddStart !== null && !this.ctrlAddMoved) {
+        const idx = this.ctrlAddStart;
+        const base = this.ctrlAddBase;
+        this.selectedLines = new Set(base);
+        this.selectionStart = null;
+        this.selectionEnd = null;
+        if (this.selectedLines.has(idx)) {
+          this.selectedLines.delete(idx);
+        } else {
+          this.selectedLines.add(idx);
+        }
+        this.selectionAnchor = idx;
+        if (this.selectedLines.size === 0) this.selectionAnchor = null;
+        this.applySelectionStyle();
+      }
+
       // Plain click (no drag) on a log line → select that one line so Ctrl+C
       // and the context menu have a range. Horizontal char-selection drag
       // that stayed on one row leaves pendingLineSelect set until here without
@@ -987,13 +1123,14 @@ export class VirtualScroller {
         const hasNative = !!(native && !native.isCollapsed && (native.toString()?.length ?? 0) > 0);
         // Click without meaningful native selection → select the line.
         if (!hasNative && dy < Math.max(8, this.lineHeight * 0.45)) {
-          this.selectionAnchor = idx;
-          this.selectionStart = idx;
-          this.selectionEnd = idx;
+          this.setRangeSelection(idx, idx);
           this.applySelectionStyle();
         }
       }
       this.pendingLineSelect = null;
+      this.ctrlAddBase = null;
+      this.ctrlAddStart = null;
+      this.ctrlAddMoved = false;
       this.isSelecting = false;
     });
   }

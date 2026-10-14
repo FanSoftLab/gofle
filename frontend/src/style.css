@@ -2606,12 +2606,13 @@ body.theme-light .adv-datetime-row input[type="time"]::-webkit-calendar-picker-i
     user-select: none !important;
     -webkit-user-select: none !important;
 }
-/* Section headers — accent-aligned, high contrast for scanning */
+/* Section headers — larger than body, high contrast */
 .help-section-title {
     margin: 0 0 14px 0;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--log-info, #58a6ff);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--text-color);
     user-select: text;
     -webkit-user-select: text;
 }
@@ -2623,20 +2624,24 @@ body.theme-light .adv-datetime-row input[type="time"]::-webkit-calendar-picker-i
     -webkit-user-select: text;
 }
 .help-item:last-child { border-bottom: none; margin-bottom: 0; }
-/* Item titles — primary accent */
+/* Item subtitles — at least body size; bright color readable on dark & light */
 .help-item-title {
     margin: 0 0 8px 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    color: var(--accent-color);
+    line-height: 1.4;
+    color: var(--log-info, #58a6ff);
     user-select: text;
     -webkit-user-select: text;
+}
+body.theme-light .help-item-title {
+    color: #005a9e;
 }
 ul.help-body {
     margin: 0;
     padding-left: 1.25em;
-    font-size: 12.5px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.55;
     color: var(--text-color);
     user-select: text;
     -webkit-user-select: text;
@@ -2653,7 +2658,7 @@ ul.help-body li { margin-bottom: 5px; }
     -webkit-user-select: text;
 }
 .help-example-label {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--log-notice, #3fb950);
     margin-bottom: 6px;
     text-transform: uppercase;
@@ -2665,10 +2670,10 @@ ul.help-body li { margin-bottom: 5px; }
 .help-example pre {
     margin: 0;
     font-family: var(--log-font, monospace);
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 13px;
+    line-height: 1.45;
     white-space: pre-wrap;
-    color: var(--log-warn, #d29922);
+    color: var(--text-color);
     user-select: text;
     -webkit-user-select: text;
 }
@@ -2713,6 +2718,9 @@ ul.help-body li { margin-bottom: 5px; }
 }
 .help-about-name {
     margin-bottom: 8px !important;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-color);
 }
 .help-about-line {
     margin: 4px 0;
@@ -2726,8 +2734,11 @@ ul.help-body li { margin-bottom: 5px; }
     margin-right: 6px;
 }
 .help-about-value {
-    color: var(--accent-color);
+    color: var(--log-info, #58a6ff);
     font-weight: 600;
+}
+body.theme-light .help-about-value {
+    color: #005a9e;
 }
 .help-about-desc {
     margin: 0;
@@ -2741,7 +2752,7 @@ ul.help-body li { margin-bottom: 5px; }
 /* Licenses tab */
 .help-licenses-note {
     margin: 0 0 12px 0;
-    font-size: 12.5px;
+    font-size: 13px;
     color: var(--text-muted);
     user-select: text;
     -webkit-user-select: text;
@@ -2749,15 +2760,16 @@ ul.help-body li { margin-bottom: 5px; }
 .help-licenses-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12.5px;
+    font-size: 13px;
     user-select: text;
     -webkit-user-select: text;
 }
 .help-licenses-table th {
     text-align: left;
     padding: 6px 10px 6px 0;
-    color: var(--log-info, #58a6ff);
-    font-weight: 600;
+    color: var(--text-color);
+    font-weight: 700;
+    font-size: 13px;
     border-bottom: 1px solid var(--border-color);
 }
 .help-licenses-table td {
@@ -2768,13 +2780,16 @@ ul.help-body li { margin-bottom: 5px; }
 }
 .help-lic-name {
     font-weight: 600;
-    color: var(--accent-color);
+    color: var(--text-color);
     white-space: nowrap;
 }
 .help-lic-url a {
     color: var(--log-info, #58a6ff);
     text-decoration: none;
     word-break: break-all;
+}
+body.theme-light .help-lic-url a {
+    color: #005a9e;
 }
 .help-lic-url a:hover {
     text-decoration: underline;
