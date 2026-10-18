@@ -19,6 +19,15 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// maxConcurrentSearches bounds how many user-initiated searches can run at once
+// across all tabs, so multiple large-file searches don't overwhelm CPU.
+const maxConcurrentSearches = 2
+
+// searchSem is a channel-based semaphore limiting concurrent SearchLines calls.
+// Acquiring it blocks (or waits on the app context) when too many searches are
+// already in flight; releasing it frees a slot for the next search.
+var searchSem = make(chan struct{}, maxConcurrentSearches)
+
 // OpenFile opens a local log file and registers a tab. Opening an already-open
 // path focuses the existing tab instead of duplicating it. Returns file
 // statistics for the frontend.
@@ -345,6 +354,20 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 
 	if !exists {
 		return 0, nil
+	}
+
+	// Acquire the global search semaphore so multiple large-file searches
+	// don't overwhelm CPU. Wait on the app context so a shutdown can abort
+	// a queued search instead of blocking the UI thread.
+	sCtx := a.ctx
+	if sCtx == nil {
+		sCtx = context.Background()
+	}
+	select {
+	case searchSem <- struct{}{}:
+		defer func() { <-searchSem }()
+	case <-sCtx.Done():
+		return 0, fmt.Errorf("search cancelled while waiting for semaphore: %w", sCtx.Err())
 	}
 
 	// Demote regex → substring when the pattern has no metacharacters.
@@ -764,7 +787,7 @@ func (a *App) ValidateRegex(pattern string) (RegexValidationResult, error) {
 		return RegexValidationResult{
 			IsValid:      false,
 			ErrorMessage: err.Error(),
-		}, err
+		}, nil
 	}
 
 	return RegexValidationResult{IsValid: true}, nil

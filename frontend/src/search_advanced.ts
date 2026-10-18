@@ -35,7 +35,7 @@ const defaultState = (): AdvFilterState => {
   };
 };
 
-function splitStoredTime(v: string): { date: string; hh: string; mm: string } {
+export function splitStoredTime(v: string): { date: string; hh: string; mm: string } {
   if (!v) return { date: '', hh: '', mm: '' };
   const m = v.trim().match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/);
   if (!m) return { date: '', hh: '', mm: '' };
@@ -43,7 +43,7 @@ function splitStoredTime(v: string): { date: string; hh: string; mm: string } {
 }
 
 /** Date required; time optional. empty time → from 00:00:00 / to 23:59:59 */
-function joinBackendTime(date: string, hh: string, mm: string, endOfDay: boolean): string {
+export function joinBackendTime(date: string, hh: string, mm: string, endOfDay: boolean): string {
   date = (date || '').trim();
   if (!date) return '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
@@ -483,7 +483,7 @@ export class AdvancedSearchBar {
   }
 }
 
-function escapeAttr(s: string): string {
+export function escapeAttr(s: string): string {
   return String(s || '')
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')

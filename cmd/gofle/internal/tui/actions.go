@@ -908,11 +908,18 @@ func (m *model) cycleViewMode() {
 
 // toggleSplitView is the direct split-view toggle ('s'). Unlike the mode cycle
 // it leaves the results-only filter untouched when switching split off.
+// Enabling split without any matches is refused — there would be nothing to show
+// in the results pane.
 func (m *model) toggleSplitView() {
 	if m.splitView {
 		m.splitView = false
 		m.splitFocus = 0
 		m.status = tr(*m, "mode_normal")
+
+		return
+	}
+	if len(m.matches) == 0 {
+		m.status = tr(*m, "no_matches_mode")
 
 		return
 	}
@@ -950,8 +957,8 @@ func (m *model) enableOnlyMatches() {
 
 // toggleOnlyMatches toggles the results-only filter view, translating the
 // current line position into a match index when switching into it.
-// Enabling without an active search is refused so the viewer does not end up
-// in a confusing "onlyMatches with zero matches" state.
+// Enabling without an active search degrades to the full log and reports it
+// via the status line instead of refusing.
 func (m *model) toggleOnlyMatches() {
 	if m.onlyMatches {
 		m.onlyMatches = false
@@ -960,7 +967,10 @@ func (m *model) toggleOnlyMatches() {
 		return
 	}
 	if len(m.matches) == 0 {
-		m.status = tr(*m, "no_matches_mode")
+		m.onlyMatches = true
+		m.matchCursor = 0
+		m.top = 0
+		m.status = tr(*m, "no_matches_hint")
 
 		return
 	}
@@ -1366,7 +1376,7 @@ func (m *model) copySelection() {
 		return
 	}
 
-	m.status = fmt.Sprintf("copied %d lines", len(collected))
+	m.status = fmt.Sprintf("Copied %d lines", len(collected))
 	m.selActive = false
 }
 

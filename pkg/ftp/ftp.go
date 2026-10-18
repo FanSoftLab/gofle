@@ -386,6 +386,9 @@ type Streamer struct {
 	probeInterval time.Duration
 	closeTimeout  time.Duration
 	stallTimeout  time.Duration
+	// failures counts consecutive supervisor probe/retrieve failures. It drives
+	// exponential backoff in pollSleep and is reset on any successful probe.
+	failures int
 	supDone       chan struct{}
 	// probeCh/probeRes implement a reusable, long-lived probe worker so repeated
 	// size probes (every probeInterval) do not allocate a fresh goroutine,
@@ -792,6 +795,9 @@ func (s *Streamer) startSupervisor() { //nolint:gocyclo // streamer lifecycle is
 			return s.client.FileSize(path)
 		})
 		if err != nil {
+			s.mu.Lock()
+			s.failures++
+			s.mu.Unlock()
 			slog.Warn("ftp: size probe failed; retrying", "remote", path, "err", err)
 
 			if !s.pollSleep() {
@@ -800,6 +806,11 @@ func (s *Streamer) startSupervisor() { //nolint:gocyclo // streamer lifecycle is
 
 			continue
 		}
+
+		// Successful probe: reset failure backoff.
+		s.mu.Lock()
+		s.failures = 0
+		s.mu.Unlock()
 
 		cur := s.offset
 		if sz == int64(cur) { //nolint:gosec // file offset fits in int64 for expected log sizes
@@ -837,6 +848,9 @@ func (s *Streamer) startSupervisor() { //nolint:gocyclo // streamer lifecycle is
 		}
 
 		if rerr != nil {
+			s.mu.Lock()
+			s.failures++
+			s.mu.Unlock()
 			slog.Warn("ftp: retrieve failed; retrying", "remote", path, "err", rerr)
 
 			if !s.pollSleep() {
@@ -845,6 +859,11 @@ func (s *Streamer) startSupervisor() { //nolint:gocyclo // streamer lifecycle is
 
 			continue
 		}
+
+		// Successful retrieve: reset failure backoff.
+		s.mu.Lock()
+		s.failures = 0
+		s.mu.Unlock()
 
 		func() {
 			s.mu.Lock()
@@ -932,9 +951,23 @@ func (s *Streamer) watchStall(startOffset uint64) func() {
 	return func() { close(done) }
 }
 
-// pollSleep waits probeInterval, or returns false if Close fired meanwhile.
+// pollSleep waits probeInterval (with exponential backoff after consecutive
+// failures), or returns false if Close fired meanwhile.
 func (s *Streamer) pollSleep() bool {
-	t := time.NewTimer(s.probeInterval)
+	s.mu.Lock()
+	failures := s.failures
+	s.mu.Unlock()
+
+	delay := streamProbeInterval
+	if failures > 0 {
+		// 30s * 2^(failures-1), capped at 5 minutes.
+		delay = streamProbeInterval * time.Duration(1<<(failures-1))
+		if delay > 5*time.Minute {
+			delay = 5 * time.Minute
+		}
+	}
+
+	t := time.NewTimer(delay)
 	defer t.Stop()
 
 	select {

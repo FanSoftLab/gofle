@@ -19,6 +19,51 @@ import (
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+// runSearchToCompletion presses Enter to start a search, executes the async
+// command returned by the key handler, and applies the searchDoneMsg result.
+// Use this instead of checking m.matches immediately after Enter, since the
+// search runs off the UI thread via startSearchCmd().
+//
+// The key handler wraps startSearchCmd() in an outer tea.Batch together with a
+// status-clear ticker (clearCmd) that blocks for 2.5s. startSearchCmd() itself
+// returns tea.Batch(searchCmd, tickCmd). So cmd() yields a nested BatchMsg:
+// BatchMsg([ func() BatchMsg([searchCmd, tickCmd]), func() statusClearMsg ]).
+// We recurse into nested BatchMsgs and return early on the first searchDoneMsg,
+// which avoids ever calling clearCmd (and its 2.5s block).
+func runSearchToCompletion(t *testing.T, m model) model {
+	t.Helper()
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nm.(model)
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	if msg == nil {
+		return m
+	}
+
+	var apply func(msg tea.Msg) bool
+	apply = func(msg tea.Msg) bool {
+		if bm, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range bm {
+				if apply(c()) {
+					return true
+				}
+			}
+			return false
+		}
+		if sdm, ok := msg.(searchDoneMsg); ok {
+			nm, _ := m.Update(sdm)
+			m = nm.(model)
+			return true
+		}
+		return false
+	}
+
+	apply(msg)
+	return m
+}
+
 // runeAtCol returns the rune whose display cell starts at column col (0-based) in s.
 func runeAtCol(s string, col int) rune {
 	c := 0
@@ -155,9 +200,8 @@ func TestModelSearchAndMatchNav(t *testing.T) {
 	}
 
 	// Enter runs the search.
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runSearchToCompletion(t, m)
 
-	m = nm.(model)
 	if m.searchMode {
 		t.Fatal("searchMode still enabled after enter")
 	}
@@ -204,7 +248,7 @@ func TestModelSplitView(t *testing.T) {
 
 	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	m = nm.(model)
+	m = runSearchToCompletion(t, m)
 	if len(m.matches) != 4 {
 		t.Fatalf("matches = %d, want 4", len(m.matches))
 	}
@@ -444,8 +488,7 @@ func searchAlphaModel(t *testing.T) model {
 		m = nm.(model)
 	}
 
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nm.(model)
+	m = runSearchToCompletion(t, m)
 
 	return m
 }
@@ -495,8 +538,8 @@ func TestModelSearchFoundCounter(t *testing.T) {
 		t.Fatalf("matches = %d, want 2", len(m.matches))
 	}
 
-	if !strings.Contains(m.status, "Found 2") {
-		t.Errorf("status = %q, want it to contain 'Found 2'", m.status)
+	if !strings.Contains(m.status, "found 2 matches") {
+		t.Errorf("status = %q, want it to contain 'found 2 matches'", m.status)
 	}
 }
 
@@ -554,7 +597,7 @@ func TestModelSearchOptionToggles(t *testing.T) {
 }
 
 // typeQueryAndRun types query into the focused search box one key at a time and
-// runs it with enter, returning the resulting model.
+// runs it with enter, returning the resulting model with search results applied.
 func typeQueryAndRun(t *testing.T, m model, query string) model {
 	t.Helper()
 
@@ -563,9 +606,9 @@ func typeQueryAndRun(t *testing.T, m model, query string) model {
 		m = nm.(model)
 	}
 
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = runSearchToCompletion(t, m)
 
-	return nm.(model)
+	return m
 }
 
 // assertMatchLines fails unless the model's match set is exactly want.
@@ -597,8 +640,8 @@ func TestModelOnlyMatchesFilterView(t *testing.T) {
 	statusLineIdx := -1
 
 	for i, l := range lines {
-		// Status bar uses "lines N" (space separator) after style refresh.
-		if strings.Contains(l, "lines ") {
+		// Status bar uses "lines N" in full mode, "results" in compact mode.
+		if strings.Contains(l, "lines ") || strings.Contains(l, "results") {
 			statusLineIdx = i
 			break
 		}
@@ -634,7 +677,7 @@ func TestModelOnlyMatchesFilterView(t *testing.T) {
 
 func TestModelOnlyMatchesNoSearch(t *testing.T) {
 	// With no active search, onlyMatches must degrade to the full log and show
-	// a "no active search" status instead of an empty viewer.
+	// a "no matches" status instead of an empty viewer.
 	m := newTestModel(t, []string{"a", "b", "c"})
 	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
@@ -643,8 +686,8 @@ func TestModelOnlyMatchesNoSearch(t *testing.T) {
 		t.Fatal("onlyMatches not enabled after 'r'")
 	}
 
-	if !strings.Contains(m.View(), "no active search") {
-		t.Errorf("expected 'no active search' status, got:\n%s", m.View())
+	if !strings.Contains(m.View(), "no matches") {
+		t.Errorf("expected 'no matches' status, got:\n%s", m.View())
 	}
 }
 
@@ -695,8 +738,8 @@ func TestModelDefaultFilterNoSearch(t *testing.T) {
 	m := newTestModel(t, []string{"a", "b", "c"})
 
 	m.onlyMatches = true
-	if !strings.Contains(m.View(), "no active search") {
-		t.Errorf("expected 'no active search' when filter view is on with no matches:\n%s", m.View())
+	if !strings.Contains(m.View(), "no matches") {
+		t.Errorf("expected 'no matches' when filter view is on with no matches:\n%s", m.View())
 	}
 }
 
@@ -780,7 +823,7 @@ func TestModelRecentViewShowsDetails(t *testing.T) {
 	m.recentMode = true
 
 	v := m.View()
-	if !strings.Contains(v, "last opened") {
+	if !strings.Contains(v, "last:") {
 		t.Errorf("recent view should show last-opened time:\n%s", v)
 	}
 
@@ -862,8 +905,7 @@ func TestModelSplitViewRendersAllRows(t *testing.T) {
 		m = nm.(model)
 	}
 
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nm.(model)
+	m = runSearchToCompletion(t, m)
 	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
 	m = nm.(model)
@@ -912,8 +954,7 @@ func TestModelSplitViewSyncScroll(t *testing.T) {
 		m = nm.(model)
 	}
 
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nm.(model)
+	m = runSearchToCompletion(t, m)
 	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
 	m = nm.(model)
@@ -991,12 +1032,13 @@ func TestSplitNoBleed(t *testing.T) {
 		m = nm.(model)
 	}
 
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nm.(model)
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = runSearchToCompletion(t, m)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ 's'}})
 	m = nm.(model)
 
-	leftW := (m.width-2)/2 - 1
+	// buildLayout: inner = max(termW - gapW - 2, 2); leftW = inner / 2;
+	// divider sits at display column leftW + 1 (after left pane + one space).
+	leftW := (m.width - 5) / 2 // gapW=3, minus 2 margins
 	divCol := leftW + 1
 	out := m.View()
 	bodyRows := 0

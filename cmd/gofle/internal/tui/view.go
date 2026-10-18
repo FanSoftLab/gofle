@@ -521,11 +521,35 @@ func (m model) logRows(width int) []string {
 		selOK:   selOK,
 	}
 
+	// Pad/truncate to m.height so logRows matches renderLogLines row-for-row
+	// (invariant M2: the split view consumes logRows directly, while renderLogLines
+	// joins and pads the same rows). Both must agree on the exact row count.
+	var rows []string
 	if m.onlyMatches && len(m.matches) > 0 && !m.splitView {
-		return m.matchOnlyRows(layout)
+		rows = m.matchOnlyRows(layout)
+	} else {
+		rows = m.fullLogRows(layout)
 	}
 
-	return m.fullLogRows(layout)
+	// Clip to width-2 (same as renderLogLines) so terminals don't soft-wrap,
+	// then pad/truncate to m.height.
+	clipW := width
+	if clipW > 2 {
+		clipW -= 2
+	}
+	for i, r := range rows {
+		if j := strings.IndexByte(r, '\n'); j >= 0 {
+			r = r[:j]
+		}
+		rows[i] = clipToWidth(r, clipW)
+	}
+	for len(rows) < m.height {
+		rows = append(rows, "")
+	}
+	if len(rows) > m.height && m.height > 0 {
+		rows = rows[:m.height]
+	}
+	return rows
 }
 
 // rowLayout carries the per-render geometry and selection bounds shared by the
@@ -1046,9 +1070,12 @@ slow:
 }
 
 // displayWidthNoANSI returns the display width of s after stripping ANSI.
-// Uses go-runewidth so CJK/emoji match terminal cell counts.
+// Uses displayWidth (which falls back to runeWidth for multi-byte content) so
+// CJK/emoji match terminal cell counts, and control characters (bare ESC,
+// unmatched OSC, etc.) that stripANSI leaves behind occupy one cell each —
+// matching displayWidth's fast-path behavior.
 func displayWidthNoANSI(s string) int {
-	return runewidth.StringWidth(stripANSI(s))
+	return displayWidth(stripANSI(s))
 }
 
 // ansiRe matches ANSI escape sequences (CSI/OSC): ESC [ … [@-~] or ESC ] … .

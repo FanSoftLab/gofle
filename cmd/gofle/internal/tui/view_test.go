@@ -107,9 +107,12 @@ func TestRenderRowBudget(t *testing.T) {
 }
 
 // renderedRows counts the terminal rows in a rendered body (each row is written
-// with a trailing newline).
+// with a trailing newline, except possibly the last).
 func renderedRows(s string) int {
-	return strings.Count(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return len(strings.Split(s, "\n"))
 }
 
 // TestRowRenderersMatchJoinedBodies pins the equivalence the split view relies on
@@ -164,15 +167,14 @@ func TestRowRenderersMatchJoinedBodies(t *testing.T) {
 	}
 }
 
-// splitTrailing splits a newline-terminated body into rows, dropping the empty
-// element the final newline produces.
+// splitTrailing splits a body into rows. joinRows never emits a trailing \n, so
+// there is no spurious trailing empty element to drop (unlike strings.Split on a
+// newline-terminated string). An empty body yields no rows.
 func splitTrailing(body string) []string {
-	rows := strings.Split(body, "\n")
-	if len(rows) > 0 && rows[len(rows)-1] == "" {
-		rows = rows[:len(rows)-1]
+	if body == "" {
+		return nil
 	}
-
-	return rows
+	return strings.Split(body, "\n")
 }
 
 // TestRenderSplitBodyPadsEveryRow guards the padding the split view does itself
