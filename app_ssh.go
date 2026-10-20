@@ -11,8 +11,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // sshBrowseMu serializes ListDir calls on the cached *ssh.Lister. ssh.Client
@@ -348,7 +346,7 @@ func (a *App) openSSHStreamOnce(sshCfg SSHConfig, sshPathDisplay string, sshSumm
 	// Progress bridge: pkg/ssh reports stages through this callback and the app
 	// forwards them to the frontend overlay as Wails events.
 	progress := func(stage string, done, total int64) {
-		runtime.EventsEmit(a.ctx, "ssh:progress", map[string]any{
+		a.emitEvent("ssh:progress", map[string]any{
 			"stage": stage,
 			"done":  done,
 			"total": total,

@@ -694,9 +694,9 @@ body.theme-light select option {
     width: max-content;
     min-width: 100%;
     overflow: visible;
-    /* layout only — `style` containment breaks native ::selection painting
-       across inner <span>/<mark> highlight tokens in Chromium/WebView. */
-    contain: layout;
+    /* Avoid CSS containment: it breaks native ::selection painting across
+       sibling rows and inside highlight <span>/<mark> tokens in WebView. */
+    contain: none;
 }
 
 .log-row:hover {
@@ -750,6 +750,19 @@ body.theme-light select option {
     user-select: text !important;
     -webkit-user-select: text !important;
 }
+
+/* Line-range drag only (gutter / Shift / Ctrl) — never during native char select. */
+body.gofle-selecting,
+body.gofle-selecting * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    cursor: default !important;
+}
+.log-viewport.is-selecting,
+.viewport.is-selecting {
+    cursor: default !important;
+}
+
 
 /* Override the global `* { user-select: none }` so syntax/search highlight
    spans and marks remain selectable and copyable inside log lines. */
@@ -1923,6 +1936,23 @@ body.word-wrap .log-scroll-spacer {
 body.hide-line-numbers .log-num {
     display: none !important;
 }
+
+/* Word-wrap: keep character selection continuous across soft-wrapped lines
+   inside a single .log-text, and across sibling .log-row elements. */
+body.word-wrap .log-row,
+.log-content-container.word-wrap .log-row {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+}
+body.word-wrap .log-text,
+.log-content-container.word-wrap .log-text,
+body.word-wrap .log-text *,
+.log-content-container.word-wrap .log-text * {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -webkit-user-drag: none;
+}
+
 :root {
     --log-font-size: 13px;
     --log-font-family: monospace;

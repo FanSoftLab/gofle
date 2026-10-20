@@ -67,8 +67,16 @@ export class VirtualScroller {
   private ctrlAddBase: Set<number> | null = null;
   private ctrlAddStart: number | null = null;
   private ctrlAddMoved = false;
-  /** Pending plain mousedown on text — promote to line-range once the pointer leaves the start row. */
-  private pendingLineSelect: { startIdx: number; startY: number } | null = null;
+  /** Plain mousedown on text — native character selection is active (do not steal it). */
+  private nativeSelecting = false;
+  private nativeSelectStartIdx: number | null = null;
+  private nativeSelectEndIdx: number | null = null;
+  private selectPendingX: number | null = null;
+  /** Line-range drag (gutter / after explicit promote). */
+  private selectRaf = 0;
+  private selectPendingY: number | null = null;
+  private selectScrollDir = 0;
+  private selectScrollTimer = 0;
 
   private rowRawContent = new WeakMap<HTMLElement, string>();
   private rowHighlightKey = new WeakMap<HTMLElement, string>();
@@ -645,6 +653,7 @@ export class VirtualScroller {
       }
 
       this.contentContainer.appendChild(fragment);
+      this.ensureDomOrder();
       this.applyPendingAnchor();
       const win2 = this.windowFromScrollTop(this.viewport.scrollTop);
       this.positionRows(win2.firstVisibleIndex, win2.fractional);
@@ -750,6 +759,14 @@ export class VirtualScroller {
   }
 
   private recycleRowNode(idx: number, node: HTMLElement) {
+    // While selecting, keep rows that are part of (or near) the selection span
+    // so the browser Range is not destroyed when the user scrolls off-screen.
+    if (this.nativeSelecting && this.nativeSelectStartIdx !== null) {
+      const end = this.nativeSelectEndIdx ?? this.nativeSelectStartIdx;
+      const lo = Math.min(this.nativeSelectStartIdx, end) - 8;
+      const hi = Math.max(this.nativeSelectStartIdx, end) + 8;
+      if (idx >= lo && idx <= hi) return;
+    }
     node.remove();
     this.renderedNodes.delete(idx);
     this.poolNodes.push(node);
@@ -821,11 +838,15 @@ export class VirtualScroller {
     this.ctrlAddBase = null;
     this.ctrlAddStart = null;
     this.ctrlAddMoved = false;
-    const lo = Math.max(0, Math.min(start, this.totalLines - 1));
-    const hi = Math.max(0, Math.min(end, this.totalLines - 1));
-    this.selectionStart = lo;
-    this.selectionEnd = hi;
-    this.selectionAnchor = lo;
+    if (this.totalLines <= 0) {
+      this.selectionStart = null;
+      this.selectionEnd = null;
+      return;
+    }
+    const a = Math.max(0, Math.min(start, this.totalLines - 1));
+    const b = Math.max(0, Math.min(end, this.totalLines - 1));
+    this.selectionStart = a;
+    this.selectionEnd = b;
   }
 
   /** Snapshot current selection into a Set (range and/or multi). */
@@ -939,6 +960,7 @@ export class VirtualScroller {
 
   public setSelection(start: number, end: number) {
     this.setRangeSelection(start, end);
+    this.selectionAnchor = Math.min(start, end);
     this.applySelectionStyle();
   }
 
@@ -966,11 +988,12 @@ export class VirtualScroller {
   }
 
   private indexFromPoint(clientY: number): number | null {
+    if (this.totalLines <= 0) return null;
+    // Prefer real row boxes — critical for word-wrap (variable heights).
     for (const [idx, node] of this.renderedNodes) {
       const r = node.getBoundingClientRect();
       if (clientY >= r.top && clientY <= r.bottom) return idx;
     }
-    // nearest
     let best: number | null = null;
     let bestDist = Infinity;
     for (const [idx, node] of this.renderedNodes) {
@@ -985,6 +1008,16 @@ export class VirtualScroller {
     return best;
   }
 
+  /** Keep .log-row children in ascending logical order so native multi-line
+   * selection walks the DOM the same way the user sees the lines. */
+  private ensureDomOrder() {
+    const indices = [...this.renderedNodes.keys()].sort((a, b) => a - b);
+    for (const idx of indices) {
+      const node = this.renderedNodes.get(idx);
+      if (node) this.contentContainer.appendChild(node);
+    }
+  }
+
   private attachSelectionListeners() {
     this.viewport.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
@@ -997,27 +1030,27 @@ export class VirtualScroller {
       const idx = this.indexFromPoint(e.clientY);
       if (idx === null) return;
 
-      this.viewport.focus();
-
-      // Ctrl/Cmd+click or drag: add line/range to the existing selection.
+      // Ctrl/Cmd: additive line selection
       if (withCtrl && !withShift) {
         e.preventDefault();
-        this.pendingLineSelect = null;
+        this.viewport.focus();
+        this.endNativeSelecting(false);
         this.ctrlAddBase = this.snapshotSelection();
         this.ctrlAddStart = idx;
         this.ctrlAddMoved = false;
-        this.isSelecting = true; // drag will extend the added range
+        this.isSelecting = true;
         this.selectionAnchor = idx;
-        // Preview: add the start line immediately.
         this.applyCtrlAddRange(this.ctrlAddBase, idx, idx);
         this.applySelectionStyle();
+        this.setDragSelecting(true);
         return;
       }
 
-      // Shift+click: extend contiguous range from anchor / highlighted line.
+      // Shift: extend line range
       if (withShift) {
         e.preventDefault();
-        this.pendingLineSelect = null;
+        this.viewport.focus();
+        this.endNativeSelecting(false);
         this.ctrlAddBase = null;
         this.ctrlAddStart = null;
         this.isSelecting = false;
@@ -1033,105 +1066,238 @@ export class VirtualScroller {
         return;
       }
 
-      // Gutter click: start line-range selection immediately; drag extends.
+      // Gutter: line-range drag
       if (inGutter) {
         e.preventDefault();
-        this.pendingLineSelect = null;
+        this.viewport.focus();
+        this.endNativeSelecting(false);
         this.ctrlAddBase = null;
         this.ctrlAddStart = null;
         this.isSelecting = true;
         this.setRangeSelection(idx, idx);
+        this.selectionAnchor = idx;
         this.applySelectionStyle();
+        this.setDragSelecting(true);
         return;
       }
 
-      // Plain mousedown on text: keep native character selection for a
-      // single-row drag; promote to line-range selection once the pointer
-      // moves onto another row (or a clear vertical drag).
+      // ---- Plain text: pure native character selection ----
+      // Do NOT focus the viewport (steals caret in WebView).
+      // Do NOT promote to line selection on vertical drag — that broke
+      // multi-line character selection. Virtualization is frozen while active.
       this.ctrlAddBase = null;
       this.ctrlAddStart = null;
-      this.pendingLineSelect = { startIdx: idx, startY: e.clientY };
       this.isSelecting = false;
+      if (this.selectionStart !== null || this.selectedLines.size > 0) {
+        this.clearSelection();
+      }
+      this.nativeSelecting = true;
+      this.nativeSelectStartIdx = idx;
+      this.nativeSelectEndIdx = idx;
+      this.selectPendingX = e.clientX;
+      this.selectPendingY = e.clientY;
     });
 
     window.addEventListener('mousemove', (e) => {
-      // Promote pending text-drag into multi-line selection.
-      if (this.pendingLineSelect && !this.isSelecting) {
+      // Native character selection: let the browser paint, but auto-scroll when
+      // the pointer hits the viewport edge so ranges larger than the screen work.
+      if (this.nativeSelecting) {
+        this.selectPendingX = e.clientX;
+        this.selectPendingY = e.clientY;
         const idx = this.indexFromPoint(e.clientY);
-        const dy = Math.abs(e.clientY - this.pendingLineSelect.startY);
-        const leftStartRow =
-          idx !== null && idx !== this.pendingLineSelect.startIdx;
-        // ~half a line height — enough to mean "select lines", not "select chars".
-        if (leftStartRow || dy >= Math.max(8, this.lineHeight * 0.45)) {
-          const startIdx = this.pendingLineSelect.startIdx;
-          this.pendingLineSelect = null;
-          // Clear any native character selection that started on the first row.
-          const native = window.getSelection();
-          if (native && !native.isCollapsed) native.removeAllRanges();
-          this.isSelecting = true;
-          this.setRangeSelection(startIdx, idx ?? startIdx);
-          this.applySelectionStyle();
-        }
+        if (idx !== null) this.nativeSelectEndIdx = idx;
+        this.updateSelectScrollDir(e.clientY);
+        // Extend the live Selection to the caret under the pointer (helps after scroll).
+        if (this.selectRaf) return;
+        this.selectRaf = requestAnimationFrame(() => {
+          this.selectRaf = 0;
+          if (!this.nativeSelecting) return;
+          if (this.selectPendingX !== null && this.selectPendingY !== null) {
+            this.extendNativeSelectionTo(this.selectPendingX, this.selectPendingY);
+          }
+        });
         return;
       }
 
       if (!this.isSelecting) return;
-      const idx = this.indexFromPoint(e.clientY);
-      if (idx === null) return;
-
-      // Ctrl/Cmd drag: union base selection with the drag range.
-      if (this.ctrlAddBase !== null && this.ctrlAddStart !== null) {
-        this.ctrlAddMoved = true;
-        this.applyCtrlAddRange(this.ctrlAddBase, this.ctrlAddStart, idx);
-        this.applySelectionStyle();
-        return;
-      }
-
-      // Plain drag-extend: contiguous range (replaces multi-set).
-      const anchor = this.selectionAnchor ?? idx;
-      this.setRangeSelection(anchor, idx);
-      this.selectionAnchor = anchor;
-      this.applySelectionStyle();
+      e.preventDefault();
+      this.selectPendingX = e.clientX;
+      this.selectPendingY = e.clientY;
+      this.updateSelectScrollDir(e.clientY);
+      if (this.selectRaf) return;
+      this.selectRaf = requestAnimationFrame(() => {
+        this.selectRaf = 0;
+        const y = this.selectPendingY;
+        if (y === null || !this.isSelecting) return;
+        this.applyDragSelectionAt(y);
+      });
     });
 
     window.addEventListener('mouseup', (e) => {
-      // Ctrl/Cmd click without drag: toggle the line on the base set.
+      // Ctrl toggle without drag
       if (this.ctrlAddBase !== null && this.ctrlAddStart !== null && !this.ctrlAddMoved) {
         const idx = this.ctrlAddStart;
         const base = this.ctrlAddBase;
         this.selectedLines = new Set(base);
         this.selectionStart = null;
         this.selectionEnd = null;
-        if (this.selectedLines.has(idx)) {
-          this.selectedLines.delete(idx);
-        } else {
-          this.selectedLines.add(idx);
-        }
-        this.selectionAnchor = idx;
-        if (this.selectedLines.size === 0) this.selectionAnchor = null;
+        if (this.selectedLines.has(idx)) this.selectedLines.delete(idx);
+        else this.selectedLines.add(idx);
+        this.selectionAnchor = this.selectedLines.size === 0 ? null : idx;
         this.applySelectionStyle();
       }
 
-      // Plain click (no drag) on a log line → select that one line so Ctrl+C
-      // and the context menu have a range. Horizontal char-selection drag
-      // that stayed on one row leaves pendingLineSelect set until here without
-      // promoting — do not overwrite an intentional native text selection.
-      if (this.pendingLineSelect && !this.isSelecting) {
-        const idx = this.pendingLineSelect.startIdx;
-        const dy = Math.abs(e.clientY - this.pendingLineSelect.startY);
+      if (this.nativeSelecting) {
         const native = window.getSelection();
         const hasNative = !!(native && !native.isCollapsed && (native.toString()?.length ?? 0) > 0);
-        // Click without meaningful native selection → select the line.
-        if (!hasNative && dy < Math.max(8, this.lineHeight * 0.45)) {
-          this.setRangeSelection(idx, idx);
+        const startIdx = this.nativeSelectStartIdx;
+        this.endNativeSelecting(true);
+        // True click (no character selection) → whole-line selection for Ctrl+C.
+        // Partial or multi-line native selection: leave the browser range alone.
+        if (!hasNative && startIdx !== null) {
+          this.setRangeSelection(startIdx, startIdx);
+          this.selectionAnchor = startIdx;
           this.applySelectionStyle();
         }
+        this.ctrlAddBase = null;
+        this.ctrlAddStart = null;
+        this.ctrlAddMoved = false;
+        this.isSelecting = false;
+        this.setDragSelecting(false);
+        this.stopSelectScroll();
+        return;
       }
-      this.pendingLineSelect = null;
+
       this.ctrlAddBase = null;
       this.ctrlAddStart = null;
       this.ctrlAddMoved = false;
       this.isSelecting = false;
+      this.setDragSelecting(false);
+      this.stopSelectScroll();
+      this.selectPendingY = null;
+      if (this.selectRaf) {
+        cancelAnimationFrame(this.selectRaf);
+        this.selectRaf = 0;
+      }
     });
+  }
+
+  private endNativeSelecting(rerender: boolean) {
+    const was = this.nativeSelecting;
+    this.nativeSelecting = false;
+    this.nativeSelectStartIdx = null;
+    this.nativeSelectEndIdx = null;
+    this.stopSelectScroll();
+    if (was && rerender) {
+      requestAnimationFrame(() => {
+        if (!this.nativeSelecting) this.render(false);
+      });
+    }
+  }
+
+  /**
+   * Extend the active native Selection to the document caret at (x, y).
+   * Used while edge-scrolling so the range grows with content that just
+   * entered the viewport (Selection.extend is supported in Chromium/WebView).
+   */
+  private extendNativeSelectionTo(clientX: number, clientY: number) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+
+    const rect = this.viewport.getBoundingClientRect();
+    // Keep the probe inside the viewport so caret hits a visible .log-text.
+    const x = Math.min(Math.max(clientX, rect.left + 8), rect.right - 8);
+    const y = Math.min(Math.max(clientY, rect.top + 2), rect.bottom - 2);
+
+    const docAny = document as any;
+    try {
+      if (typeof docAny.caretRangeFromPoint === 'function') {
+        const r = docAny.caretRangeFromPoint(x, y) as Range | null;
+        if (r && r.startContainer) {
+          sel.extend(r.startContainer, r.startOffset);
+          return;
+        }
+      }
+      if (typeof docAny.caretPositionFromPoint === 'function') {
+        const pos = docAny.caretPositionFromPoint(x, y);
+        if (pos && pos.offsetNode) {
+          sel.extend(pos.offsetNode, pos.offset);
+        }
+      }
+    } catch {
+      // Cross-node extend can throw if the anchor was recycled; ignore.
+    }
+  }
+
+  private applyDragSelectionAt(clientY: number) {
+    const idx = this.indexFromPoint(clientY);
+    if (idx === null) return;
+    if (this.ctrlAddBase !== null && this.ctrlAddStart !== null) {
+      this.ctrlAddMoved = true;
+      this.applyCtrlAddRange(this.ctrlAddBase, this.ctrlAddStart, idx);
+      this.applySelectionStyle();
+      return;
+    }
+    const anchor = this.selectionAnchor ?? idx;
+    this.setRangeSelection(anchor, idx);
+    this.selectionAnchor = anchor;
+    this.applySelectionStyle();
+  }
+
+  private setDragSelecting(on: boolean) {
+    document.body.classList.toggle('gofle-selecting', on);
+    this.viewport.classList.toggle('is-selecting', on);
+  }
+
+  private updateSelectScrollDir(clientY: number) {
+    const rect = this.viewport.getBoundingClientRect();
+    const margin = 36;
+    let dir = 0;
+    if (clientY < rect.top + margin) dir = -1;
+    else if (clientY > rect.bottom - margin) dir = 1;
+    if (dir === this.selectScrollDir) {
+      if (dir !== 0 && !this.selectScrollTimer) this.startSelectScroll();
+      return;
+    }
+    this.selectScrollDir = dir;
+    if (dir === 0) this.stopSelectScroll();
+    else this.startSelectScroll();
+  }
+
+  private startSelectScroll() {
+    if (this.selectScrollTimer) return;
+    const tick = () => {
+      const active = this.isSelecting || this.nativeSelecting;
+      if (!active || this.selectScrollDir === 0) {
+        this.selectScrollTimer = 0;
+        return;
+      }
+      // Accelerate slightly when held at the edge so long ranges are reachable.
+      const unit = Math.max(this.lineHeight, 16);
+      const step = unit * this.selectScrollDir * 1.5;
+      const before = this.viewport.scrollTop || 0;
+      this.viewport.scrollTop = Math.max(0, before + step);
+      // Force a layout pass for newly visible rows, then grow the Selection.
+      if (this.nativeSelecting) {
+        this.render(false);
+        if (this.selectPendingX !== null && this.selectPendingY !== null) {
+          const idx = this.indexFromPoint(this.selectPendingY);
+          if (idx !== null) this.nativeSelectEndIdx = idx;
+          this.extendNativeSelectionTo(this.selectPendingX, this.selectPendingY);
+        }
+      } else if (this.selectPendingY !== null) {
+        this.applyDragSelectionAt(this.selectPendingY);
+      }
+      this.selectScrollTimer = window.setTimeout(tick, 16);
+    };
+    this.selectScrollTimer = window.setTimeout(tick, 16);
+  }
+
+  private stopSelectScroll() {
+    this.selectScrollDir = 0;
+    if (this.selectScrollTimer) {
+      clearTimeout(this.selectScrollTimer);
+      this.selectScrollTimer = 0;
+    }
   }
 }

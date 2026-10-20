@@ -14,12 +14,17 @@ import { SettingsManager, applyLogFontSize, getPrefs } from './settings_manager'
 import { ContextMenu } from './context_menu';
 import { AdvancedSearchBar } from './search_advanced';
 import { HelpModal } from './help_modal';
+import { bootstrapWebClient, detectWebEnvironment } from './web_client';
 
 type FileStatsResponse = any;
 
 let pendingStartupArgs: string[] = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // Web UI mode: same UI, HTTP+WS transport when Wails bridge is absent.
+    if (detectWebEnvironment()) {
+        await bootstrapWebClient();
+    }
     const getApi = () => (window as any).go?.main?.App;
 
     const ctx: AppContext = {

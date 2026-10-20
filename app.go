@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // ErrTabNotFound is returned by tab-scoped operations when the tab id does not
@@ -167,6 +169,10 @@ type App struct {
 	// Key is "host:port", value is attempt info.
 	connAttemptsMu sync.Mutex
 	connAttempts   map[string]*connAttemptInfo
+	// hub broadcasts events to web UI WebSocket clients. Always non-nil.
+	hub *EventHub
+	// webMode is true when running as HTTP server (no Wails runtime).
+	webMode bool
 }
 
 // connAttemptInfo tracks connection attempts for rate limiting.
@@ -216,8 +222,23 @@ func NewApp() (*App, error) {
 		pendingFTPHost:   make(map[string]string),
 		pendingFTPConfig: make(map[string]remote.Config),
 		connAttempts:     make(map[string]*connAttemptInfo),
+		hub:              NewEventHub(),
 	}, nil
 }
+
+// emitEvent delivers an event to the Wails runtime (desktop) and/or the web hub.
+func (a *App) emitEvent(name string, data any) {
+	if a == nil {
+		return
+	}
+	if a.hub != nil {
+		a.hub.Broadcast(name, data)
+	}
+	if !a.webMode && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, name, data)
+	}
+}
+
 
 // Startup is the Wails lifecycle hook: it captures the runtime context, parses
 // any file arguments from the OS, and starts the 500 ms tail-poller goroutine.

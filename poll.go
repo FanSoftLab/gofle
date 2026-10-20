@@ -6,8 +6,6 @@ import (
 	"os"
 	"runtime/debug"
 	"sync"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // pollFileUpdates is invoked by the 500 ms ticker. For each tab it appends newly
@@ -88,7 +86,7 @@ func (a *App) pollFileUpdates() {
 				}
 
 				if failures == 1 {
-					runtime.EventsEmit(a.ctx, "file_error", map[string]any{
+					a.emitEvent("file_error", map[string]any{
 						"tab_id": t.ID,
 						"error":  err.Error(),
 					})
@@ -127,7 +125,7 @@ func (a *App) pollFileUpdates() {
 					t.mu.Unlock()
 				}
 
-				runtime.EventsEmit(a.ctx, "file_updated", map[string]any{
+				a.emitEvent("file_updated", map[string]any{
 					"tab_id":      t.ID,
 					"total_lines": newTotal,
 					"file_size":   t.Indexer.FileSize(),
@@ -172,7 +170,7 @@ func (a *App) pollFileUpdates() {
 					t.mu.Unlock()
 				}
 
-				runtime.EventsEmit(a.ctx, "file_updated", map[string]any{
+				a.emitEvent("file_updated", map[string]any{
 					"tab_id":      t.ID,
 					"total_lines": t.Indexer.TotalLines(),
 					"file_size":   t.Indexer.FileSize(),

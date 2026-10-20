@@ -13,8 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // ftpBrowseMu / ftpBrowseLister / ftpBrowseListerKey mirror the SSH browse
@@ -200,7 +198,7 @@ func (a *App) openFTPStream(ftpCfg ftp.Config, displayPath string, summary *conf
 // overlay.
 func (a *App) openFTPStreamOnce(ftpCfg ftp.Config, displayPath string, summary *config.SSHConfigSummary, tabID string) (*FileStatsResponse, error) {
 	progress := func(stage string, done, total int64) {
-		runtime.EventsEmit(a.ctx, "ssh:progress", map[string]any{
+		a.emitEvent("ssh:progress", map[string]any{
 			"stage": stage,
 			"done":  done,
 			"total": total,

@@ -7,6 +7,7 @@ import (
 	"embed"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -30,6 +31,18 @@ var appIcon []byte
 //go:generate wails generate module
 
 func main() {
+	// Web UI mode: identical frontend over HTTP+WebSocket.
+	// Usage: GoFLE -web [addr]   (default :8080)
+	args := os.Args[1:]
+	for i, a := range args {
+		if a == "-web" || a == "--web" {
+			addr := ":8080"
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				addr = args[i+1]
+			}
+			os.Exit(runWebServer(addr))
+		}
+	}
 	os.Exit(run())
 }
 

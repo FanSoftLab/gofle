@@ -15,8 +15,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // maxConcurrentSearches bounds how many user-initiated searches can run at once
@@ -45,7 +43,7 @@ func (a *App) OpenFiles(paths []string) ([]*FileStatsResponse, error) {
 		res, err := a.OpenFile(p)
 		if err != nil {
 			if a.ctx != nil {
-				runtime.EventsEmit(a.ctx, "file_error", map[string]any{
+				a.emitEvent("file_error", map[string]any{
 					"path":  p,
 					"error": err.Error(),
 				})
@@ -440,7 +438,7 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 		tab.mu.Unlock()
 		cancel()
 		if a.ctx != nil {
-			runtime.EventsEmit(a.ctx, "search_progress", map[string]any{
+			a.emitEvent("search_progress", map[string]any{
 				"tabId": tabID, "gen": gen, "count": int64(0), "done": true,
 			})
 		}
@@ -484,7 +482,7 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 		if a.ctx == nil {
 			return
 		}
-		runtime.EventsEmit(a.ctx, "search_progress", map[string]any{
+		a.emitEvent("search_progress", map[string]any{
 			"tabId": tabID,
 			"gen":   gen,
 			"count": count,

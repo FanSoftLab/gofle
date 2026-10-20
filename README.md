@@ -512,6 +512,22 @@ goreleaser release --clean
 
 ---
 
+## Web UI
+
+The same frontend runs in a browser when you start the HTTP server:
+
+```bash
+./GoFLE -web          # listen on :8080
+./GoFLE -web :9090    # custom address
+```
+
+Open `http://localhost:8080/` — the UI is identical to the desktop app. Local files
+are opened via browser file picker (upload to the server process). Remote SSH/FTP
+works the same as on desktop. Search progress, tail updates, and SSH progress
+are pushed over WebSocket.
+
+---
+
 ## Running
 
 ```bash
