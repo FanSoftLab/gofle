@@ -175,7 +175,7 @@ func (a *App) OpenFileDialog() (*FileStatsResponse, error) {
 	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Відкрити лог-файл",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Log Files (*.log, *.txt)", Pattern: "*.log;*.txt;*.out"},
+			{DisplayName: "Log Files (*.log, *.txt, *.tar.gz, *.tgz)", Pattern: "*.log;*.txt;*.out;*.tar.gz;*.tgz"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})
@@ -192,7 +192,7 @@ func (a *App) OpenMultipleFilesDialog() ([]*FileStatsResponse, error) {
 	files, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Відкрити лог-файли",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Log Files (*.log, *.txt)", Pattern: "*.log;*.txt;*.out"},
+			{DisplayName: "Log Files (*.log, *.txt, *.tar.gz, *.tgz)", Pattern: "*.log;*.txt;*.out;*.tar.gz;*.tgz"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})

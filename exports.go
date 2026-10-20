@@ -33,8 +33,9 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 		Title:           "Зберегти результати пошуку",
 		DefaultFilename: fmt.Sprintf("search_results_%s.log", fileName),
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Log Files (*.log)", Pattern: "*.log"},
+			{DisplayName: "Log Files (*.log, *.txt, *.tar.gz, *.tgz)", Pattern: "*.log;*.txt;*.tar.gz;*.tgz"},
 			{DisplayName: "Text Files (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "Compressed Logs (*.gz, *.tar.gz, *.tgz)", Pattern: "*.gz;*.tar.gz;*.tgz"},
 		},
 	})
 
@@ -166,7 +167,7 @@ func (a *App) SaveFullLogAs(tabID string) (string, error) {
 		Title:           "Зберегти лог як",
 		DefaultFilename: fileName,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Log Files (*.log)", Pattern: "*.log"},
+			{DisplayName: "Log Files (*.log, *.txt, *.tar.gz, *.tgz)", Pattern: "*.log;*.txt;*.tar.gz;*.tgz"},
 			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
 		},
 	})
