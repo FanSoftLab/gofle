@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -44,6 +45,12 @@ func runWebServer(addr string) int {
 		Addr:              addr,
 		Handler:           withCORS(mux),
 		ReadHeaderTimeout: 10 * time.Second,
+		// IdleTimeout reaps keep-alive connections the client abandoned
+		// without a close (C4). A blanket ReadTimeout/WriteTimeout is
+		// deliberately NOT set: it would kill the 512 MB multipart uploads
+		// and the long-lived streaming exports; ReadHeaderTimeout already
+		// bounds header reads, and bodies/exports are long-lived by design.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	slog.Info("GoFLE web UI listening", "addr", addr)
@@ -728,6 +735,20 @@ func (api *webAPI) handleTabs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleExportSearch streams the current search matches to the client, one
+// output line per match in the desktop export's format ("%d: %s\n" with the
+// 1-based line number).
+//
+// It ports the desktop export's bulk approach (exports.go SaveSearchResults)
+// (C3): the (ascending) match list is walked in contiguous runs, each run is
+// read with one bulk ScanLinesRetry pass instead of one pread+string per
+// match, and output is buffered through a bufio.Writer instead of fmt.Fprintf
+// straight into the ResponseWriter (one unbuffered syscall per line). A run
+// whose bulk read fails (e.g. it raced a rotation) falls back to per-line
+// reads for exactly that run, so lines unreadable by ScanLines are skipped the
+// same way the previous per-line path always did. Write errors (the client
+// went away mid-stream) stop the export; the status cannot be changed after
+// the first byte is written, so the failure is only logged.
 func (api *webAPI) handleExportSearch(w http.ResponseWriter, tabID string) {
 	api.app.mu.RLock()
 	tab, exists := api.app.tabs[tabID]
@@ -743,16 +764,79 @@ func (api *webAPI) handleExportSearch(w http.ResponseWriter, tabID string) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"search_results_%s.log\"", fileName))
+
+	// Buffer through bufio: an unbuffered Fprintf per match issued one syscall
+	// per line, which dominated the export on large match sets.
+	writer := bufio.NewWriter(w)
+
+	var writeErr error
+
+	// Export via bulk ScanLines over contiguous runs of the (ascending) match
+	// list instead of one pread+string per match — the same measured ~15x path
+	// as the desktop export. Matches beyond the live total (snapshot raced a
+	// rotation) are skipped, matching what GetLine would have reported.
 	total := tab.Indexer.TotalLines()
-	for _, idx := range matched {
-		if idx >= total {
+
+	i := 0
+	for i < len(matched) && writeErr == nil {
+		if matched[i] >= total {
+			i++
+
 			continue
 		}
-		line, err := tab.Indexer.GetLine(idx)
-		if err != nil {
-			continue
+
+		runEnd := i + 1
+		for runEnd < len(matched) && matched[runEnd] == matched[runEnd-1]+1 && matched[runEnd] < total {
+			runEnd++
 		}
-		fmt.Fprintf(w, "%d: %s\n", idx+1, line)
+
+		start, count := matched[i], int64(runEnd-i)
+
+		serr := tab.Indexer.ScanLinesRetry(start, count, func(idx int64, line []byte) bool {
+			if _, e := fmt.Fprintf(writer, "%d: %s\n", idx+1, line); e != nil {
+				writeErr = e
+				return false
+			}
+
+			return true
+		})
+
+		if writeErr != nil {
+			break
+		}
+
+		if serr != nil {
+			// Chunk read failed (e.g. raced a rotation): fall back to per-line
+			// reads for exactly this run; lines that still fail to read are
+			// skipped, matching the previous per-line export.
+			for k := i; k < runEnd; k++ {
+				content, gerr := tab.Indexer.GetLine(matched[k])
+				if gerr != nil {
+					continue
+				}
+
+				if _, e := fmt.Fprintf(writer, "%d: %s\n", matched[k]+1, content); e != nil {
+					writeErr = e
+					break
+				}
+			}
+
+			if writeErr != nil {
+				break
+			}
+		}
+
+		i = runEnd
+	}
+
+	if ferr := writer.Flush(); ferr != nil && writeErr == nil {
+		writeErr = ferr
+	}
+
+	if writeErr != nil {
+		// The client disconnected or the connection broke mid-stream; the
+		// status is already committed, so there is nothing to report to it.
+		slog.Warn("web export-search ended with a write error", "tab", tabID, "err", writeErr)
 	}
 }
 

@@ -3,13 +3,20 @@ package indexer
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 )
+
+// errReaderFailure is the sentinel a test reader fails with to exercise the
+// index scan's error return path.
+var errReaderFailure = errors.New("synthetic read failure")
 
 func writeFile(t *testing.T, content string) (*FileIndexer, string) {
 	t.Helper()
@@ -1030,5 +1037,105 @@ func TestScanLinesAfterCloseReturnsErrClosed(t *testing.T) {
 	err := idx.ScanLines(0, 3, func(int64, []byte) bool { return true })
 	if !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("ScanLines after Close = %v, want os.ErrClosed", err)
+	}
+}
+
+// The index scan pass takes its 64 KiB bufio.Reader from a package pool (C1).
+// Back-to-back scans over different readers must produce identical tables —
+// the second scan reuses the recycled buffer via Reset — and the reader must
+// also survive the error return path, since the deferred Put covers every
+// return.
+func TestAppendLineOffsetsWithLevelsReusesPooledReader(t *testing.T) {
+	const content = "ERROR one\nWARN two\nplain three\n"
+
+	scan := func(r io.Reader) ([]int64, []LevelCount, error) {
+		return appendLineOffsetsWithLevels(r, []int64{0}, []LevelCount{{LineIndex: 0}}, 0, int64(len(content)), "test.log")
+	}
+
+	offsets1, levelCounts1, err := scan(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+
+	// The first call returned its reader to the pool; the second one must Reset
+	// it and still index the fresh stream identically.
+	offsets2, levelCounts2, err := scan(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("second scan (recycled reader): %v", err)
+	}
+
+	if !slices.Equal(offsets1, offsets2) {
+		t.Fatalf("offsets differ between scans: %v vs %v", offsets1, offsets2)
+	}
+
+	if !slices.Equal(levelCounts1, levelCounts2) {
+		t.Fatalf("levelCounts differ between scans: %+v vs %+v", levelCounts1, levelCounts2)
+	}
+
+	if len(offsets1) != 4 {
+		t.Fatalf("expected 4 offsets (initial + 3 lines), got %d", len(offsets1))
+	}
+
+	// A failing reader exercises the error return path; a subsequent scan must
+	// still work, proving the reader came back from the pool intact.
+	_, _, err = scan(iotest.ErrReader(errReaderFailure))
+	if !errors.Is(err, errReaderFailure) {
+		t.Fatalf("error reader scan = %v, want errReaderFailure", err)
+	}
+
+	offsets3, _, err := scan(strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("third scan after error path: %v", err)
+	}
+
+	if !slices.Equal(offsets1, offsets3) {
+		t.Fatalf("offsets differ after the error path recycled the reader: %v vs %v", offsets1, offsets3)
+	}
+}
+
+// GetLevelCounts hands out the internal table directly (C2): the snapshot must
+// be readable, stable across calls, and extend after a tail append without any
+// defensive copy.
+func TestGetLevelCountsSnapshot(t *testing.T) {
+	var sb strings.Builder
+
+	// An entry is published every levelCountInterval lines, covering the lines
+	// counted so far: the snapshot at LineIndex 1000 covers lines 0-999.
+	for i := range 1500 {
+		switch i {
+		case 0:
+			sb.WriteString("ERROR one\n")
+		case 999:
+			sb.WriteString("WARN two\n")
+		default:
+			sb.WriteString("INFO filler\n")
+		}
+	}
+
+	idx, _ := writeFile(t, sb.String())
+
+	counts := idx.GetLevelCounts()
+	if len(counts) != 2 {
+		t.Fatalf("expected 2 level count entries (lines 0 and 1000), got %d", len(counts))
+	}
+
+	if counts[0].LineIndex != 0 || counts[0].Errors != 0 || counts[0].Warns != 0 {
+		t.Fatalf("first entry = %+v, want {0 0 0}", counts[0])
+	}
+
+	if counts[1].LineIndex != 1000 || counts[1].Errors != 1 || counts[1].Warns != 1 {
+		t.Fatalf("second entry = %+v, want LineIndex 1000 with 1 error and 1 warn", counts[1])
+	}
+
+	// A repeat call must observe identical content.
+	again := idx.GetLevelCounts()
+	if len(again) != len(counts) {
+		t.Fatalf("repeat call returned %d entries, want %d", len(again), len(counts))
+	}
+
+	for i := range counts {
+		if again[i] != counts[i] {
+			t.Fatalf("repeat call entry %d = %+v, want %+v", i, again[i], counts[i])
+		}
 	}
 }

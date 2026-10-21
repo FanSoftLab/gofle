@@ -28,3 +28,6 @@ frontend/node_modules
 build/bin/
 dist/*
 *.log
+
+# Go test binaries
+*.test

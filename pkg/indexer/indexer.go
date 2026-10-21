@@ -166,6 +166,21 @@ var lineBufPool = sync.Pool{
 	},
 }
 
+// indexReaderPool reuses the 64 KiB buffered readers of the sequential index
+// scan (appendLineOffsetsWithLevels) (C1). That pass runs on every tail
+// UpdateIndex tick (one per active tab per 500 ms) and on every rotation
+// rebuild, so a fresh reader allocated a new 64 KiB buffer per pass. Pooling
+// is safe because the scan only counts bytes: it hands out no references into
+// the bufio internal buffer. The next Get always Resets before use, so the
+// reader is returned to the pool as-is.
+var indexReaderPool = sync.Pool{
+	New: func() any {
+		// The placeholder reader is never read from: every Get Resets onto the
+		// real reader before the first ReadSlice.
+		return bufio.NewReaderSize(strings.NewReader(""), 64*1024)
+	},
+}
+
 // scanBufPool reuses the large, contiguous chunk read buffers used by
 // ScanLines. A full-file search previously issued one random ReadAt per line
 // (~10M pread syscalls on a 10M-line log); ScanLines reads the whole searched
@@ -412,8 +427,18 @@ func (fi *FileIndexer) scanIndexUnlocked(limit int64) error {
 // levelCounts must already contain a zero entry at LineIndex 0 if starting
 // from an empty file, or the appropriate prefix if continuing from an existing
 // index.
+//
+// The buffered reader is taken from indexReaderPool (C1): the scan runs on
+// every tail UpdateIndex tick and every rotation rebuild, and a fresh
+// bufio.Reader allocated a new 64 KiB buffer each time. Pooling is safe here —
+// the function only counts bytes and hands out NO references into the bufio
+// internal buffer — and the deferred Put covers all return paths; the next Get
+// always Resets first.
 func appendLineOffsetsWithLevels(r io.Reader, offsets []int64, levelCounts []LevelCount, startOffset, limit int64, path string) ([]int64, []LevelCount, error) {
-	reader := bufio.NewReaderSize(r, 64*1024)
+	reader := indexReaderPool.Get().(*bufio.Reader)
+	reader.Reset(r)
+	defer indexReaderPool.Put(reader)
+
 	currentOffset := startOffset
 
 	// Current running counts
@@ -689,20 +714,20 @@ func (fi *FileIndexer) TakeRebuiltFlag() bool {
 	return rebuilt
 }
 
-// GetLevelCounts returns a copy of the level marker counts at each interval.
-// This enables fast incremental level statistics without full-file rescans.
-// The returned slice is a copy and safe to retain.
+// GetLevelCounts returns the level marker counts at each interval as a
+// read-only snapshot of the internal table (C2). Callers must NOT modify or
+// retain the returned slice: it aliases the indexer's live levelCounts storage.
+// Handing out the slice directly is safe because entries are never mutated
+// after publication — appends only write beyond len, and a rotation rebuild
+// allocates a fresh slice — and the sole caller (App.GetLevelStats) only reads
+// the result within its call. The previous defensive make+copy ran on every
+// tail tick and moved one entry per 1000 lines (~240 KB per call on a
+// 10M-line file) for no benefit.
 func (fi *FileIndexer) GetLevelCounts() []LevelCount {
 	fi.mu.RLock()
 	defer fi.mu.RUnlock()
 
-	if len(fi.levelCounts) == 0 {
-		return nil
-	}
-
-	result := make([]LevelCount, len(fi.levelCounts))
-	copy(result, fi.levelCounts)
-	return result
+	return fi.levelCounts
 }
 
 // readAtFull fills buf with exactly len(buf) bytes from offset via pread. A
