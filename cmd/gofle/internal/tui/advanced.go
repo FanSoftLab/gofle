@@ -4,7 +4,6 @@ import (
 	"GoFLE/pkg/config"
 	"GoFLE/pkg/search"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -480,11 +479,10 @@ func extractMatchSnippet(line, pattern string, isRegex, caseSensitive bool) stri
 		return ""
 	}
 	if isRegex {
-		flags := ""
-		if !caseSensitive {
-			flags = "(?i)"
-		}
-		re, err := regexp.Compile(flags + pattern)
+		// Reuse the highlight-path regex cache: Top unique calls this per
+		// match line (up to 20k lines), and compiling per line cost ~25x the
+		// match itself, so the compiled pattern is served from the cache.
+		re, err := cachedRegex(pattern, caseSensitive)
 		if err != nil {
 			return extractMatchSnippet(line, pattern, false, caseSensitive)
 		}

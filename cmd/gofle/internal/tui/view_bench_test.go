@@ -105,3 +105,86 @@ func BenchmarkViewSplit(b *testing.B) {
 		_ = m.View()
 	}
 }
+
+// BenchmarkViewNormalHighlight pins the case-insensitive literal highlight
+// path (findSpans without regex): one rendered row per match per frame.
+func BenchmarkViewNormalHighlight(b *testing.B) {
+	m := buildBenchModel(b, 200_000, 200, 120)
+	m.query = "i:request"
+
+	opts := m.effectiveSearchOptions()
+
+	res, err := m.se.SearchWithContext(context.Background(), opts)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	m.matches = res
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if len(m.matches) > 0 {
+			m.matchCursor = (m.matchCursor + 1) % len(m.matches)
+		}
+
+		_ = m.View()
+	}
+}
+
+// BenchmarkViewNormalRegex pins the regex highlight path: with a regex query
+// active, every rendered row compiles the pattern (baseline) or serves it
+// from the compiled-regex cache (after the fix).
+func BenchmarkViewNormalRegex(b *testing.B) {
+	m := buildBenchModel(b, 200_000, 200, 120)
+	m.query = "/Exception|latency"
+
+	opts := m.effectiveSearchOptions()
+
+	res, err := m.se.SearchWithContext(context.Background(), opts)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	m.matches = res
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if len(m.matches) > 0 {
+			m.matchCursor = (m.matchCursor + 1) % len(m.matches)
+		}
+
+		_ = m.View()
+	}
+}
+
+// BenchmarkViewSplitRegex is BenchmarkViewNormalRegex in the 50/50 split view,
+// which doubles the per-frame highlight work (both panes render match rows).
+func BenchmarkViewSplitRegex(b *testing.B) {
+	m := buildBenchModel(b, 200_000, 200, 120)
+	m.query = "/Exception|latency"
+
+	opts := m.effectiveSearchOptions()
+
+	res, err := m.se.SearchWithContext(context.Background(), opts)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	m.matches = res
+	m.splitView = true
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if len(m.matches) > 0 {
+			m.matchCursor = (m.matchCursor + 1) % len(m.matches)
+		}
+
+		_ = m.View()
+	}
+}
