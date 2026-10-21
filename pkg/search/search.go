@@ -782,12 +782,16 @@ func (se *SearchEngine) FilterLines(ctx context.Context, opts SearchOptions, lin
 			default:
 			}
 		}
-		content, e := se.indexer.GetLine(ln)
+		// GetLineBytes copies the line out of the pooled read buffer exactly
+		// once, into the caller-owned slice the matcher consumes directly —
+		// the old GetLine(string) + []byte(content) chain made two copies per
+		// line (2M allocations on a 1M-line refine pass).
+		content, e := se.indexer.GetLineBytes(ln)
 		if e != nil {
 			return nil, e
 		}
 
-		if secMatch([]byte(content)) {
+		if secMatch(content) {
 			out = append(out, ln)
 		}
 	}
@@ -1028,18 +1032,22 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 	const cacheCap = 256
 	type cacheEntry struct {
 		ln  int64
-		txt string
+		txt []byte
 	}
 	cache := make([]cacheEntry, 0, cacheCap)
-	getLine := func(ln int64) (string, error) {
+	// getLine hands out caller-owned []byte lines from GetLineBytes — one copy
+	// per line, where the old GetLine(string) cache followed by []byte(content)
+	// at every use made two copies per line (plus one more per nearby window
+	// line). The cached slices are read-only and never mutated.
+	getLine := func(ln int64) ([]byte, error) {
 		for i := len(cache) - 1; i >= 0; i-- {
 			if cache[i].ln == ln {
 				return cache[i].txt, nil
 			}
 		}
-		txt, err := se.indexer.GetLine(ln)
+		txt, err := se.indexer.GetLineBytes(ln)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if len(cache) >= cacheCap {
 			// drop oldest half
@@ -1061,11 +1069,10 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 			}
 		}
 
-		content, err := getLine(ln)
+		b, err := getLine(ln)
 		if err != nil {
 			return nil, err
 		}
-		b := []byte(content)
 
 		if needExclude {
 			drop := false
@@ -1080,12 +1087,12 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 			}
 		}
 
-		if needLevels && !allowLevel[lineLevel(content)] {
+		if needLevels && !allowLevel[lineLevelBytes(b)] {
 			continue
 		}
 
 		if needTime {
-			ts, ok := parseLineTime(content)
+			ts, ok := parseLineTimeBytes(b)
 			if !ok {
 				if opts.TimeRequireStamp {
 					continue
@@ -1131,7 +1138,7 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 				if e != nil {
 					continue
 				}
-				if nearbyMatch([]byte(nb)) {
+				if nearbyMatch(nb) {
 					found = true
 					break
 				}
@@ -1168,51 +1175,84 @@ func ExpandMatchesWithContext(matches []int64, before, after int, totalLines int
 	if before == 0 && after == 0 {
 		return matches
 	}
-	seen := make(map[int64]struct{}, len(matches)*(before+after+1))
-	out := make([]int64, 0, len(matches)*(before+after+1))
+
+	// Matches arrive sorted ascending, so their context windows advance
+	// monotonically: each window's end is >= the previous one's. A single
+	// running watermark therefore dedupes overlapping windows exactly, which
+	// replaces the old len(matches)*(before+after+1)-sized dedupe map — for
+	// 1M matches with a 5+5 window that map preallocated ~88 MB for the map
+	// plus ~88 MB for the output slice, transiently, on every search and
+	// every live-tail tick.
+	out := make([]int64, 0, len(matches))
+	var lastEmitted int64 = -1
+
 	for _, m := range matches {
-		start := m - int64(before)
-		if start < 0 {
-			start = 0
+		start := max(m-int64(before), 0)
+		end := min(m+int64(after), totalLines-1)
+		if start <= lastEmitted {
+			start = lastEmitted + 1
 		}
-		end := m + int64(after)
-		if end >= totalLines {
-			end = totalLines - 1
-		}
+
 		for i := start; i <= end; i++ {
-			if _, ok := seen[i]; ok {
-				continue
-			}
-			seen[i] = struct{}{}
 			out = append(out, i)
 		}
+
+		if end > lastEmitted {
+			lastEmitted = end
+		}
 	}
+
 	return out
 }
 
-func lineLevel(content string) string {
-	// Case-insensitive substring without allocating ToUpper of the whole line.
+// Pre-lowered fold needles for lineLevelBytes so the per-line level check is
+// fully allocation-free: containsFoldASCIIBytes folds UPPERCASE bytes in the
+// content on the fly while the needle stays a pre-lowered package-level
+// literal (the compiler constant-folds []byte("literal"), so these cost no
+// per-line allocation).
+var (
+	foldNeedleError    = []byte("error")
+	foldNeedleFatal    = []byte("fatal")
+	foldNeedleCritical = []byte("critical")
+	foldNeedleWarn     = []byte("warn")
+	foldNeedleInfo     = []byte("info")
+	foldNeedleDebug    = []byte("debug")
+	foldNeedleTrace    = []byte("trace")
+)
+
+// lineLevelBytes is the allocation-free []byte counterpart of lineLevel: it
+// folds the first 200 bytes on the fly against pre-lowered needles instead of
+// strings.ToLower-ing a copy of every filtered line (M2: one full-line
+// allocation + copy per filtered line in ApplyAdvancedFilters before).
+func lineLevelBytes(content []byte) string {
 	u := content
 	if len(u) > 200 {
 		u = u[:200]
 	}
-	if hasFold(u, "error") || hasFold(u, "fatal") || hasFold(u, "critical") {
+	if containsFoldASCIIBytes(u, foldNeedleError) ||
+		containsFoldASCIIBytes(u, foldNeedleFatal) ||
+		containsFoldASCIIBytes(u, foldNeedleCritical) {
 		return "ERROR"
 	}
-	if hasFold(u, "warn") {
+	if containsFoldASCIIBytes(u, foldNeedleWarn) {
 		return "WARN"
 	}
-	if hasFold(u, "info") {
+	if containsFoldASCIIBytes(u, foldNeedleInfo) {
 		return "INFO"
 	}
-	if hasFold(u, "debug") || hasFold(u, "trace") {
+	if containsFoldASCIIBytes(u, foldNeedleDebug) || containsFoldASCIIBytes(u, foldNeedleTrace) {
 		return "DEBUG"
 	}
 	return "OTHER"
 }
 
+// lineLevel is the string twin of lineLevelBytes, kept for existing callers.
+func lineLevel(content string) string {
+	return lineLevelBytes([]byte(content))
+}
+
 func hasFold(s, sub string) bool {
-	return strings.Contains(strings.ToLower(s), sub)
+	return containsFoldASCIIBytes([]byte(s), []byte(strings.ToLower(sub)))
 }
 
 var timeLayouts = []string{
@@ -1227,28 +1267,74 @@ var timeLayouts = []string{
 }
 
 func parseLineTime(content string) (time.Time, bool) {
+	return parseLineTimeBytes([]byte(content))
+}
+
+// parseLineTimeBytes is the []byte twin of parseLineTime, used by the
+// post-filter path so a filtered line is never copied into a string just to
+// parse its timestamp. It splits at most the 40-byte prefix into up to three
+// space-separated tokens manually (no strings.Fields slice), then tries the
+// same candidates in the same order as before — token[0] first, then the
+// 2-token and 3-token joins, each against every layout. The difference is
+// laziness: the 2- and 3-token candidate strings are only built when the
+// previous candidate failed, instead of always building all three.
+func parseLineTimeBytes(content []byte) (time.Time, bool) {
 	prefix := content
 	if len(prefix) > 40 {
 		prefix = prefix[:40]
 	}
-	fields := strings.Fields(prefix)
-	var candidates []string
-	if len(fields) >= 1 {
-		candidates = append(candidates, fields[0])
+
+	var fields [3][]byte
+	n := 0
+
+	for i := 0; i < len(prefix) && n < 3; {
+		for i < len(prefix) && (prefix[i] == ' ' || prefix[i] == '\t') {
+			i++
+		}
+
+		if i >= len(prefix) {
+			break
+		}
+
+		start := i
+		for i < len(prefix) && prefix[i] != ' ' && prefix[i] != '\t' {
+			i++
+		}
+		fields[n] = prefix[start:i]
+		n++
 	}
-	if len(fields) >= 2 {
-		candidates = append(candidates, fields[0]+" "+fields[1])
+
+	if n == 0 {
+		return time.Time{}, false
 	}
-	if len(fields) >= 3 {
-		candidates = append(candidates, fields[0]+" "+fields[1]+" "+fields[2])
-	}
-	for _, c := range candidates {
+
+	tryLayouts := func(c string) (time.Time, bool) {
 		for _, layout := range timeLayouts {
 			if t, err := time.Parse(layout, c); err == nil {
 				return t, true
 			}
 		}
+
+		return time.Time{}, false
 	}
+
+	if t, ok := tryLayouts(string(fields[0])); ok {
+		return t, true
+	}
+
+	if n >= 2 {
+		if t, ok := tryLayouts(string(fields[0]) + " " + string(fields[1])); ok {
+			return t, true
+		}
+	}
+
+	if n >= 3 {
+		c := string(fields[0]) + " " + string(fields[1]) + " " + string(fields[2])
+		if t, ok := tryLayouts(c); ok {
+			return t, true
+		}
+	}
+
 	return time.Time{}, false
 }
 

@@ -241,3 +241,104 @@ func BenchmarkSearchWithLevelCounts(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkExpandWithContext pins the memory shape of context expansion
+// (H2): 20k sparse matches with a 5+5 context window overlap heavily, so the
+// dedupe structure (map + full preallocation vs running pointer) dominates
+// the allocation profile.
+func BenchmarkExpandWithContext(b *testing.B) {
+	const nLines = 200_000
+
+	idx := benchFile(b, nLines, 10)
+
+	total := idx.TotalLines()
+	matches := make([]int64, 0, total/10)
+
+	for i := int64(0); i < total; i += 10 {
+		matches = append(matches, i)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		out := ExpandMatchesWithContext(matches, 5, 5, total)
+		if len(out) == 0 {
+			b.Fatal("empty expansion")
+		}
+	}
+}
+
+// BenchmarkFilterLines pins the secondary-refine pass (M1): one indexer read
+// + match per primary hit, per invocation.
+func BenchmarkFilterLines(b *testing.B) {
+	const nLines = 200_000
+
+	idx := benchFile(b, nLines, 10)
+	se := NewSearchEngine(idx)
+
+	primary, err := se.SearchWithContext(b.Context(), SearchOptions{Query: "request", CaseSensitive: false})
+	if err != nil {
+		b.Fatalf("primary search: %v", err)
+	}
+
+	opts := SearchOptions{SecondaryQuery: "status=200", CaseSensitive: false}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		out, err := se.FilterLines(b.Context(), opts, primary)
+		if err != nil {
+			b.Fatalf("filter: %v", err)
+		}
+
+		if len(out) == 0 {
+			b.Fatal("no lines survived the filter")
+		}
+	}
+}
+
+// BenchmarkAdvancedFiltersLevelsTime exercises the post-filter pass with a
+// Levels filter (per-line lineLevel/hasFold) and a time window (per-line
+// parseLineTime) over a dense match set.
+func BenchmarkAdvancedFiltersLevelsTime(b *testing.B) {
+	const nLines = 200_000
+
+	idx := benchFile(b, nLines, 2)
+	se := NewSearchEngine(idx)
+
+	primary, err := se.SearchWithContext(b.Context(), SearchOptions{Query: "exception", CaseSensitive: false})
+	if err != nil {
+		b.Fatalf("primary search: %v", err)
+	}
+
+	opts := SearchOptions{
+		Levels:   []string{"OTHER"},
+		TimeFrom: "2026-08-15T00:00:00Z",
+		TimeTo:   "2026-08-16T00:00:00Z",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if _, err := se.ApplyAdvancedFilters(b.Context(), opts, primary); err != nil {
+			b.Fatalf("advanced filters: %v", err)
+		}
+	}
+}
+
+// BenchmarkParseLineTime pins the per-line timestamp parse cost of the
+// time-filter path (M6): candidates construction plus time.Parse attempts.
+func BenchmarkParseLineTime(b *testing.B) {
+	line := "2026-08-15T10:00:00.000Z level=info svc=1 request handled ok latency=12ms status=200"
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, ok := parseLineTime(line); !ok {
+			b.Fatal("timestamp not parsed")
+		}
+	}
+}
