@@ -1132,6 +1132,43 @@ document.addEventListener('DOMContentLoaded', async () => {
             const what = data?.path ?? data?.tab_id ?? 'unknown';
             showToast(`${what}: ${data?.error ?? ''}`, 'error');
         });
+
+        // Second-instance "Open with" / CLI: open paths in new tabs (or focus
+        // existing). Prefer OpenFiles(paths) like drag-drop; fall back to
+        // pre-built stats from the backend if paths are missing.
+        (window as any).runtime.EventsOn('app:open-files', async (data: any) => {
+            const api = getApi();
+            const paths: string[] = Array.isArray(data?.paths)
+                ? data.paths.filter((p: unknown) => typeof p === 'string' && p)
+                : (Array.isArray(data) && typeof data[0] === 'string' ? data : []);
+
+            if (paths.length > 0 && api) {
+                try {
+                    const statsList = await api.OpenFiles(paths);
+                    if (statsList && statsList.length > 0) {
+                        statsList.forEach((stats: FileStatsResponse) => tabManager.addOrUpdateTab(stats));
+                    }
+                    return;
+                } catch (err) {
+                    console.error('Failed to open files from second instance:', err);
+                    showToast(String((err as any)?.message ?? err), 'error');
+                }
+            }
+
+            const list = Array.isArray(data?.files)
+                ? data.files
+                : (Array.isArray(data) ? data : (data ? [data] : []));
+            for (const stats of list) {
+                if (stats && (stats as FileStatsResponse).tab_id) {
+                    try {
+                        tabManager.addOrUpdateTab(stats as FileStatsResponse);
+                    } catch (err) {
+                        console.error('Failed to add tab from second instance:', err);
+                        showToast(String((err as any)?.message ?? err), 'error');
+                    }
+                }
+            }
+        });
     }
 
     // --- Open files ---

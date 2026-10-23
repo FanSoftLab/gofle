@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -239,6 +240,46 @@ func (a *App) emitEvent(name string, data any) {
 	}
 }
 
+
+// onSecondInstanceLaunch is invoked by Wails SingleInstanceLock when the user
+// launches GoFLE again (e.g. "Open with" on a log file) while an instance is
+// already running. Paths from the second process are opened as tabs in this
+// window; a second OS window is never created.
+//
+// Wails sets SecondInstanceData.Args to os.Args[1:] (no executable name) on
+// all platforms. Relative paths are resolved against WorkingDirectory when set.
+func (a *App) onSecondInstanceLaunch(data options.SecondInstanceData) {
+	if a == nil || a.ctx == nil {
+		return
+	}
+
+	// Bring the existing window forward (Wails does not focus automatically).
+	runtime.WindowUnminimise(a.ctx)
+	runtime.Show(a.ctx)
+
+	paths := extractFilePathArgsIn(data.Args, data.WorkingDirectory)
+	slog.Info("second instance launch",
+		"args", data.Args,
+		"cwd", data.WorkingDirectory,
+		"resolved_paths", paths,
+	)
+	if len(paths) == 0 {
+		return
+	}
+
+	// Open on the backend first so tab state exists even if the UI event is delayed.
+	responses, err := a.OpenFiles(paths)
+	if err != nil {
+		slog.Warn("second-instance open failed", "err", err, "paths", paths)
+	}
+
+	// Prefer paths so the frontend can call OpenFiles (same path as drag-drop);
+	// include any stats already produced as a fallback.
+	a.emitEvent("app:open-files", map[string]any{
+		"paths": paths,
+		"files": responses,
+	})
+}
 
 // Startup is the Wails lifecycle hook: it captures the runtime context, parses
 // any file arguments from the OS, and starts the 500 ms tail-poller goroutine.

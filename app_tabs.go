@@ -742,23 +742,43 @@ func newTabID(prefix, explicit string) string {
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UnixNano(), tabIDSeq.Add(1))
 }
 
-// extractFilePathArgs scans the process arguments and returns those that refer
-// to existing regular files. This lets the OS "Open with" / file-association
-// flow pass log paths straight to the app on launch.
+// extractFilePathArgs scans process argv (os.Args) and returns those that refer
+// to existing regular files. argv[0] (the binary) is skipped. This lets the OS
+// "Open with" / file-association flow pass log paths straight to the app on launch.
 func extractFilePathArgs(args []string) []string {
-	files := make([]string, 0)
+	if len(args) == 0 {
+		return nil
+	}
+	// os.Args[0] is the executable. Wails SecondInstanceData.Args is already
+	// os.Args[1:] — use extractFilePathArgsIn for that payload.
+	return extractFilePathArgsIn(args[1:], "")
+}
 
-	for i, a := range args {
-		if i == 0 {
-			continue // skip the binary path
+// extractFilePathArgsIn returns existing regular-file paths from args.
+// It does NOT skip args[0]: Wails SingleInstanceLock passes
+// SecondInstanceData.Args as os.Args[1:] on Linux/Windows/macOS, so the first
+// element is already a user argument (typically the file to open).
+// Relative paths are resolved against workDir when it is non-empty.
+func extractFilePathArgsIn(args []string, workDir string) []string {
+	files := make([]string, 0, len(args))
+
+	for _, a := range args {
+		if a == "" || strings.HasPrefix(a, "-") {
+			continue
 		}
 
-		if strings.HasPrefix(a, "-") {
-			continue // skip flags
+		path := a
+		if workDir != "" {
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(workDir, path)
+			}
+			if abs, err := filepath.Abs(path); err == nil {
+				path = abs
+			}
 		}
 
-		if info, err := os.Stat(a); err == nil && !info.IsDir() {
-			files = append(files, a)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			files = append(files, path)
 		}
 	}
 

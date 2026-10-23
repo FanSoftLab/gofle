@@ -100,6 +100,14 @@ func run() int {
 		Bind: []any{
 			app,
 		},
+		// One process only: "Open with" / file associations while GoFLE is
+		// already running deliver paths to the existing window as new tabs
+		// instead of spawning another window.
+		SingleInstanceLock: &options.SingleInstanceLock{
+			// Stable UUID — Wails derives mutex/dbus names from this.
+			UniqueId:               "e7c4a1b2-9f3d-4e8a-b6c0-1d2e3f4a5b6c",
+			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
+		},
 		DragAndDrop: &options.DragAndDrop{
 			EnableFileDrop:  true,
 			CSSDropProperty: "--wails-drop-target",
