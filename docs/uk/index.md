@@ -21,8 +21,8 @@
 GoFLE — це **орієнтований на читання переглядач логів**, розроблений для:
 
 - Відкриття файлів будь-якого розміру (сотні МБ — ГБ) миттєво через індекс зміщень рядків
-- Live tail / follow локальних та віддалених логів
-- Паралельний підрядковий/regex пошук з розширеними фільтрами (Nearby, Levels, Time, Exclude, Range, Top)
+- Слідкування / follow локальних та віддалених логів
+- Паралельний підрядковий/regex пошук з розширеними фільтрами (Nearby — Поруч, Levels — Рівні, Time — Час, Exclude — Виключити, Range — Діапазон, Top — Топ)
 - Кілька вкладок з кольоровими групами та відновленням сесії
 - Віддалений доступ через SSH та FTP/FTPS (explicit/implicit) з пінгуванням сертифікатів
 - Термінальний компаньйон (`gofle`), що повторно використовує той самий Go бекенд
@@ -45,9 +45,9 @@ GoFLE **навмисно не є**:
 | Підключитися через FTP/FTPS | [Відкрити віддалено (FTP/FTPS)](../user-guide/open-remote-ftp.md) |
 | Пошук з regex | [Основи пошуку](../user-guide/search-basics.md) |
 | Використати розширені фільтри | [Розширений пошук](../user-guide/search-advanced.md) |
-| Увімкнути live tail | [Follow (Live Tail)](../user-guide/follow-tail.md) |
+| Увімкнути слідкування | [Слідкування (Live Tail)](../user-guide/follow-tail.md) |
 | Організувати вкладками/групами | [Вкладки та групи](../user-guide/tabs-groups.md) |
-| Налаштувати параметри | [UI налаштувань](../configuration/settings-ui.md) |
+| Налаштувати параметри | [Налаштування UI](../configuration/settings-ui.md) |
 | Використати CLI | [Огляд CLI](../cli-reference/cli-overview.md) |
 | Вирішити проблеми SSH | [SSH з'єднання](../troubleshooting/ssh-connection.md) |
 | Переглянути всі скорочення | [Клавіатурні скорочення](../user-guide/keyboard-shortcuts.md) |
@@ -86,10 +86,10 @@ GoFLE слідує моделі **тонкий бекенд / тонкий фр�
 ```
 
 Ключові пакети:
-- `pkg/indexer` — індекс зміщень байтів, `pread` випадковий доступ, інкрементальний tail
+- `pkg/indexer` — індекс зміщень байтів, `pread` випадковий доступ, інкрементальне слідкування
 - `pkg/search` — паралельний worker pool, regex/substring, LRU кеш скомпільованих regex
 - `pkg/remote` — спільні інтерфейси `Streamer`/`Lister` (реалізовані в `pkg/ssh`, `pkg/ftp`)
-- `pkg/config` —.persisted JSON + AES-GCM зашифровані секрети
+- `pkg/config` — persisted JSON + AES-GCM зашифровані секрети
 - `pkg/logging` — централізований `slog` для десктопного бінарника та `gofle` CLI
 
 ---
@@ -102,9 +102,9 @@ GoFLE слідує моделі **тонкий бекенд / тонкий фр�
 |--------|--------------|-------------|
 | [Огляд](index.md) | Concept | Що таке GoFLE, для кого, архітектура |
 | [Початок роботи](../getting-started/) | Task | Передумови, встановлення, перший запуск |
-| [Користувацький посібник](../user-guide/) | Task | Всі користувацькі workflow (open, search, follow, tabs, export) |
-| [Налаштування](../configuration/) | Reference | Settings, config files, повна таблиця налаштувань |
-| [Довідка CLI](../cli-reference/) | Reference | `gofle` команди, прапори, клавіатура viewer |
+| [Користувацький посібник](../user-guide/) | Task | Всі користувацькі завдання (open, search, follow, tabs, export) |
+| [Налаштування](../configuration/) | Reference | Налаштування, config files, повна таблиця налаштувань |
+| [Довідка CLI](../cli-reference/) | Reference | `gofle` команди, прапори, клавіатура переглядача |
 | [Вирішення проблем](../troubleshooting/) | Troubleshooting | Симптом → причина → вирішення для поширених проблем |
 | [Довідка API](../api-reference/) | Reference | Wails bridge, Go пакети, frontend модулі |
 | [Релізи](../release/) | Release | Changelog, процес релізу, міграційні гайди |
@@ -124,7 +124,7 @@ GoFLE слідує моделі **тонкий бекенд / тонкий фр�
 - **search preset** / **пресет пошуку** — збережена комбінація фільтрів
 - **tab group** / **група вкладок** — кольорова колекція вкладок
 - **config directory** / **директорія конфігурації** — OS-специфічна папка налаштувань
-- **terminal viewer** / **термінальний переглядач** — `gofle` CLI інтерактивний viewer
+- **terminal viewer** / **термінальний переглядач** — `gofle` CLI інтерактивний переглядач
 
 ---
 

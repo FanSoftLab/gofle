@@ -1,7 +1,7 @@
 # Передумови
 
 > **Тип контенту**: Reference — системні вимоги для білду та запуску GoFLE.
-> **Аудиторія**: Всі користувачі (end users, developers, contributors)
+> **Аудиторія**: Всі користувачі (кільцевий користувач, розробник, контриб'ютор)
 > **Verified**: 2026-10-29 — перевірено проти білд-скриптів та Wails документації
 
 ## Призначення
@@ -87,7 +87,7 @@ docker --version  # Для Docker білдів
 
 ## Пов'язані теми
 
-- [Docker Build Procedure](install-docker.md)
-- [Local Build Procedure](install-local.md)
-- [Linux Package Install](install-linux.md)
-- [First Run](first-run.md)
+- [Процедура білду Docker](install-docker.md)
+- [Процедура локального білду](install-local.md)
+- [Встановлення пакета Linux](install-linux.md)
+- [Перший запуск](first-run.md)

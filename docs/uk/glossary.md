@@ -21,8 +21,8 @@
 | Time фільтр | **фільтр часу** | **Time filter** | Фільтр за діапазоном дати/часу з опціональною вимогою timestamp | Search advanced, help, settings | time, date filter, фільтр дати |
 | Exclude фільтр | **фільтр виключення** | **Exclude filter** | Патерни (один на рядок), що видаляють відповідні рядки з результатів | Search advanced, help, settings | exclude, exclusion patterns, виключення |
 | Top unique | **Топ унікальних** | **Top unique** | Агрегація поточних результатів: нормалізовані рядки згруповані за частотою | Search advanced, help, settings | top, frequent matches, топ |
-| Контекстні рядки | **контекст: рядки до/після** | **Context lines before/after** | Кількість рядків, показаних навколо кожного match в results (зараз in-row only) | Search settings, help | context, surrounding lines, контекст |
-| Follow режим | **режим слідкування** | **Follow mode** | Стан, коли view залишається в кінці файлу, коли приходять нові рядки | UI, settings, help | tail mode, auto-scroll, режим хвоста |
+| Контекстні рядки | **контекст: рядки до/після** | **Context lines before/after** | Кількість рядків, показаних навколо кожного збігу на панелі результатів (зараз у рядку) | Search settings, help | context, surrounding lines, контекст |
+| Follow режим | **режим слідкування** | **Follow mode** | Стан, коли перегляд залишається в кінці файлу, коли приходять нові рядки | UI, settings, help | tail mode, auto-scroll, режим хвоста |
 | Search combine logic | **логіка другого поля (AND/OR)** | **Secondary field logic (AND/OR)** | Чи AND поле вимагає обидва патерни (AND) або будь-який (OR) в тому ж рядку | Search UI, help, settings | combine logic, AND/OR logic, логіка пошуку |
 | Stall timeout | **таймаут тиші завантаження** | **Download silence timeout** | Прервати remote download, якщо N секунд не отримано байтів (повільні але активні передачі не чіпаються) | Remote settings, SSH/FTP, troubleshooting | stall timeout, silence timeout, таймаут стриму |
 | Auto-accept host key | **автоприйняття ключа хоста** | **Auto-accept host key** | Зберегти невідомий SSH host key / FTPS cert без запиту (позначено як небезпечне) | Remote settings, security, troubleshooting | auto-accept, trust on first use, автоматичне прийняття |
@@ -31,18 +31,18 @@
 | Search history | **історія введення** | **Search input history** | Попередні запити, збережені на поле пошуку; налаштовувана глибина | Search UI, settings, help | search history, query history, історія пошуку |
 | Word wrap | **перенос довгих рядків** | **Word wrap** | Довгі рядки повністю переносяться в межах вікна (без горизонтального скролу) | Viewer settings, help, performance | wrap, line wrap, перенос рядків |
 | Line density | **щільність рядків** | **Line density** | Вертикальний інтервал між рядками логу: Compact / Normal / Comfortable | Viewer settings, help | density, row height, висота рядка |
-| View mode | **режим перегляду** | **View mode** | Дефолтний layout панелей: Split (log + results), Results only, Log only | Viewer settings, help, toolbar | pane mode, layout, режим панелей |
-| Split view | **розділений перегляд** | **Split view** | Log pane і results pane показані одночасно | Viewer settings, toolbar, help | split, split pane, розділена панель |
+| View mode | **режим перегляду** | **View mode** | Дефолтний вигляд панелей: Split (log + панель результатів), лише результати, лише лог | Viewer settings, help, toolbar | pane mode, layout, режим панелей |
+| Split view | **розділений перегляд** | **Split view** | Панель логу і панель результатів показані одночасно | Viewer settings, toolbar, help | split, split pane, розділена панель |
 | Results only view | **лише результати** | **Results only** | Видна тільки панель результатів пошуку | Viewer settings, toolbar, help | filter view, results view, режим результатів |
-| Log only view | **лише лог** | **Log only** | Видна тільки повна log pane (results приховані) | Viewer settings, toolbar, help | normal view, log view, режим логу |
-| Go to line | **перейти до рядка** | **Go to line** | Перехід до конкретного номера рядка в повній log pane (Ctrl+G) | UI, keyboard shortcuts, help | goto, line navigation, перехід до рядка |
-| Export results | **зберегти результати пошуку** | **Save search results** | Записати matched рядки (з номерами рядків) у .log файл (Ctrl+S) | UI, context menu, help, shortcuts | export matches, save matches, експорт збігів |
-| Export full log | **зберегти лог як...** | **Save log as...** | Записати повний лог файл на диск з context menu | UI, context menu, help | save full log, export log, експорт логу |
+| Log only view | **лише лог** | **Log only** | Видна тільки повна панель логу (панель результатів прихована) | Viewer settings, toolbar, help | normal view, log view, режим логу |
+| Go to line | **перейти до рядка** | **Go to line** | Перехід до конкретного номера рядка в повній панелі логу (Ctrl+G) | UI, keyboard shortcuts, help | goto, line navigation, перехід до рядка |
+| Export results | **зберегти результати пошуку** | **Save search results** | Записати збігаючі рядки (з номерами рядків) у .log файл (Ctrl+S) | UI, контекстне меню, help, shortcuts | export matches, save matches, експорт збігів |
+| Export full log | **зберегти лог як...** | **Save log as...** | Записати повний лог файл на диск з контекстного меню | UI, контекстне меню, help | save full log, export log, експорт логу |
 | SSH connection form | **форма SSH-підключення** | **SSH connection form** | Модалка з host, port, user, auth type, key/password, remote path, browse button | UI, help, troubleshooting | SSH modal, SSH dialog, SSH форма |
 | FTP connection form | **форма FTP-підключення** | **FTP connection form** | Модалка з host, port, user, password, TLS mode, remote path, browse button | UI, help, troubleshooting | FTP modal, FTP dialog, FTP форма |
 | Remote directory browser | **браузер віддаленого каталогу** | **Remote directory browser** | Інтерактивний file picker для SSH/FTP серверів (browse, filter, navigate) | UI, SSH/FTP forms, help | remote browser, directory picker, віддалений браузер |
 | Primary query | **основний запит** | **Primary query** | Головний пошуковий текст/regex, введений в ліве поле пошуку | Search UI, help, examples | primary, main query, головний запит |
-| Secondary AND field | **AND-поле** | **AND field** | Друге поле пошуку, яке вимагає match в тому ж рядку (логічне AND з primary) | Search UI, help, examples | AND, secondary query, друге поле |
+| Secondary AND field | **AND-поле** | **AND field** | Друге поле пошуку, яке вимагає збіг в тому ж рядку (логічне AND з primary) | Search UI, help, examples | AND, secondary query, друге поле |
 | Invert match | **інвертувати збіг** | **Invert match** | Показати рядки, що НЕ відповідають запиту (Alt+I) | Search UI, help, shortcuts | invert, negative match, інверсія |
 | Match case | **враховувати регістр** | **Match case** | Case-sensitive пошук (Alt+C) | Search UI, help, shortcuts | case sensitive, case, регістр |
 | Regex mode | **регулярний вираз** | **Regular expression** | Інтерпретувати запит як RE2/Go regex (Alt+R) | Search UI, help, shortcuts | regex, regexp, regex mode |

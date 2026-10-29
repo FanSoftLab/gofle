@@ -32,22 +32,22 @@
 | `/` | Фокус на пошук | Global |
 | `Enter` | Виконати пошук | Поле пошуку |
 | `Esc` | Очистити пошук / закрити діалог | Поле пошуку, діалоги |
-| `Alt+C` | Toggle Match Case | Global |
-| `Alt+R` | Toggle Regex | Global |
-| `Alt+I` | Toggle Invert Match | Global |
+| `Alt+C` | Toggle Match Case (перемикання регістру) | Global |
+| `Alt+R` | Toggle Regex (перемикання regex) | Global |
+| `Alt+I` | Toggle Invert Match (перемикання інверсії) | Global |
 | `\` | Фокус на AND поле | Global |
-| `F3` / `Alt+↓` | Next match | Global |
-| `Shift+F3` / `Alt+↑` | Previous match | Global |
-| `Alt+Home` | First match | Global |
-| `Alt+End` | Last match | Global |
+| `F3` / `Alt+↓` | Next match (наступний збіг) | Global |
+| `Shift+F3` / `Alt+↑` | Previous match (попередній збіг) | Global |
+| `Alt+Home` | First match (перший збіг) | Global |
+| `Alt+End` | Last match (останній збіг) | Global |
 
 ### Follow & View
 
 | Скорочення | Дія | Контекст |
 |------------|-----|----------|
 | `F` | Toggle Follow (Tail) | Global |
-| `r` | Toggle Results Only view | Global |
-| `s` / `m` | Split view / cycle view mode | Global |
+| `r` | Toggle Results Only view (режим лише результатів) | Global |
+| `s` / `m` | Split view / cycle view mode (розділений перегляд / цикл режимів перегляду) | Global |
 
 ### Help & Settings
 
@@ -61,8 +61,8 @@
 
 | Скорочення | Дія | Контекст |
 |------------|-----|----------|
-| `Ctrl+S` | Зберегти результати пошуку | Results pane focused |
-| `Ctrl+Shift+S` | Зберегти повний лог | Log pane focused |
+| `Ctrl+S` | Зберегти результати пошуку | Панель результатів в фокусі |
+| `Ctrl+Shift+S` | Зберегти повний лог | Панель логу в фокусі |
 
 ### Діалоги та форми
 
@@ -70,7 +70,7 @@
 |------------|-----|----------|
 | `Esc` | Закрити діалог / зняти фокус | Будь-який діалог |
 | `Enter` | Підтвердити форму / застосувати фільтр | Форми |
-| `Tab` / `Shift+Tab` | Next/previous поле | Форми |
+| `Tab` / `Shift+Tab` | Next/previous поле (наступне/попереднє поле) | Форми |
 
 ---
 
@@ -92,20 +92,20 @@
 | `/` | Почати пошук (відкриває input знизу) |
 | `Enter` (у пошуку) | Виконати пошук |
 | `Esc` (у пошуку) | Скасувати введення пошуку |
-| `Alt+R` | Toggle Regex mode |
-| `Alt+I` | Toggle Invert Match |
-| `Alt+C` | Toggle Match Case |
-| `n` / `p` | Next / Previous match |
-| `[` / `]` | First / Last match |
-| `\` | Secondary AND filter (відкриває AND input) |
+| `Alt+R` | Toggle Regex (перемикання regex) |
+| `Alt+I` | Toggle Invert Match (перемикання інверсії) |
+| `Alt+C` | Toggle Match Case (перемикання регістру) |
+| `n` / `p` | Next / Previous match (наступний / попередній збіг) |
+| `[` / `]` | First / Last match (перший / останній збіг) |
+| `\` | Secondary AND filter (відкриває AND input — поле AND) |
 
 ### Розширені фільтри
 
 | Клавіша | Дія |
 |---------|-----|
-| `A` | Відкрити форму Advanced Filters (Nearby, Levels, Time, Exclude, Range, Top, Presets) |
-| `u` | Toggle Top Unique overlay |
-| `P` | Відкрити Search Presets (load/save/delete) |
+| `A` | Відкрити форму розширених фільтрів (Nearby — Поруч, Levels — Рівні, Time — Час, Exclude — Виключити, Range — Діапазон, Top — Топ, Presets — Пресети) |
+| `u` | Toggle Top Unique overlay (перемикання Top Unique — унікальні топ) |
+| `P` | Відкрити пресети пошуку (load/save/delete — завантажити/зберегти/видалити) |
 
 ### Вкладки та Групи
 
@@ -114,31 +114,31 @@
 | `Ctrl+Tab` / `Ctrl+PgDn` | Наступна вкладка |
 | `Ctrl+Shift+Tab` / `Ctrl+PgUp` | Попередня вкладка |
 | `1`–`9` | Перейти до вкладки N |
-| `T` | Відкрити Recent list → відкрити вибір як нову вкладку |
-| `t` | У Recent picker: відкрити виділене як нову вкладку |
-| `G` | Tab Group — назва/колір для активної вкладки |
+| `T` | Відкрити список нещодавніх → відкрити вибір як нову вкладку |
+| `t` | У виборі нещодавніх: відкрити виділене як нову вкладку |
+| `G` | Група вкладок — назва/колір для активної вкладки |
 | `Y` | Відновити вкладки з збереженої сесії |
 | `Ctrl+W` | Закрити поточну вкладку (остання вкладка виходить) |
 
-### View & Export
+### Перегляд та Експорт
 
 | Клавіша | Дія |
 |---------|-----|
-| `r` | Toggle Results Only view (filter mode) |
-| `s` / `m` | Split view / cycle view mode (Log+Results / Results Only / Log Only) |
-| `f` | Toggle Follow (Tail) |
-| `e` | Export — відкриває діалог експорту (whole file або matches) |
-| `v` | Toggle view mode |
+| `r` | Перемикання режиму лише результатів (режим лише результатів) |
+| `s` / `m` | Розділений перегляд / цикл режимів перегляду (Лог+Результати / Лише результати / Лише лог) | Глобально |
+| `f` | Перемикання слідкування (слідкування) |
+| `e` | Експорт — відкриває діалог експорту (повний файл або збіги) |
+| `v` | Перемикання режиму перегляду (перемикання режиму перегляду) |
 
-### Settings & Help
+### Налаштування та Довідка
 
 | Клавіша | Дія |
 |---------|-----|
-| `F2` / `,` | Відкрити Settings (view mode, search defaults, context/nearby/top) |
-| `?` | Показати повний help overlay |
-| `q` / `Ctrl+C` | Вийти з viewer |
+| `F2` / `,` | Відкрити Налаштування (режим перегляду — режим перегляду, дефолти пошуку — дефолти пошуку, контекст/поруч/топ — контекст/поруч/топ) |
+| `?` | Показати повну довідку (довідка) | Глобально |
+| `q` / `Ctrl+C` | Вийти з переглядача |
 
-### Clipboard
+### Буфер обміну
 
 | Клавіша | Дія |
 |---------|-----|
@@ -147,51 +147,51 @@
 
 ---
 
-## Context Menu (Right-Click)
+## Контекстне меню (правий клік)
 
-Недоступний у термінальному viewer. Використовуйте keybindings вище.
-
----
-
-## Mouse Support
-
-- **Scroll wheel**: Прокрутка log/results
-- **Click**: Фокус панелі, вибір рядка
-- **Drag**: Виділення тексту (для `Ctrl+C`)
-
-Mouse support залежить від термінального емулятора (більшість сучасних підтримує).
+Недоступне в термінальному переглядачі. Використовуйте клавіатурні скорочення вище.
 
 ---
 
-## Search Input Mode
+## Підтримка миші
 
-Коли `/` відкриває search input:
+- **Колесо прокрутки**: Прокрутка log/панель результатів
+- **Клік**: Фокус панелі, вибір рядка
+- **Перетягування**: Виділення тексту (для `Ctrl+C`)
+
+Підтримка миші залежить від термінального емулятора (більшість сучасних підтримує).
+
+---
+
+## Режим введення пошуку
+
+Коли `/` відкриває поле пошуку (поле пошуку):
 
 | Клавіша | Дія |
 |---------|-----|
-| `Tab` | Цикл: Primary → AND → Regex → Case → Invert → Search History |
-| `Shift+Tab` | Reverse cycle |
+| `Tab` | Цикл: Основний → AND → Regex → Регістр → Інверсія → Історія пошуку (історія пошуку) |
+| `Shift+Tab` | Зворотний цикл (зворотний цикл) |
 | `Enter` | Виконати пошук |
-| `Esc` | Закрити search input |
-| `↑` / `↓` | Навігація по search history |
+| `Esc` | Закрити поле пошуку (поле пошуку) |
+| `↑` / `↓` | Навігація по історії пошуку (історії пошуку) |
 
 ---
 
-## Advanced Filters Form
+## Форма розширених фільтрів
 
 Коли `A` відкриває форму:
 
 | Клавіша | Дія |
 |---------|-----|
 | `Tab` / `Shift+Tab` | Навігація полями |
-| `Enter` | Apply / save поточний фільтр |
+| `Enter` | Застосувати / зберегти поточний фільтр (застосувати/зберегти поточний фільтр) |
 | `Esc` | Закрити форму |
-| `Space` | Toggle checkboxes (Levels, etc.) |
-| `←` / `→` | Зміна radio опцій (Nearby mode, Range mode) |
+| `Space` | Перемикання чекбоксів (Рівні тощо) (перемикання чекбоксів: Рівні тощо) |
+| `←` / `→` | Зміна радіо опцій (Режим поруч, Режим діапазону) |
 
 ---
 
-## Presets Menu
+## Меню пресетів
 
 Коли `P` відкриває пресети:
 
@@ -205,50 +205,50 @@ Mouse support залежить від термінального емулято�
 
 ---
 
-## Settings Menu
+## Меню налаштувань
 
-Коли `F2` / `,` відкриває settings:
+Коли `F2` / `,` відкриває налаштування (налаштування):
 
 | Клавіша | Дія |
 |---------|-----|
 | `Tab` / `Shift+Tab` | Навігація секціями |
-| `Enter` / `Space` | Toggle / редагувати значення |
+| `Enter` / `Space` | Перемикання / редагувати значення (перемикання/редагування значення) |
 | `Esc` | Закрити та зберегти |
 
 ---
 
-## Tab Indicators
+## Індикатори вкладок
 
-Tab bar показує:
+Панель вкладок показує:
 - Ім'я вкладки (скорочене)
 - Індикатор кольору групи (якщо згруповано)
-- Remote badge: `SSH` / `FTP` (для remote вкладок)
+- Індикатор віддаленого: `SSH` / `FTP` (для віддалених вкладок — віддалених вкладок)
 - Активна вкладка підсвічена
 
 ---
 
-## Status Bar
+## Статус бар
 
 Нижній бар показує:
-- Шлях до файлу / remote URL
-- Кількість рядків / кількість match
-- Follow state: `Tail: ACTIVE` / `Tail: PAUSED` / `Tail: —`
-- Search state: `Results Only` badge (натисніть `r` для toggle)
+- Шлях до файлу / URL віддаленого
+- Кількість рядків / кількість збігів
+- Стан слідкування: `Follow: ACTIVE` / `Follow: PAUSED` / `Follow: —`
+- Стан пошуку: значок `Лише результати` (натисніть `r` для перемикання)
 - Поточний час (опціонально)
 
 ---
 
 ## Колірне підсвічування
 
-| Елемент | Колір | Toggle |
+| Елемент | Колір | Перемикання (перемикання) |
 |---------|-------|--------|
-| Primary match | Gold/Yellow | Settings |
-| AND match | Green | Settings |
-| Nearby match | Cyan | Settings |
-| Exclude match | Red | Settings |
-| Line numbers | Dim | Settings |
+| Primary match (основний збіг) | Gold/Yellow | Налаштування |
+| AND match (AND-збіг) | Green | Налаштування |
+| Nearby match (збіг поруч) | Cyan | Налаштування |
+| Exclude match (виключення) | Red | Налаштування |
+| Line numbers | Dim | Налаштування |
 
-Кольори налаштовуються в Settings (спільно з GUI через `settings.json`).
+Кольори налаштовуються в Налаштуваннях (спільно з GUI через `settings.json`).
 
 ---
 
@@ -257,5 +257,5 @@ Tab bar показує:
 - [Основи пошуку](search-basics.md)
 - [Розширений пошук](search-advanced.md)
 - [Вкладки та групи](tabs-groups.md)
-- [Follow (Live Tail)](follow-tail.md)
-- [CLI Viewer Keys](../cli-reference/cli-viewer-keys.md)
+- [Слідкування (Live Tail)](follow-tail.md)
+- [Клавіатура CLI Viewer](../cli-reference/cli-viewer-keys.md)
