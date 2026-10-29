@@ -59,6 +59,12 @@ jobs:
         with:
           version: latest
 
+      - name: Run Vale (documentation linting)
+        uses: errata-ai/vale-action@v2
+        with:
+          files: docs/
+          config: .vale.ini
+
   govulncheck:
     name: Go Vulnerability Check
     runs-on: ubuntu-latest

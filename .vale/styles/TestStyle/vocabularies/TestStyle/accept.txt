@@ -1,0 +1,34 @@
+# Technical terms accepted in GoFLE documentation
+# These are legitimate technical terms that should not be flagged
+
+bool
+Bubbletea
+Esc
+goto
+camelCase
+localStorage
+known_hosts
+ftp_certs
+vsftpd
+chroot
+logrotate
+publickey
+SREs
+WMs
+Adwaita
+fontconfig
+Thunar
+env
+Godoc
+godoc
+Dedup
+arg
+args
+sftp
+ungroup
+recents
+healthcheck
+Backreferences
+px
+unexported
+libs

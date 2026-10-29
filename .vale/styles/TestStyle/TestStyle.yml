@@ -1,0 +1,5 @@
+extends: Vale
+
+Substitution:
+  level: error
+  dictionary: substitutions.txt

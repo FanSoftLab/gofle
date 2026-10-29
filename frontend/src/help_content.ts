@@ -117,11 +117,11 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: { uk: 'Follow', en: 'Follow' },
         body: {
           uk: [
-            'Кнопка зі стрілками вниз або клавіша F — «хвіст» файлу: нові рядки автоматично з’являються внизу.',
-            'Якщо прокрутити лог вгору, follow тимчасово зупиняється, щоб не втратити контекст.',
+            'Кнопка зі стрілками вниз або клавіша F — слідкування за файлом: нові рядки автоматично з’являються внизу.',
+            'Якщо прокрутити лог вгору, слідкування тимчасово зупиняється, щоб не втратити контекст.',
           ],
           en: [
-            'Down-arrows button or F — file tail: new lines appear at the bottom automatically.',
+            'Down-arrows button or F — follow: new lines appear at the bottom automatically.',
             'Scrolling the log up pauses follow so you do not lose context.',
           ],
         },
@@ -159,9 +159,9 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: { uk: 'Навігація по збігах', en: 'Match navigation' },
         body: {
           uk: [
-            'Кнопки ⇈ / ↑ / ↓ / ⇊ — перший, попередній, наступний, останній результат у панелі results.',
+            'Кнопки ⇈ / ↑ / ↓ / ⇊ — перший, попередній, наступний, останній результат у панелі результатів.',
             'Лічильник показує кількість збігів відносно розміру файлу.',
-            'Іконка збереження — експорт поточних results у файл.',
+            'Іконка збереження — експорт поточних результатів у файл.',
           ],
           en: [
             'Buttons ⇈ / ↑ / ↓ / ⇊ — first, previous, next, last hit in the results pane.',
@@ -230,14 +230,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: {
           uk: [
             'Пошук виконується на бекенді по індексу рядків (паралельно по чанках), без завантаження всього файлу в UI.',
-            'Results — віртуалізований список: у пам’яті лише видимі рядки.',
-            'Клік по рядку в results підсвічує його і переходить до відповідного номера рядка в повному логу.',
+            'Панель результатів — віртуалізований список: у пам’яті лише видимі рядки.',
+            'Клік по рядку в панелі результатів підсвічує його і переходить до відповідного номера рядка в повному логу.',
             'При увімкненому переносі рядків позиція переходу враховує різну висоту рядків.',
           ],
           en: [
             'Search runs on the backend over the line index (chunked, parallel) without loading the whole file into the UI.',
-            'Results are virtualized: only visible rows stay in memory.',
-            'Click a results row to highlight it and jump to that line number in the full log.',
+            'Results pane is virtualized: only visible rows stay in memory.',
+            'Click a results pane row to highlight it and jump to that line number in the full log.',
             'With word wrap on, jump position accounts for variable row heights.',
           ],
         },
@@ -296,14 +296,14 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: { uk: 'Загальна ідея', en: 'General idea' },
         body: {
           uk: [
-            'Рядок чіпів над results: Поруч, Рівні, Час, Виключити, Діапазон, Топ, Пресети.',
+            'Рядок фільтр-чіпів над панеллю результатів: Поруч, Рівні, Час, Виключити, Діапазон, Топ, Пресети.',
             'Підсвічений чіп = фільтр активний. Обводка = відкрита форма налаштування.',
             'Клік по чіпу відкриває форму під рядком; повторний клік або Escape — закриває.',
             '«Застосувати» зберігає значення і перезапускає пошук; «Скинути» очищає цей фільтр.',
             'Фільтри комбінуються з primary/AND (спочатку збіги, потім пост-обробка).',
           ],
           en: [
-            'Chip row above results: Nearby, Levels, Time, Exclude, Range, Top, Presets.',
+            'Filter chip row above results pane: Nearby, Levels, Time, Exclude, Range, Top, Presets.',
             'Highlighted chip = filter active. Outline = its form is open.',
             'Click a chip to open the form under the bar; click again or Escape to close.',
             'Apply saves values and re-runs search; Clear resets that filter.',
@@ -408,15 +408,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: { uk: 'Топ', en: 'Top' },
         body: {
           uk: [
-            'Не окремий пошук по диску, а агрегація вже знайдених results.',
+            'Не окремий пошук по диску, а агрегація вже знайдених результатів на панелі результатів.',
             'Рядки нормалізуються (timestamp, довгі числа) і групуються; показується кількість × шаблон.',
-            'Увімкнення Топ показує список поверх results; вимкнення повертає звичайний список збігів.',
+            'Увімкнення Топ показує список поверх панелі результатів; вимкнення повертає звичайний список збігів.',
             'Ліміт унікальних рядків задається в Налаштування → Пошук.',
           ],
           en: [
-            'Not a separate disk search — aggregation of current results.',
+            'Not a separate disk search — aggregation of current results pane.',
             'Lines are normalized (timestamps, long numbers) and grouped; shows count × template.',
-            'Enabling Top overlays the list on results; disabling restores the normal match list.',
+            'Enabling Top overlays the list on results pane; disabling restores the normal match list.',
             'Unique-row limit is in Settings → Search.',
           ],
         },
@@ -476,7 +476,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: { uk: 'Пошук (налаштування)', en: 'Search (settings)' },
         body: {
           uk: [
-            'Контекст ±N — запас для майбутнього/сумісності; у results зараз показуються самі збіги.',
+            'Контекст ±N — запас для майбутнього/сумісності; на панелі результатів зараз показуються самі збіги.',
             'Режим і вікно «Поруч» за замовчуванням.',
             'Виключення як regex за замовчуванням.',
             'Лише рядки з timestamp — дефолт для фільтра Час.',
@@ -484,7 +484,7 @@ export const HELP_SECTIONS: HelpSection[] = [
             'Підсвітка термів: primary, AND, поруч, виключення — кольорові маркери в тексті логу.',
           ],
           en: [
-            '±N context — reserved for future/compat; results currently show match lines themselves.',
+            '±N context — reserved for future/compat; results pane currently shows match lines themselves.',
             'Default Nearby mode and window.',
             'Exclude-as-regex by default.',
             'Require timestamp — default for the Time filter.',
@@ -547,7 +547,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: {
           uk: [
             'Файл з’являється як вкладка; пошук і фільтри працюють як для локального файлу.',
-            'Follow періодично підтягує нові дані з сервера (залежно від протоколу й налаштувань).',
+            'Слідкування періодично підтягує нові дані з сервера (залежно від протоколу й налаштувань).',
           ],
           en: [
             'The file appears as a tab; search and filters work like for a local file.',
