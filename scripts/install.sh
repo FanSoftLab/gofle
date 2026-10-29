@@ -2,21 +2,66 @@
 set -e
 
 APP="GoFLE"
+CLI_APP="gofle"
 
 # 1. Precise directory resolution
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# 2. Flexible binary search (script directory or project root)
-if [ -f "$SCRIPT_DIR/$APP" ]; then
-    BIN_SRC="$SCRIPT_DIR/$APP"
-elif [ -f "$PROJECT_DIR/$APP" ]; then
-    BIN_SRC="$PROJECT_DIR/$APP"
-else
-    BIN_SRC="$SCRIPT_DIR/$APP" # Default for error message
-fi
+# 2. Detect current platform for binary selection
+detect_platform() {
+    local os arch
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        armv7l) arch="arm" ;;
+        i386|i686) arch="386" ;;
+    esac
+    
+    echo "${os}/${arch}"
+}
 
-# 3. Flexible icon search (build/ in project root or build/ next to script)
+PLATFORM="$(detect_platform)"
+PLATFORM_OS="${PLATFORM%/*}"
+PLATFORM_ARCH="${PLATFORM#*/}"
+
+# 3. Find binary for current platform (with fallback to generic name)
+find_binary() {
+    local app_name="$1"
+    local search_dirs=("$SCRIPT_DIR" "$PROJECT_DIR/dist" "$PROJECT_DIR")
+    
+    # Platform-specific binary names to try (in order of preference)
+    local candidates=()
+    
+    if [ "$PLATFORM_OS" = "windows" ] || [ "$PLATFORM_OS" = "mingw" ] || [ "$PLATFORM_OS" = "msys" ]; then
+        candidates+=("${app_name}-${PLATFORM_OS}-${PLATFORM_ARCH}.exe")
+        candidates+=("${app_name}.exe")
+    else
+        candidates+=("${app_name}-${PLATFORM_OS}-${PLATFORM_ARCH}")
+        candidates+=("${app_name}")
+    fi
+    
+    for dir in "${search_dirs[@]}"; do
+        for candidate in "${candidates[@]}"; do
+            if [ -f "$dir/$candidate" ]; then
+                echo "$dir/$candidate"
+                return 0
+            fi
+        done
+    done
+    
+    # Return first candidate as default for error message
+    echo "${search_dirs[0]}/${candidates[0]}"
+    return 1
+}
+
+BIN_SRC="$(find_binary "$APP")"
+CLI_BIN_SRC="$(find_binary "$CLI_APP")"
+
+# 4. Flexible icon search (build/ in project root or build/ next to script)
 if [ -f "$PROJECT_DIR/build/appicon.png" ]; then
     ICON_SRC="$PROJECT_DIR/build/appicon.png"
 elif [ -f "$SCRIPT_DIR/build/appicon.png" ]; then
@@ -32,6 +77,7 @@ APP_COMMENT="Go Fast Log Explorer"
 APP_TERMINAL="false"
 SELECTED_CATEGORIES=("Development" "Utility" "TextEditor")
 INTERACTIVE=false
+INSTALL_CLI=false
 
 # Available standard Freedesktop categories
 ALL_CATEGORIES=("Development" "Utility" "TextEditor" "System" "Office" "Graphics" "Network" "AudioVideo")
@@ -51,6 +97,9 @@ Customization flags:
   --terminal            Run application inside terminal (Terminal=true)
   --categories "C1;C2;" Custom categories separated by ';'
 
+CLI options:
+  --install-cli         Also install the 'gofle' CLI companion binary
+
 General:
   -h, --help            Show this help message
 EOF
@@ -68,6 +117,7 @@ while [[ $# -gt 0 ]]; do
         --categories) 
             IFS=';' read -r -a SELECTED_CATEGORIES <<< "$2"
             shift 2;;
+        --install-cli) INSTALL_CLI=true; shift;;
         -h|--help) usage; exit 0;;
         *) echo "Unknown argument: $1" >&2; usage; exit 1;;
     esac
@@ -76,11 +126,23 @@ done
 # File existence check with informative output
 if [ ! -f "$BIN_SRC" ]; then
     echo "Error: Executable file '$APP' not found!" >&2
-    echo "Checked locations:" >&2
-    echo "  - $SCRIPT_DIR/$APP" >&2
-    echo "  - $PROJECT_DIR/$APP" >&2
-    echo "Run ./build.sh first." >&2
+    echo "Checked locations for platform '$PLATFORM':" >&2
+    echo "  - $SCRIPT_DIR/GoFLE-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
+    echo "  - $SCRIPT_DIR/GoFLE" >&2
+    echo "  - $PROJECT_DIR/dist/GoFLE-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
+    echo "  - $PROJECT_DIR/dist/GoFLE" >&2
+    echo "Run ./build.sh first (or ./build.sh -os all -arch all for multi-platform)." >&2
     exit 1
+fi
+
+if [ "$INSTALL_CLI" = true ] && [ ! -f "$CLI_BIN_SRC" ]; then
+    echo "Warning: CLI binary '$CLI_APP' not found for platform '$PLATFORM', skipping CLI install." >&2
+    echo "Checked locations:" >&2
+    echo "  - $SCRIPT_DIR/gofle-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
+    echo "  - $SCRIPT_DIR/gofle" >&2
+    echo "  - $PROJECT_DIR/dist/gofle-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
+    echo "  - $PROJECT_DIR/dist/gofle" >&2
+    INSTALL_CLI=false
 fi
 
 if [ ! -f "$ICON_SRC" ]; then
@@ -167,6 +229,12 @@ if [ "$MODE" = "user" ]; then
     generate_desktop_file "$BIN_DIR/$APP" "$ICON_DIR/$APP.png" > "$APP_DIR/$APP.desktop"
     chmod 644 "$APP_DIR/$APP.desktop"
 
+    # Install CLI if requested
+    if [ "$INSTALL_CLI" = true ] && [ -f "$CLI_BIN_SRC" ]; then
+        install -Dm755 "$CLI_BIN_SRC" "$BIN_DIR/$CLI_APP"
+        echo "Installed CLI '$CLI_APP' to $BIN_DIR"
+    fi
+    
     echo "Installed $APP ($APP_NAME) for current user into $PREFIX"
 else
     if [ "$(id -u)" -ne 0 ]; then
@@ -177,12 +245,18 @@ else
             if [ "$APP_TERMINAL" = "true" ]; then
                 TERM_FLAG="--terminal"
             fi
-
+            
+            CLI_FLAG=""
+            if [ "$INSTALL_CLI" = true ]; then
+                CLI_FLAG="--install-cli"
+            fi
+            
             exec sudo "$0" --system \
                 ${INTERACTIVE:+--interactive} \
                 --name "$APP_NAME" \
                 --comment "$APP_COMMENT" \
                 $TERM_FLAG \
+                $CLI_FLAG \
                 --categories "$CATEGORIES_STRING"
         else
             echo "Error: system-wide install needs root privileges, but 'sudo' was not found." >&2
@@ -199,6 +273,12 @@ else
     
     generate_desktop_file "$BIN_DEST" "$APP.png" > "$APP_DEST"
     chmod 644 "$APP_DEST"
+    
+    # Install CLI if requested
+    if [ "$INSTALL_CLI" = true ] && [ -f "$CLI_BIN_SRC" ]; then
+        install -Dm755 "$CLI_BIN_SRC" "/usr/local/bin/$CLI_APP"
+        echo "Installed CLI '$CLI_APP' to /usr/local/bin"
+    fi
     
     gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 

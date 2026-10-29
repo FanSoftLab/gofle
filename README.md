@@ -463,8 +463,12 @@ dependencies, producing deterministic artifacts for one or many platforms.
 A Linux install/package helper is shipped at `scripts/install.sh`. It copies the
 binary to a `bin/` directory, installs the icon into the hicolor theme, and
 **generates** the `.desktop` entry for you (a committed `GoFLE.desktop` file is not
-part of the repo — the installer creates it at install time). Run it after a
-successful `linux/amd64` build:
+part of the repo — the installer creates it at install time).
+
+The installer **automatically detects the current platform** (Linux/Windows/macOS, amd64/arm64)
+and selects the matching binary from `dist/` (e.g., `GoFLE-linux-amd64`, `GoFLE-windows-amd64.exe`).
+This works with both single-target builds (`./build.sh`) and multi-platform builds
+(`./build.sh -os all -arch all`).
 
 ```bash
 # System-wide install (copies to /usr/local/bin/GoFLE and registers the menu entry)
@@ -472,12 +476,51 @@ sudo ./scripts/install.sh --system
 
 # Or install for the current user only (default; no sudo needed)
 ./scripts/install.sh --user
+
+# Also install the CLI companion (gofle)
+./scripts/install.sh --user --install-cli
+sudo ./scripts/install.sh --system --install-cli
 ```
 
 This makes GoFLE appear in the application menu and lets it be set as the default
 handler for `.log`/`.txt` files. The installer looks for the binary first next to
-itself and then at the repository root (`scripts/install.sh` lives one level under
-the repo root), so run `./build.sh` (which produces `./GoFLE` at the root) first.
+itself, then in `dist/`, then at the repository root.
+
+### Updating (Linux)
+
+Use `scripts/update.sh` to rebuild and reinstall. It runs `build.sh`, compares versions,
+and only reinstalls if the version changed (use `--force` to override).
+
+```bash
+# Update for current user (rebuilds by default)
+./scripts/update.sh --user
+
+# System-wide update
+sudo ./scripts/update.sh --system
+
+# Skip rebuild, only reinstall existing binaries
+./scripts/update.sh --user --no-build
+
+# Force update even if version unchanged
+./scripts/update.sh --user --force
+
+# Also update CLI companion
+./scripts/update.sh --user --install-cli
+```
+
+### Uninstalling (Linux)
+
+```bash
+# User-only uninstall
+./scripts/uninstall.sh --user
+
+# System-wide uninstall
+sudo ./scripts/uninstall.sh --system
+
+# Also uninstall CLI companion
+./scripts/uninstall.sh --user --uninstall-cli
+sudo ./scripts/uninstall.sh --system --uninstall-cli
+```
 
 ### Releasing (local only)
 
@@ -489,6 +532,9 @@ the repo root), so run `./build.sh` (which produces `./GoFLE` at the root) first
 1. **`./build.sh`** збирає CLI + GUI у `dist/`.
 2. **GoReleaser** пакує готові CLI (`builder: prebuilt`), checksums і публікує Release;
    GUI з `dist/GoFLE*` — як `extra_files`.
+
+The `scripts/release.sh` script verifies **both CLI and GUI artifacts** exist in `dist/`
+before running GoReleaser (CLI: `gofle-*`, GUI: `GoFLE-*`).
 
 ```bash
 export GITHUB_TOKEN=ghp_…   # classic PAT, scope: repo

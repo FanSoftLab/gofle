@@ -99,7 +99,25 @@ do
     missing=1
   fi
 done
-if [[ "$missing" -ne 0 ]]; then
+
+# Required GUI prebuilts for GoReleaser (extra_files: ./dist/GoFLE*)
+gui_missing=0
+for pair in \
+  linux/amd64 linux/arm64 \
+  windows/amd64
+do
+  os="${pair%/*}"
+  arch="${pair#*/}"
+  ext=""
+  [[ "$os" == windows ]] && ext=".exe"
+  f="dist/GoFLE-${os}-${arch}${ext}"
+  if [[ ! -f "$f" ]]; then
+    echo "missing prebuilt GUI: $f" >&2
+    gui_missing=1
+  fi
+done
+
+if [[ "$missing" -ne 0 ]] || [[ "$gui_missing" -ne 0 ]]; then
   echo "Run without --skip-build, or build missing targets first." >&2
   exit 1
 fi
