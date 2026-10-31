@@ -19,6 +19,8 @@ export class VirtualScroller {
   private scrollSpacer: HTMLElement;
   private lineHeight = 20;
   private totalLines = 0;
+  /** Identity of the bound document; change forces full rebuild (tab switch). */
+  private dataKey = '';
   private visibleCount = 0;
   private bufferCount = 25;
   private fetchCallback: FetchLinesCallback;
@@ -332,14 +334,39 @@ export class VirtualScroller {
     this.positionRows(anchorIndex, anchorFrac);
   }
 
-  public setTotalLines(total: number) {
-    if (total === this.totalLines && total > 0) {
+  /**
+   * @param total line count for this scroller
+   * @param dataKey optional document identity (e.g. tab id). When it changes,
+   *   rows are always discarded so a tab switch never reuses another file's DOM.
+   *   Omit or pass the same key for live-tail growth to keep the soft path.
+   */
+  public setTotalLines(total: number, dataKey?: string) {
+    const prev = this.totalLines;
+    const keyChanged = dataKey !== undefined && dataKey !== this.dataKey;
+    if (dataKey !== undefined) {
+      this.dataKey = dataKey;
+    }
+
+    // Same document, same count: soft layout pass only.
+    if (!keyChanged && total === prev && total > 0) {
       this.updateLayout();
       this.recalculateVisible();
       this.applyPendingAnchor();
-      this.render();
+      this.render(false);
       return;
     }
+
+    // Same document grew (live-tail / poll): keep existing row nodes + height cache.
+    // Full clear+re-highlight on every 500 ms append was the main UI jank source.
+    if (!keyChanged && total > prev && prev > 0) {
+      this.totalLines = total;
+      this.updateLayout();
+      this.recalculateVisible();
+      this.render(false);
+      return;
+    }
+
+    // Tab switch, shrink, reset, or first open: full rebuild.
     this.totalLines = total;
     this.heightCache.clear();
     this.avgHeight = this.lineHeight;
@@ -351,7 +378,7 @@ export class VirtualScroller {
     this.clear();
     // Re-map content anchor → pixels after spacer metrics change.
     this.applyPendingAnchor();
-    this.render();
+    this.render(true);
   }
 
   private highlightTerms: { q: string; cls: string; isRegex?: boolean }[] = [];

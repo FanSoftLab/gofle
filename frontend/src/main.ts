@@ -474,7 +474,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         if (done) {
             const prevHighlight = tab.currentMatchIndex;
-            filterScroller.setTotalLines(matches);
+            // Same tab + filter key → soft growth when match count rises; full rebuild on shrink/new search.
+            filterScroller.setTotalLines(matches, tab.id + ':f:' + query);
             // Keep selection if still in range; avoid null flash on every search finish.
             if (prevHighlight >= 0 && prevHighlight < matches) {
                 filterScroller.setHighlightedLine(prevHighlight);
@@ -487,7 +488,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             syncSearchClearBtn();
         } else {
             // Progressive: grow the filter pane as counts arrive without a full reset flash.
-            filterScroller.setTotalLines(matches);
+            filterScroller.setTotalLines(matches, tab.id + ':f:' + query);
         }
     };
 
@@ -584,8 +585,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('status-levels')?.classList.add('hidden');
             document.getElementById('status-filter-badge')?.classList.add('hidden');
             document.getElementById('empty-state')?.classList.remove('hidden');
-            mainScroller.setTotalLines(0);
-            filterScroller.setTotalLines(0);
+            mainScroller.setTotalLines(0, '');
+            filterScroller.setTotalLines(0, '');
             updateSearchNavState();
             return;
         }
@@ -627,9 +628,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 filterScroller.setViewAnchor(tab.filterScrollIndex, tab.filterScrollFrac ?? 0);
             }
         }
-        mainScroller.setTotalLines(tab.totalLines);
+        mainScroller.setTotalLines(tab.totalLines, tab.id);
         mainScroller.setSearchQuery(tab.searchQuery);
-        filterScroller.setTotalLines(tab.matchedLines);
+        filterScroller.setTotalLines(tab.matchedLines, tab.id + ':f:' + (tab.searchQuery || ''));
         if (tab.autoScroll) {
             mainScroller.scrollToBottom();
         }
@@ -684,7 +685,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         ctx.searchBoxContainer.classList.remove('invalid-regex');
         ctx.regexErrorIndicator.classList.add('hidden');
         mainScroller.setSearchQuery('');
-        filterScroller.setTotalLines(0);
+        filterScroller.setTotalLines(0, (ctx.activeTabId ?? '') + ':f:');
         document.getElementById('match-counter-text')!.textContent =
             `0 / ${tab.totalLines}${t('match_counter_suffix')}`;
         updateSearchNavState();

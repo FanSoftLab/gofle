@@ -14,6 +14,16 @@ interface SearchSegment {
   isMatch: boolean;
 }
 
+/**
+ * LogHighlighter — syntax + search highlighting for log lines.
+ *
+ * Performance notes (2026-10):
+ * - tokenize() is the hot path. Results are cached by (text + search key) so
+ *   re-renders / soft setTotalLines do not re-run 16 sticky regexes per visible
+ *   line on every poll tick.
+ * - Cache is bounded (LRU-ish via Map insertion order) to avoid unbounded growth
+ *   when scrolling huge files.
+ */
 export class LogHighlighter {
   private static readonly rules: HighlighterRule[] = [
     { name: 'date', className: 'hl-date', regex: /\b(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)\b/y },
@@ -33,6 +43,10 @@ export class LogHighlighter {
     { name: 'metric', className: 'hl-metric', regex: /\b\d+(?:\.\d+)?\s?(?:ms|µs|us|ns|s|kb|mb|gb|tb|b|%|x)\b/yi },
     { name: 'pid', className: 'hl-pid', regex: /\b(?:pid|tid)=(\d+)\b/yi },
   ];
+
+  /** Bounded HTML cache: key = text + '\\0' + queryKey → highlighted HTML. */
+  private static readonly htmlCache = new Map<string, string>();
+  private static readonly HTML_CACHE_MAX = 4000;
 
   private static escapeHtml(str: string): string {
     return str
@@ -54,11 +68,41 @@ export class LogHighlighter {
     );
   }
 
+  private static cacheGet(key: string): string | undefined {
+    const v = this.htmlCache.get(key);
+    if (v === undefined) return undefined;
+    // Refresh insertion order for crude LRU.
+    this.htmlCache.delete(key);
+    this.htmlCache.set(key, v);
+    return v;
+  }
+
+  private static cacheSet(key: string, html: string): void {
+    if (this.htmlCache.has(key)) this.htmlCache.delete(key);
+    this.htmlCache.set(key, html);
+    while (this.htmlCache.size > this.HTML_CACHE_MAX) {
+      const first = this.htmlCache.keys().next().value;
+      if (first === undefined) break;
+      this.htmlCache.delete(first);
+    }
+  }
+
+  /** Drop cached HTML (e.g. after theme / rule changes). */
+  public static clearCache(): void {
+    this.htmlCache.clear();
+  }
+
   public static highlightLineMulti(
     text: string,
     terms: { q: string; cls: string; isRegex?: boolean }[],
   ): string {
     text = this.sanitize(text);
+    const termKey = terms.map((t) => `${t.cls}:${t.isRegex ? 'r' : 's'}:${t.q}`).join('|');
+    const cacheKey = text + '\0m\0' + termKey;
+    const cached = this.cacheGet(cacheKey);
+    if (cached !== undefined) return cached;
+
+    // Multi-term path: escape once, then apply each term as a replace.
     let html = this.escapeHtml(text);
     for (const term of terms) {
       if (!term.q) continue;
@@ -67,27 +111,35 @@ export class LogHighlighter {
           ? new RegExp(term.q, 'gi')
           : new RegExp(term.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         html = html.replace(re, (m) => `<span class="${term.cls}">${m}</span>`);
-      } catch { /* ignore bad regex */ }
+      } catch {
+        /* ignore bad regex */
+      }
     }
+    this.cacheSet(cacheKey, html);
     return html;
   }
 
   public static highlightLine(text: string, searchQuery?: string, isRegex?: boolean): string {
     text = this.sanitize(text);
+    const q = searchQuery ?? '';
+    const cacheKey = text + '\0s\0' + (isRegex ? 'r:' : 's:') + q;
+    const cached = this.cacheGet(cacheKey);
+    if (cached !== undefined) return cached;
+
     const tokens = this.tokenize(text);
     const searchRe = this.buildSearchRegex(searchQuery, isRegex);
 
     let html = '';
     for (const token of tokens) {
+      const className = this.rules.find((r) => r.name === token.type)?.className;
       const inner = this.renderTokenValue(token.value, searchRe);
-      if (token.type === 'text') {
-        html += inner;
-      } else {
-        const rule = this.rules.find((r) => r.name === token.type);
-        const className = rule ? rule.className : token.type;
+      if (className && token.type !== 'text') {
         html += `<span class="${className}">${inner}</span>`;
+      } else {
+        html += inner;
       }
     }
+    this.cacheSet(cacheKey, html);
     return html;
   }
 

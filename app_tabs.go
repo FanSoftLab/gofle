@@ -672,6 +672,14 @@ func int64FromFilter(v interface{}, fallback int64) int64 {
 // GetFilteredLines returns a page of matched lines [start, start+count) from the
 // current search results. Unknown tabs or out-of-range requests yield an empty
 // slice (not an error).
+//
+// Snapshot of indices + MatchSet is taken under tab.mu then released before the
+// (I/O-bound) line reads so a long GetFilteredLines never starves the poller
+// or a concurrent SearchLines that needs the write lock.
+//
+// Dense contiguous runs of match indices are read via GetLines (single span
+// ReadAt) instead of per-line GetLine, which is the dominant cost when the
+// filter pane shows tightly clustered hits.
 func (a *App) GetFilteredLines(tabID string, start, count int64) ([]LogLineResponse, error) {
 	a.mu.RLock()
 	tab, exists := a.tabs[tabID]
@@ -682,39 +690,86 @@ func (a *App) GetFilteredLines(tabID string, start, count int64) ([]LogLineRespo
 	}
 
 	tab.mu.RLock()
-	defer tab.mu.RUnlock()
-
 	totalMatches := int64(len(tab.MatchedLines))
 	if start < 0 || start >= totalMatches || count <= 0 {
+		tab.mu.RUnlock()
 		return []LogLineResponse{}, nil
 	}
-
 	end := min(start+count, totalMatches)
+	indices := make([]int64, end-start)
+	copy(indices, tab.MatchedLines[start:end])
+	matchSet := tab.MatchSet
+	idx := tab.Indexer
+	tab.mu.RUnlock()
 
-	resp := make([]LogLineResponse, 0, end-start)
-	for i := start; i < end; i++ {
-		lineIdx := tab.MatchedLines[i]
-
-		content, err := tab.Indexer.GetLine(lineIdx)
-		if err != nil {
-			// Same convention as search.GetFilteredLines: an unreadable match
-			// becomes a visible placeholder instead of silently shrinking the
-			// page below the reported match count.
-			content = fmt.Sprintf("<error reading line %d>", lineIdx)
+	resp := make([]LogLineResponse, 0, len(indices))
+	n := len(indices)
+	i := 0
+	for i < n {
+		// Grow a contiguous run [i, j) as far as consecutive line indices allow.
+		j := i + 1
+		for j < n && indices[j] == indices[j-1]+1 {
+			j++
 		}
-
-		_, isHit := tab.MatchSet[lineIdx]
-		if tab.MatchSet == nil {
-			isHit = true
+		runLen := j - i
+		if runLen >= 4 {
+			// Dense enough: one bulk GetLines for the whole span.
+			runStart := indices[i]
+			items, err := idx.GetLines(runStart, int64(runLen))
+			if err != nil {
+				for k := i; k < j; k++ {
+					lineIdx := indices[k]
+					resp = append(resp, LogLineResponse{
+						Index:   lineIdx,
+						Content: fmt.Sprintf("<error reading line %d>", lineIdx),
+						IsMatch: matchIsHit(matchSet, lineIdx),
+					})
+				}
+			} else {
+				// GetLines returns only available lines; pad if truncated.
+				itemByIdx := make(map[int64]string, len(items))
+				for _, it := range items {
+					itemByIdx[it.Index] = it.Content
+				}
+				for k := i; k < j; k++ {
+					lineIdx := indices[k]
+					content, ok := itemByIdx[lineIdx]
+					if !ok {
+						content = fmt.Sprintf("<error reading line %d>", lineIdx)
+					}
+					resp = append(resp, LogLineResponse{
+						Index:   lineIdx,
+						Content: content,
+						IsMatch: matchIsHit(matchSet, lineIdx),
+					})
+				}
+			}
+		} else {
+			for k := i; k < j; k++ {
+				lineIdx := indices[k]
+				content, err := idx.GetLine(lineIdx)
+				if err != nil {
+					content = fmt.Sprintf("<error reading line %d>", lineIdx)
+				}
+				resp = append(resp, LogLineResponse{
+					Index:   lineIdx,
+					Content: content,
+					IsMatch: matchIsHit(matchSet, lineIdx),
+				})
+			}
 		}
-		resp = append(resp, LogLineResponse{
-			Index:   lineIdx,
-			Content: content,
-			IsMatch: isHit,
-		})
+		i = j
 	}
 
 	return resp, nil
+}
+
+func matchIsHit(matchSet map[int64]struct{}, lineIdx int64) bool {
+	if matchSet == nil {
+		return true
+	}
+	_, ok := matchSet[lineIdx]
+	return ok
 }
 
 // SetAutoScroll toggles live-tail auto-scroll for a tab (follow new lines as
