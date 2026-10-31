@@ -38,6 +38,20 @@
     font-style: normal;
     font-display: swap;
 }
+@font-face {
+    font-family: 'Medeo Mono';
+    src: url('./assets/fonts/MedeoMonoVariable.woff2') format('woff2-variations');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Medeo Mono';
+    src: url('./assets/fonts/MedeoMonoVariable-Italic.woff2') format('woff2-variations');
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+}
 
 /* frontend/src/style.css */
 :root {

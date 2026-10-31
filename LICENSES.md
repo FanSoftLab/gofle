@@ -146,6 +146,11 @@ Application license: **MIT** — see [LICENSE.md](LICENSE.md).
 - **License:** SIL Open Font License 1.1
 - **Description:** Monospace font from Microsoft (optional viewer font).
 
+### Medeo Mono (font)
+- **Link:** https://github.com/DNFDEVS/medeo-font
+- **License:** SIL Open Font License 1.1
+- **Description:** Variable monospace font family for code and aligned columns, covering Latin and Cyrillic (optional viewer font).
+
 ---
 
 ## Notes
