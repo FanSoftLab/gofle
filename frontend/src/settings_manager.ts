@@ -1,4 +1,4 @@
-import { resolveLang, resolveTheme, setLang, applyI18n } from './i18n';
+import { resolveLang, resolveTheme, setLang } from './i18n';
 import { showToast } from './toast';
 import type { AppContext } from './app_context';
 
@@ -173,7 +173,6 @@ export class SettingsManager {
         if (p.wordWrap) document.body.classList.add('word-wrap');
         if (!p.showLineNumbers) document.body.classList.add('hide-line-numbers');
         setLang(resolveLang(p.language));
-        applyI18n();
         this.onPrefsApplied?.(p);
     }
 

@@ -2,7 +2,7 @@
 import './style.css';
 import { VirtualScroller, LogLineData } from './virtual_scroller';
 import {
-    translations, t, setLang, getLang, applyI18n, resolveLang, resolveTheme,
+    t, setLang, getLang, initI18n, resolveLang, resolveTheme,
 } from './i18n';
 import { initToasts, showToast } from './toast';
 import type { AppContext, TabData, TabGroup, StripEntry } from './app_context';
@@ -1583,7 +1583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         ? String((cfg as any).log_font_size)
                         : (localStorage.getItem('gofle.logFontSize') || '13');
                     applyLogFontSize(fontPx);
-                    applyI18n();
+                    await initI18n();
                 }
             } catch (err) {
                 console.error('Failed to load settings:', err);
@@ -1723,7 +1723,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     // i18n first so restore/open paths can write live status text afterward.
-    applyI18n();
+    await initI18n();
     applyLogFontSize(localStorage.getItem('gofle.logFontSize') || '13');
 
     await restoreSavedSession();

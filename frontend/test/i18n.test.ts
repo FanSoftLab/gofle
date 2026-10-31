@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { t, setLang, getLang, resolveLang, resolveTheme, type LangCode } from '../src/i18n';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { t, setLang, getLang, resolveLang, resolveTheme, initI18n, type LangCode } from '../src/i18n';
 
 // Mock window.matchMedia used by resolveTheme for the system theme branch.
 const mockMatchMedia = vi.fn().mockReturnValue({ matches: false });
@@ -20,6 +20,10 @@ beforeEach(() => {
 
 afterEach(() => {
   setLang('uk' as LangCode);
+});
+
+beforeAll(async () => {
+  await initI18n();
 });
 
 describe('i18n t()', () => {
