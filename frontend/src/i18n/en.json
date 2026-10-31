@@ -104,6 +104,7 @@
   "help_search_placeholder": "Search help…",
   "help_title": "Keyboard shortcuts",
   "hk_esc": "Close dialog / blur focus",
+  "hk_follow": "Toggle follow",
   "hk_export": "Export",
   "hk_firstlast": "First / last match",
   "hk_help": "This help",
@@ -153,7 +154,12 @@
   "label_default_search_regex": "Regular expression",
   "label_exclude_regex": "Exclude as regex by default",
   "label_font_family": "Log font",
+  "label_auto_accept_host_key": "Auto-accept host key",
+  "label_confirm_close_tab": "Confirm close SSH/FTP",
   "label_font_size": "Font size",
+  "label_show_line_numbers": "Line numbers",
+  "label_startup_behavior": "Startup behavior",
+  "label_word_wrap": "Word wrap",
   "label_ftp_tls": "FTPS mode:",
   "label_group_color": "Group Color:",
   "label_group_name": "Group Name:",
@@ -306,5 +312,8 @@
   "tooltip_open_files": "Open File(s)",
   "tooltip_open_ssh": "Open remote log",
   "tooltip_search_layout": "Search results layout",
-  "tooltip_settings": "Settings"
+  "tooltip_settings": "Settings",
+  "history_delete_item": "Delete item",
+  "history_clear_all": "Clear all history",
+  "btn_cancel": "Cancel"
 }

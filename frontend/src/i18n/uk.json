@@ -105,6 +105,7 @@
   "help_title": "Гарячі клавиші",
   "hk_esc": "Закрити діалог / зняти фокус",
   "hk_export": "Експорт",
+  "hk_follow": "Слідкування вкл/викл",
   "hk_firstlast": "Перший / останній збіг",
   "hk_help": "Ця довідка",
   "hk_navalt": "Навігація збігами (альтернативні)",
@@ -152,8 +153,13 @@
   "label_default_search_invert": "Інвертувати збіг",
   "label_default_search_regex": "Регулярний вираз",
   "label_exclude_regex": "Виключення як регулярний вираз за замовчуванням",
+  "label_auto_accept_host_key": "Автоприйняття ключа хоста",
+  "label_confirm_close_tab": "Підтверджувати закриття SSH/FTP",
   "label_font_family": "Шрифт логу",
   "label_font_size": "Розмір шрифту",
+  "label_show_line_numbers": "Номери рядків",
+  "label_startup_behavior": "Поведінка при запуску",
+  "label_word_wrap": "Перенос довгих рядків",S
   "label_ftp_tls": "Режим FTPS:",
   "label_group_color": "Колір групи:",
   "label_group_name": "Назва групи:",
@@ -306,5 +312,8 @@
   "tooltip_open_files": "Відкрити файл(и)",
   "tooltip_open_ssh": "Відкрити віддалений лог",
   "tooltip_search_layout": "Розташування результатів пошуку",
-  "tooltip_settings": "Налаштування"
+  "tooltip_settings": "Налаштування",
+  "history_delete_item": "Видалити елемент",
+  "history_clear_all": "Очистити всю історію",
+  "btn_cancel": "Скасувати"
 }
