@@ -37,6 +37,18 @@ func (h *EventHub) Unsubscribe(ch chan []byte) {
 
 // Broadcast sends an event of the given type to all subscribers.
 func (h *EventHub) Broadcast(eventType string, data any) {
+	// Skip the marshal entirely when nobody is listening (E1): desktop
+	// (Wails) mode never registers a WebSocket subscriber, so without this
+	// check every file_updated (per active tab per 500 ms poll tick), every
+	// search_progress partial and every ssh:progress stage paid a map build
+	// plus a json.Marshal for nothing.
+	h.mu.RLock()
+	n := len(h.subs)
+	h.mu.RUnlock()
+	if n == 0 {
+		return
+	}
+
 	msg, err := json.Marshal(map[string]any{
 		"type": eventType,
 		"data": data,
@@ -44,6 +56,7 @@ func (h *EventHub) Broadcast(eventType string, data any) {
 	if err != nil {
 		return
 	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for ch := range h.subs {
