@@ -774,26 +774,73 @@ func (se *SearchEngine) FilterLines(ctx context.Context, opts SearchOptions, lin
 	}
 
 	out := make([]int64, 0, len(lines))
-	for i, ln := range lines {
-		if i&0xff == 0 { // every 256 lines
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-			}
-		}
-		// GetLineBytes copies the line out of the pooled read buffer exactly
-		// once, into the caller-owned slice the matcher consumes directly —
-		// the old GetLine(string) + []byte(content) chain made two copies per
-		// line (2M allocations on a 1M-line refine pass).
-		content, e := se.indexer.GetLineBytes(ln)
-		if e != nil {
-			return nil, e
+
+	// (S1) The refine pass walks the ascending line list in contiguous runs
+	// and bulk-reads each run with one ScanLines pass instead of one
+	// pread-per-match GetLineBytes: refining a 1M-match primary result used
+	// to issue 1M single-line preads — the same gap the export paths closed
+	// in round-1 C3 (measured ~15x there). The per-line fallback below
+	// preserves the old semantics (identical newline/CR trimming, any
+	// unreadable line fails the filter) when a bulk pass fails.
+	i := 0
+	for i < len(lines) {
+		runEnd := i + 1
+		for runEnd < len(lines) && lines[runEnd] == lines[runEnd-1]+1 {
+			runEnd++
 		}
 
-		if secMatch(content) {
-			out = append(out, ln)
+		start, count := lines[i], int64(runEnd-i)
+
+		seen := 0
+
+		serr := se.indexer.ScanLines(start, count, func(idx int64, content []byte) bool {
+			seen++
+			if seen&0xff == 0 {
+				select {
+				case <-ctx.Done():
+					return false
+				default:
+				}
+			}
+
+			if secMatch(content) {
+				out = append(out, idx)
+			}
+
+			return true
+		})
+		if serr == nil {
+			if ctxErr := ctx.Err(); ctxErr != nil && int64(seen) < count {
+				return nil, ctxErr
+			}
+
+			i = runEnd
+
+			continue
 		}
+
+		// Bulk pass failed (e.g. raced a rotation rebuild between spans):
+		// per-line reads for exactly this run.
+		for k := i; k < runEnd; k++ {
+			if k&0xff == 0 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				default:
+				}
+			}
+
+			content, e := se.indexer.GetLineBytes(lines[k])
+			if e != nil {
+				return nil, e
+			}
+
+			if secMatch(content) {
+				out = append(out, lines[k])
+			}
+		}
+
+		i = runEnd
 	}
 
 	return out, nil

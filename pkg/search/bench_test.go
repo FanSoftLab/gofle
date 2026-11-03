@@ -342,3 +342,45 @@ func BenchmarkParseLineTime(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkFilterLinesLegacy is the pre-S1 shape: one GetLineBytes pread per
+// primary match. Kept as the documented baseline next to BenchmarkFilterLines
+// (the bulk contiguous-run port) so the refine-pass gap stays quantified.
+func BenchmarkFilterLinesLegacy(b *testing.B) {
+	const nLines = 200_000
+
+	idx := benchFile(b, nLines, 10)
+	se := NewSearchEngine(idx)
+
+	primary, err := se.SearchWithContext(b.Context(), SearchOptions{Query: "request", CaseSensitive: false})
+	if err != nil {
+		b.Fatalf("primary search: %v", err)
+	}
+
+	secMatch, err := se.buildSecondaryMatcher(SearchOptions{SecondaryQuery: "status=200", CaseSensitive: false})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		out := make([]int64, 0, len(primary))
+
+		for _, ln := range primary {
+			content, gerr := idx.GetLineBytes(ln)
+			if gerr != nil {
+				b.Fatal(gerr)
+			}
+
+			if secMatch(content) {
+				out = append(out, ln)
+			}
+		}
+
+		if len(out) == 0 {
+			b.Fatal("no lines survived the filter")
+		}
+	}
+}
