@@ -726,17 +726,23 @@ func (a *App) GetFilteredLines(tabID string, start, count int64) ([]LogLineRespo
 					})
 				}
 			} else {
-				// GetLines returns only available lines; pad if truncated.
-				itemByIdx := make(map[int64]string, len(items))
-				for _, it := range items {
-					itemByIdx[it.Index] = it.Content
-				}
+				// GetLines returns items in ascending index order for the span
+				// [runStart, runStart+runLen): a sequential cursor matches
+				// them without a per-run map (H2). Only a tail truncation
+				// (file shorter than the span) leaves later indices unserved,
+				// and those fall back to the error placeholder exactly like a
+				// map miss did.
+				t := 0
 				for k := i; k < j; k++ {
 					lineIdx := indices[k]
-					content, ok := itemByIdx[lineIdx]
-					if !ok {
+					content := ""
+					if t < len(items) && items[t].Index == lineIdx {
+						content = items[t].Content
+						t++
+					} else {
 						content = fmt.Sprintf("<error reading line %d>", lineIdx)
 					}
+
 					resp = append(resp, LogLineResponse{
 						Index:   lineIdx,
 						Content: content,
