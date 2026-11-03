@@ -229,6 +229,7 @@ func TestHandleUploadLargeFileSpillsToDisk(t *testing.T) {
 	payload := bytes.Repeat(line, (16<<20)/len(line)+1)[:(16 << 20)]
 
 	var buf bytes.Buffer
+
 	mw := multipart.NewWriter(&buf)
 
 	fw, err := mw.CreateFormFile("file", "spill-test.log")
@@ -244,7 +245,7 @@ func TestHandleUploadLargeFileSpillsToDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := httptest.NewRequest(http.MethodPost, "/api/files/upload", &buf)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/files/upload", &buf)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
 
 	// Exercise the same middleware chain the server installs so the
@@ -310,17 +311,25 @@ func TestHandleWSAbruptClientDisconnect(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
 	handlerReturned := make(chan struct{})
+
 	go func() {
 		// The handler goroutine is the one ServeHTTP runs on; re-running
 		// handleWS on its own conn would race the server's — instead detect
 		// teardown by the hub subscriber count dropping back to zero.
 		t0 := time.Now()
+
 		for range 100 {
 			app.hub.mu.RLock()
 			n := len(app.hub.subs)
@@ -334,6 +343,7 @@ func TestHandleWSAbruptClientDisconnect(t *testing.T) {
 
 			time.Sleep(10 * time.Millisecond)
 		}
+
 		t.Logf("subscriber still registered after %v", time.Since(t0))
 	}()
 

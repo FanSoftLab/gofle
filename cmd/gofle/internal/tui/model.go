@@ -550,10 +550,7 @@ func (m model) wrapRows(ln int64) int {
 		return n
 	}
 
-	n := m.computeWrapRows(ln)
-	if n < 1 {
-		n = 1
-	}
+	n := max(m.computeWrapRows(ln), 1)
 
 	if len(wrapCounts) >= wrapCacheMaxEntries {
 		wrapCounts = make(map[int64]int, 1024)

@@ -4,12 +4,17 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// benchLogContent is the small .log payload of the bench archive (named once
+// so the literal is not repeated across the package's test files).
+const benchLogContent = "line one\nline two with ERROR\n"
 
 // benchTarGz builds a tar.gz with nMembers payload members (each ~200 KB) plus
 // one small app.log placed LAST, so the walk must inflate every member before
@@ -31,18 +36,22 @@ func benchTarGz(b *testing.B, dir string, nMembers int) string {
 
 	for i := range nMembers {
 		name := fmt.Sprintf("data/metrics_%03d.txt", i)
+
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(payload))}); err != nil {
 			b.Fatal(err)
 		}
+
 		if _, err := tw.Write(payload); err != nil {
 			b.Fatal(err)
 		}
 	}
 
-	logContent := "line one\nline two with ERROR\n"
+	logContent := benchLogContent
+
 	if err := tw.WriteHeader(&tar.Header{Name: "app.log", Mode: 0o644, Size: int64(len(logContent))}); err != nil {
 		b.Fatal(err)
 	}
+
 	if _, err := tw.Write([]byte(logContent)); err != nil {
 		b.Fatal(err)
 	}
@@ -72,77 +81,23 @@ func benchTarGz(b *testing.B, dir string, nMembers int) string {
 func BenchmarkEnsureDecompressedTarGz(b *testing.B) {
 	dir := b.TempDir()
 	path := benchTarGz(b, dir, 20)
+
 	const nMembers = 21
 
 	b.Run("extract-all-pre-G1", func(b *testing.B) {
 		b.ReportAllocs()
 
 		for b.Loop() {
-			tmpDir, err := os.MkdirTemp("", "gofle-bench-tar-*")
+			tmpDir := b.TempDir()
+
+			extracted, err := extractAllMembers(path, tmpDir)
 			if err != nil {
-				b.Fatal(err)
-			}
-
-			src, err := os.Open(path) //nolint:gosec // benchmark fixture path
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			zr, err := gzip.NewReader(src)
-			if err != nil {
-				b.Fatal(err)
-			}
-
-			tr := tar.NewReader(zr)
-
-			var extracted int
-
-			for {
-				hdr, err := tr.Next()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					b.Fatal(err)
-				}
-				if hdr.Typeflag != tar.TypeReg {
-					continue
-				}
-
-				target := filepath.Join(tmpDir, filepath.Clean(hdr.Name))
-				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-					b.Fatal(err)
-				}
-
-				out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-				if err != nil {
-					b.Fatal(err)
-				}
-
-				if _, err := io.Copy(out, tr); err != nil {
-					b.Fatal(err)
-				}
-
-				if err := out.Close(); err != nil {
-					b.Fatal(err)
-				}
-
-				extracted++
-			}
-
-			if err := zr.Close(); err != nil {
-				b.Fatal(err)
-			}
-
-			if err := src.Close(); err != nil {
 				b.Fatal(err)
 			}
 
 			if extracted != nMembers {
 				b.Fatalf("extracted %d, want %d", extracted, nMembers)
 			}
-
-			os.RemoveAll(tmpDir)
 		}
 	})
 
@@ -166,4 +121,63 @@ func BenchmarkEnsureDecompressedTarGz(b *testing.B) {
 			cleanup()
 		}
 	})
+}
+
+// extractAllMembers is the pre-G1 shape: extract EVERY regular member of the
+// archive into destDir, returning the count. Kept as the documented baseline.
+func extractAllMembers(archivePath, destDir string) (int, error) {
+	src, err := os.Open(archivePath)
+	if err != nil {
+		return 0, err
+	}
+	defer src.Close()
+
+	zr, err := gzip.NewReader(src)
+	if err != nil {
+		return 0, err
+	}
+	defer zr.Close()
+
+	tr := tar.NewReader(zr)
+
+	extracted := 0
+
+	for {
+		hdr, err := tr.Next()
+
+		if errors.Is(err, io.EOF) {
+			return extracted, nil
+		}
+
+		if err != nil {
+			return 0, err
+		}
+
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		target := filepath.Join(destDir, filepath.Clean(hdr.Name))
+
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+			return 0, err
+		}
+
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			return 0, err
+		}
+
+		if _, err := io.Copy(out, tr); err != nil {
+			out.Close()
+
+			return 0, err
+		}
+
+		if err := out.Close(); err != nil {
+			return 0, err
+		}
+
+		extracted++
+	}
 }

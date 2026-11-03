@@ -102,91 +102,56 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func (api *webAPI) handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		slog.Warn("websocket upgrade failed", "err", err)
-		return
-	}
-	defer conn.Close()
+// wsWriteDeadline / wsPongWait / wsPingPeriod bound the WebSocket write and
+// keepalive cadence (W3): writes get a short deadline so a stalled client
+// cannot park the writer forever, and the 45 s ping keeps the 60 s pong
+// deadline refreshed on idle connections.
+const (
+	wsWriteDeadline = 10 * time.Second
+	wsPongWait      = 60 * time.Second
+	wsPingPeriod    = 45 * time.Second
+)
 
-	ch := api.app.hub.Subscribe()
-	defer api.app.hub.Unsubscribe(ch)
+// wsWriterPump is the single writer goroutine: gorilla/websocket permits
+// exactly one concurrent writer, so event pushes and pings are serialized
+// through outbox and drained here (the previous code wrote directly from the
+// dispatch loop; adding pings would have violated the rule). Exits on write
+// error or when outbox closes; closing writerDone signals both.
+func wsWriterPump(conn *websocket.Conn, outbox <-chan []byte, writerDone chan struct{}) {
+	defer close(writerDone)
 
-	done := make(chan struct{})
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
 
-	const (
-		writeWait  = 10 * time.Second
-		pongWait   = 60 * time.Second
-		pingPeriod = 45 * time.Second
-	)
+	for {
+		select {
+		case msg, ok := <-outbox:
+			if !ok {
+				return
+			}
 
-	// W3: without a read deadline + pong handshake, a half-open client (a
-	// network drop with no RST/FIN) left ReadMessage blocked until the OS
-	// TCP keepalive noticed — hours — leaking this handler goroutine and its
-	// subscriber channel. The pong handler refreshes the deadline, and the
-	// server-side ping in the writer below prompts an answer even when no
-	// events flow.
-	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(pongWait))
-	})
+			_ = conn.SetWriteDeadline(time.Now().Add(wsWriteDeadline))
 
-	// Reader: any read error (client gone, pong deadline passed) ends the
-	// session.
-	go func() {
-		defer close(done)
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = conn.SetWriteDeadline(time.Now().Add(wsWriteDeadline))
+
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
-	}()
+	}
+}
 
-	// Single writer: gorilla/websocket permits exactly one concurrent
-	// writer, so event pushes and pings are serialized through outbox and
-	// drained by one goroutine (the previous code wrote directly from the
-	// dispatch loop; adding pings would have violated the rule).
-	outbox := make(chan []byte, 64)
-
-	writerDone := make(chan struct{})
-	go func() {
-		defer close(writerDone)
-
-		ticker := time.NewTicker(pingPeriod)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case msg, ok := <-outbox:
-				if !ok {
-					return
-				}
-
-				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					return
-				}
-			case <-ticker.C:
-				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					return
-				}
-			}
-		}
-	}()
-
-	// Dispatch: forward hub events into the outbox. A stalled client fills
-	// the 64-slot outbox; further events are DROPPED (not queued) so the hub
-	// never blocks on one slow consumer, and every drop is counted (W3) —
-	// silent loss made a slow client look like a frozen live view. When the
-	// writer exits early (a write error), writerDone also stops this loop so
-	// it never sends on the closed outbox.
-	defer func() {
-		close(outbox)
-		<-writerDone
-	}()
-
+// wsDispatch forwards hub events into the client's outbox. A stalled client
+// fills the 64-slot outbox; further events are DROPPED (not queued) so the
+// hub never blocks on one slow consumer, and every drop is counted (W3) —
+// silent loss made a slow client look like a frozen live view. When the
+// writer exits early (a write error), writerDone also stops this loop so it
+// never sends on the closed outbox.
+func (api *webAPI) wsDispatch(hub *EventHub, ch <-chan []byte, outbox chan<- []byte, done, writerDone chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -201,10 +166,65 @@ func (api *webAPI) handleWS(w http.ResponseWriter, r *http.Request) {
 			select {
 			case outbox <- msg:
 			default:
-				api.app.hub.recordDrop()
+				hub.recordDrop()
 			}
 		}
 	}
+}
+
+func (api *webAPI) handleWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		slog.Warn("websocket upgrade failed", "err", err)
+		return
+	}
+
+	defer conn.Close()
+
+	ch := api.app.hub.Subscribe()
+
+	defer api.app.hub.Unsubscribe(ch)
+
+	done := make(chan struct{})
+
+	// W3: without a read deadline + pong handshake, a half-open client (a
+	// network drop with no RST/FIN) left ReadMessage blocked until the OS
+	// TCP keepalive noticed — hours — leaking this handler goroutine and its
+	// subscriber channel. The pong handler refreshes the deadline, and the
+	// server-side ping in the writer below prompts an answer even when no
+	// events flow.
+	_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+
+	// Reader: any read error (client gone, pong deadline passed) ends the
+	// session.
+	go func() {
+		defer close(done)
+
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	outbox := make(chan []byte, 64)
+
+	writerDone := make(chan struct{})
+
+	go wsWriterPump(conn, outbox, writerDone)
+
+	// Runs until the client disconnects (done), the writer fails
+	// (writerDone) or the hub unsubscribes us (ch closed); the deferred
+	// close+wait below then drains the writer before conn.Close.
+	defer func() {
+		close(outbox)
+		<-writerDone
+	}()
+
+	api.wsDispatch(api.app.hub, ch, outbox, done, writerDone)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -332,10 +352,12 @@ func (api *webAPI) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// back out to a temp file anyway.
 	const uploadMaxMemory = 8 << 20
 
+	//nolint:gosec // G120: bodies are already bounded by withCORS's MaxBytesReader (1 GiB); gosec's taint analysis cannot see the middleware
 	if err := r.ParseMultipartForm(uploadMaxMemory); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
+
 	file, hdr, err := r.FormFile("file")
 	if err != nil {
 		writeErr(w, 400, err)
@@ -364,10 +386,12 @@ func (api *webAPI) handleUploadMultiple(w http.ResponseWriter, r *http.Request) 
 	// to disk (see handleUpload).
 	const uploadMaxMemory = 8 << 20
 
+	//nolint:gosec // G120: bodies are already bounded by withCORS's MaxBytesReader (1 GiB); gosec's taint analysis cannot see the middleware
 	if err := r.ParseMultipartForm(uploadMaxMemory); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
+
 	files := r.MultipartForm.File["files"]
 	paths := make([]string, 0, len(files))
 	for _, hdr := range files {

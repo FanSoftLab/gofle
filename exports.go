@@ -1,6 +1,7 @@
 package main
 
 import (
+	"GoFLE/pkg/indexer"
 	"bufio"
 	"fmt"
 	"log/slog"
@@ -14,8 +15,6 @@ import (
 // SaveSearchResults writes the current search matches (prefixed with their
 // 1-based line numbers) to a user-chosen file. Returns the saved path, or an
 // empty string if cancelled.
-//
-//nolint:gocyclo // export loop over result rows is inherently branchy
 func (a *App) SaveSearchResults(tabID string) (string, error) {
 	a.mu.RLock()
 	tab, exists := a.tabs[tabID]
@@ -63,21 +62,47 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 	}()
 
 	writer := bufio.NewWriter(file)
-	skipped := 0
-
-	var writeErr error
-
-	// Line numbers are appended into one reusable buffer per export instead
-	// of fmt.Fprintf per line (H1): Fprintf boxes the line number into an
-	// interface (allocating above 255) and runs reflection over the args for
-	// every row of a multi-million-match export.
-	num := make([]byte, 0, 32)
 
 	// Export via bulk ScanLines over contiguous runs of the (ascending) match
 	// list instead of one pread+string per match — measured ~15x on a 1M-match
 	// export. Matches beyond the live total (snapshot raced a rotation) count
 	// as skipped, matching what GetLine would have reported.
 	total := tab.Indexer.TotalLines()
+
+	skipped, writeErr := writeMatchedRuns(tab.Indexer, matched, total, writer)
+
+	if writeErr != nil {
+		// A line that cannot be read (e.g. raced a rotation) must not vanish
+		// silently — the export would look complete while missing hits.
+		_ = writer.Flush()
+		return "", fmt.Errorf("failed to write search results: %w", writeErr)
+	}
+
+	if ferr := writer.Flush(); ferr != nil {
+		return "", fmt.Errorf("failed to flush search results: %w", ferr)
+	}
+
+	if skipped > 0 {
+		return savePath, fmt.Errorf(
+			"exported %d of %d matches to %s; %d unreadable lines skipped",
+			len(matched)-skipped, len(matched), savePath, skipped)
+	}
+
+	return savePath, nil
+}
+
+// writeMatchedRuns streams the (ascending) matched lines to writer in bulk
+// contiguous runs — one ScanLinesRetry pass per run instead of one pread+string
+// per match — and returns how many matches were skipped (unreadable or raced a
+// rotation) plus the first write error. Line numbers are appended into one
+// reusable buffer instead of fmt.Fprintf per line (H1): Fprintf boxes the line
+// number into an interface (allocating above 255) and runs reflection over the
+// args for every row of a multi-million-match export.
+func writeMatchedRuns(idx *indexer.FileIndexer, matched []int64, total int64, writer *bufio.Writer) (int, error) {
+	num := make([]byte, 0, 32)
+	skipped := 0
+
+	var writeErr error
 
 	i := 0
 	for i < len(matched) && writeErr == nil {
@@ -95,8 +120,8 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 
 		start, count := matched[i], int64(runEnd-i)
 
-		serr := tab.Indexer.ScanLinesRetry(start, count, func(idx int64, line []byte) bool {
-			num = strconv.AppendInt(num[:0], idx+1, 10)
+		serr := idx.ScanLinesRetry(start, count, func(ln int64, line []byte) bool {
+			num = strconv.AppendInt(num[:0], ln+1, 10)
 			num = append(num, ']', ' ')
 			num = append(num, line...)
 
@@ -122,31 +147,17 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 		if serr != nil {
 			// Chunk read failed (e.g. raced a rotation): fall back to per-line
 			// reads for exactly this run so skip accounting stays precise.
-			for k := i; k < runEnd; k++ {
-				content, gerr := tab.Indexer.GetLine(matched[k])
-				if gerr != nil {
-					skipped++
-					continue
-				}
+			var (
+				fskip int
+				ferr  error
+			)
 
-				num = strconv.AppendInt(num[:0], matched[k]+1, 10)
-				num = append(num, ']', ' ')
-				num = append(num, content...)
+			fskip, ferr = writeRunFallback(idx, matched, i, runEnd, writer)
+			skipped += fskip
 
-				if _, e := writer.Write(num); e != nil {
-					writeErr = e
+			if ferr != nil {
+				writeErr = ferr
 
-					break
-				}
-
-				if e := writer.WriteByte('\n'); e != nil {
-					writeErr = e
-
-					break
-				}
-			}
-
-			if writeErr != nil {
 				break
 			}
 		}
@@ -154,24 +165,39 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 		i = runEnd
 	}
 
-	if writeErr != nil {
-		// A line that cannot be read (e.g. raced a rotation) must not vanish
-		// silently — the export would look complete while missing hits.
-		_ = writer.Flush()
-		return "", fmt.Errorf("failed to write search results: %w", writeErr)
+	return skipped, writeErr
+}
+
+// writeRunFallback re-reads exactly one failed run line by line (a chunk read
+// that raced a rotation) and writes the survivors with their line numbers.
+// Returns how many lines were unreadable (counted as skipped) and the first
+// write error. It uses its own scratch buffer: the fallback is the rare path
+// and must not disturb the hot loop's buffer.
+func writeRunFallback(idx *indexer.FileIndexer, matched []int64, from, to int, writer *bufio.Writer) (int, error) {
+	num := make([]byte, 0, 32)
+	skipped := 0
+
+	for k := from; k < to; k++ {
+		content, gerr := idx.GetLine(matched[k])
+		if gerr != nil {
+			skipped++
+			continue
+		}
+
+		num = strconv.AppendInt(num[:0], matched[k]+1, 10)
+		num = append(num, ']', ' ')
+		num = append(num, content...)
+
+		if _, e := writer.Write(num); e != nil {
+			return skipped, e
+		}
+
+		if e := writer.WriteByte('\n'); e != nil {
+			return skipped, e
+		}
 	}
 
-	if ferr := writer.Flush(); ferr != nil {
-		return "", fmt.Errorf("failed to flush search results: %w", ferr)
-	}
-
-	if skipped > 0 {
-		return savePath, fmt.Errorf(
-			"exported %d of %d matches to %s; %d unreadable lines skipped",
-			len(matched)-skipped, len(matched), savePath, skipped)
-	}
-
-	return savePath, nil
+	return skipped, nil
 }
 
 // SaveFullLogAs exports the entire log of a tab to a user-chosen file, read in

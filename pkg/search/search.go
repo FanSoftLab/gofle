@@ -779,9 +779,9 @@ func (se *SearchEngine) FilterLines(ctx context.Context, opts SearchOptions, lin
 	// and bulk-reads each run with one ScanLines pass instead of one
 	// pread-per-match GetLineBytes: refining a 1M-match primary result used
 	// to issue 1M single-line preads — the same gap the export paths closed
-	// in round-1 C3 (measured ~15x there). The per-line fallback below
-	// preserves the old semantics (identical newline/CR trimming, any
-	// unreadable line fails the filter) when a bulk pass fails.
+	// in round-1 C3 (measured ~15x there). A run whose bulk pass fails falls
+	// back to per-line reads (filterFallback) so the old semantics —
+	// identical trimming, any unreadable line fails the filter — hold.
 	i := 0
 	for i < len(lines) {
 		runEnd := i + 1
@@ -789,61 +789,92 @@ func (se *SearchEngine) FilterLines(ctx context.Context, opts SearchOptions, lin
 			runEnd++
 		}
 
-		start, count := lines[i], int64(runEnd-i)
+		run := lines[i:runEnd]
 
-		seen := 0
-
-		serr := se.indexer.ScanLines(start, count, func(idx int64, content []byte) bool {
-			seen++
-			if seen&0xff == 0 {
-				select {
-				case <-ctx.Done():
-					return false
-				default:
-				}
-			}
-
-			if secMatch(content) {
-				out = append(out, idx)
-			}
-
-			return true
-		})
+		kept, serr := se.filterRun(ctx, secMatch, run, out)
 		if serr == nil {
-			if ctxErr := ctx.Err(); ctxErr != nil && int64(seen) < count {
-				return nil, ctxErr
-			}
-
+			out = kept
 			i = runEnd
 
 			continue
 		}
 
-		// Bulk pass failed (e.g. raced a rotation rebuild between spans):
-		// per-line reads for exactly this run.
-		for k := i; k < runEnd; k++ {
-			if k&0xff == 0 {
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				default:
-				}
-			}
+		// Cancellation aborts outright; anything else (rotation rebuild,
+		// transient read failure) falls back to per-line reads.
+		if errors.Is(serr, context.Canceled) || errors.Is(serr, context.DeadlineExceeded) {
+			return nil, serr
+		}
 
-			content, e := se.indexer.GetLineBytes(lines[k])
-			if e != nil {
-				return nil, e
-			}
-
-			if secMatch(content) {
-				out = append(out, lines[k])
-			}
+		if ferr := se.filterFallback(ctx, secMatch, run, &out); ferr != nil {
+			return nil, ferr
 		}
 
 		i = runEnd
 	}
 
 	return out, nil
+}
+
+// filterRun bulk-matches one contiguous run of line indices with a single
+// ScanLines pass, appending surviving indices to out. The error is either the
+// scan failure (caller falls back to per-line reads) or ctx.Err() when the
+// bulk pass stopped early on cancellation (seen < len(run) disambiguates a
+// canceled stop from a full pass, since a false return is a clean stop).
+func (se *SearchEngine) filterRun(ctx context.Context, secMatch func([]byte) bool, run []int64, out []int64) ([]int64, error) {
+	seen := 0
+
+	serr := se.indexer.ScanLines(run[0], int64(len(run)), func(idx int64, content []byte) bool {
+		seen++
+
+		if seen&0xff == 0 {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+		}
+
+		if secMatch(content) {
+			out = append(out, idx)
+		}
+
+		return true
+	})
+	if serr != nil {
+		return out, serr
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil && int64(seen) < int64(len(run)) {
+		return out, ctxErr
+	}
+
+	return out, nil
+}
+
+// filterFallback reads a run line by line after its bulk pass failed
+// (e.g. it raced a rotation rebuild between spans) and appends matches to out.
+// Any unreadable line fails the whole filter, matching the pre-S1 behavior.
+func (se *SearchEngine) filterFallback(ctx context.Context, secMatch func([]byte) bool, run []int64, out *[]int64) error {
+	for k, ln := range run {
+		if k&0xff == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
+		content, e := se.indexer.GetLineBytes(ln)
+		if e != nil {
+			return e
+		}
+
+		if secMatch(content) {
+			*out = append(*out, ln)
+		}
+	}
+
+	return nil
 }
 
 // isASCII reports whether s contains only ASCII bytes.

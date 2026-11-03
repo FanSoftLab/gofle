@@ -127,7 +127,7 @@ func BenchmarkUploadMultipartParse(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				r := httptest.NewRequest(http.MethodPost, "/api/files/upload", bytes.NewReader(body))
+				r := httptest.NewRequestWithContext(b.Context(), http.MethodPost, "/api/files/upload", bytes.NewReader(body))
 				r.Header.Set("Content-Type", ctype)
 
 				if err := r.ParseMultipartForm(tc.maxMemory); err != nil {

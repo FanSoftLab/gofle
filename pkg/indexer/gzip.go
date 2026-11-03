@@ -83,11 +83,12 @@ func extractTarFile(tr *tar.Reader, hdr *tar.Header, destDir string) (string, er
 	targetPath := filepath.Join(destDir, safeName)
 
 	// Ensure target directory exists
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o750); err != nil {
 		return "", fmt.Errorf("failed to create directory for %s: %w", targetPath, err)
 	}
 
 	// Create the file
+	//nolint:gosec // G304: the member path is derived from the sanitized header name inside the caller-chosen temp dir
 	outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return "", fmt.Errorf("failed to create file %s: %w", targetPath, err)
@@ -215,9 +216,11 @@ func extractPrimaryTarLog(zr *gzip.Reader, srcPath, destDir string) (string, err
 
 	for {
 		hdr, err := tr.Next()
+
 		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			return "", fmt.Errorf("failed to read tar entry: %w", err)
 		}
@@ -245,23 +248,29 @@ func extractPrimaryTarLog(zr *gzip.Reader, srcPath, destDir string) (string, err
 	}
 
 	// Re-open and re-inflate the archive; extract only the chosen member.
+	return extractNamedMember(srcPath, best.name, destDir)
+}
+
+// extractNamedMember re-opens the archive, inflates it, and extracts only the
+// member whose sanitized name matches wantName.
+func extractNamedMember(srcPath, wantName, destDir string) (string, error) {
 	src, err := os.Open(srcPath) //nolint:gosec // user-provided path is intended
 	if err != nil {
 		return "", fmt.Errorf("failed to reopen %s for extraction: %w", srcPath, err)
 	}
 	defer func() { _ = src.Close() }()
 
-	zr2, err := gzip.NewReader(src)
+	zr, err := gzip.NewReader(src)
 	if err != nil {
 		return "", fmt.Errorf("failed to re-read gzip header of %s: %w", srcPath, err)
 	}
 
-	tr2 := tar.NewReader(zr2)
+	tr := tar.NewReader(zr)
 
 	for {
-		hdr, err := tr2.Next()
+		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return "", fmt.Errorf("tar member %q vanished between passes", best.name)
+			return "", fmt.Errorf("tar member %q vanished between passes", wantName)
 		}
 		if err != nil {
 			return "", fmt.Errorf("failed to read tar entry: %w", err)
@@ -276,8 +285,8 @@ func extractPrimaryTarLog(zr *gzip.Reader, srcPath, destDir string) (string, err
 			continue
 		}
 
-		if safeName == best.name {
-			return extractTarFile(tr2, hdr, destDir)
+		if safeName == wantName {
+			return extractTarFile(tr, hdr, destDir)
 		}
 	}
 }

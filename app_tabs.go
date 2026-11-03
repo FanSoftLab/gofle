@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"GoFLE/pkg/indexer"
 	"GoFLE/pkg/search"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -91,14 +91,14 @@ func (a *App) openFileWithID(filePath, tabID string) (*FileStatsResponse, error)
 	fileName := filepath.Base(filePath)
 
 	tab := &TabState{
-		ID:           tabID,
-		FilePath:     filePath,
-		FileName:     fileName,
-		Indexer:      idx,
-		Searcher:     search.NewSearchEngine(idx),
-		MatchedLines:    make([]int64, 0),
-		PrimaryMatches:  make([]int64, 0),
-		AutoScroll:      true,
+		ID:             tabID,
+		FilePath:       filePath,
+		FileName:       fileName,
+		Indexer:        idx,
+		Searcher:       search.NewSearchEngine(idx),
+		MatchedLines:   make([]int64, 0),
+		PrimaryMatches: make([]int64, 0),
+		AutoScroll:     true,
 	}
 
 	a.mu.Lock()
@@ -377,25 +377,25 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 	// Preserve advanced filters previously set via SearchLinesAdvanced / UI state.
 	prevAdv := tab.LastSearchOpts
 	opts := search.SearchOptions{
-		Query:              query,
-		SecondaryQuery:     secondaryQuery,
-		IsRegex:            primaryRegex,
-		CaseSensitive:      caseSensitive,
-		InvertMatch:        invertMatch,
-		ExcludePatterns:    prevAdv.ExcludePatterns,
-		ExcludeIsRegex:     prevAdv.ExcludeIsRegex,
-		NearbyQuery:        prevAdv.NearbyQuery,
-		NearbyMode:         prevAdv.NearbyMode,
-		NearbyWindow:       prevAdv.NearbyWindow,
-		Levels:             prevAdv.Levels,
-		ContextBefore:      prevAdv.ContextBefore,
-		ContextAfter:       prevAdv.ContextAfter,
-		SecondaryMode:      prevAdv.SecondaryMode,
-		LineStart:          prevAdv.LineStart,
-		LineEnd:            prevAdv.LineEnd,
-		TimeFrom:           prevAdv.TimeFrom,
-		TimeTo:             prevAdv.TimeTo,
-		TimeRequireStamp:   prevAdv.TimeRequireStamp,
+		Query:            query,
+		SecondaryQuery:   secondaryQuery,
+		IsRegex:          primaryRegex,
+		CaseSensitive:    caseSensitive,
+		InvertMatch:      invertMatch,
+		ExcludePatterns:  prevAdv.ExcludePatterns,
+		ExcludeIsRegex:   prevAdv.ExcludeIsRegex,
+		NearbyQuery:      prevAdv.NearbyQuery,
+		NearbyMode:       prevAdv.NearbyMode,
+		NearbyWindow:     prevAdv.NearbyWindow,
+		Levels:           prevAdv.Levels,
+		ContextBefore:    prevAdv.ContextBefore,
+		ContextAfter:     prevAdv.ContextAfter,
+		SecondaryMode:    prevAdv.SecondaryMode,
+		LineStart:        prevAdv.LineStart,
+		LineEnd:          prevAdv.LineEnd,
+		TimeFrom:         prevAdv.TimeFrom,
+		TimeTo:           prevAdv.TimeTo,
+		TimeRequireStamp: prevAdv.TimeRequireStamp,
 	}
 
 	// security: bound regex complexity (ReDoS hardening).
@@ -570,7 +570,6 @@ func (a *App) SearchLines(tabID, query string, isRegex, caseSensitive, invertMat
 	return matchCount, nil
 }
 
-
 // SearchLinesAdvanced applies advanced filters (JSON) then runs SearchLines.
 // filterJSON keys: exclude_patterns, exclude_is_regex, nearby_query, nearby_mode,
 // nearby_window, levels, line_start, line_end, time_from, time_to, time_require_stamp.
@@ -733,9 +732,11 @@ func (a *App) GetFilteredLines(tabID string, start, count int64) ([]LogLineRespo
 				// and those fall back to the error placeholder exactly like a
 				// map miss did.
 				t := 0
+
 				for k := i; k < j; k++ {
 					lineIdx := indices[k]
 					content := ""
+
 					if t < len(items) && items[t].Index == lineIdx {
 						content = items[t].Content
 						t++

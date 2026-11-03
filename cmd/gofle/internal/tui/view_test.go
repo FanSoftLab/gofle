@@ -302,6 +302,7 @@ func TestWrapCountCacheInvalidation(t *testing.T) {
 
 	// Split toggle halves the pane width: must invalidate too.
 	m.width = 120
+
 	wrapCacheMu.Lock()
 	stampBefore := wrapCacheStamp
 	wrapCacheMu.Unlock()

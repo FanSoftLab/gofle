@@ -1557,7 +1557,6 @@ func (m *model) exportMatchedLines(lw *lineWriter) (written, skipped int) {
 
 			return lw.writeLine(num)
 		})
-
 		if serr == nil {
 			written += runEnd - i
 			i = runEnd
@@ -1606,7 +1605,6 @@ func (m *model) exportAllLines(lw *lineWriter) (written, skipped int) {
 		serr := m.idx.ScanLinesRetry(start, count, func(_ int64, line []byte) bool {
 			return lw.writeLine(line)
 		})
-
 		if serr == nil {
 			written += int(count)
 			continue

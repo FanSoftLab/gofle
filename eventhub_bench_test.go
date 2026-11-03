@@ -30,6 +30,7 @@ func BenchmarkBroadcastNoSubs(b *testing.B) {
 func BenchmarkBroadcastOneSub(b *testing.B) {
 	h := NewEventHub()
 	ch := h.Subscribe()
+
 	defer h.Unsubscribe(ch)
 
 	b.ReportAllocs()
@@ -71,6 +72,7 @@ func BenchmarkBroadcastNoSubsLegacy(b *testing.B) {
 		}
 
 		h.mu.RLock()
+
 		for ch := range h.subs {
 			select {
 			case ch <- msg:

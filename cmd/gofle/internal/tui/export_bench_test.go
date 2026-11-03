@@ -71,7 +71,6 @@ func BenchmarkTUIExportAllLegacy(b *testing.B) {
 	for b.Loop() {
 		p := filepath.Join(b.TempDir(), "out-legacy.log")
 
-		//nolint:gosec // benchmark output path
 		f, err := os.Create(p)
 		if err != nil {
 			b.Fatal(err)
@@ -139,7 +138,6 @@ func BenchmarkTUIExportMatchesBulk(b *testing.B) {
 	for b.Loop() {
 		p := filepath.Join(b.TempDir(), "out-matches.log")
 
-		//nolint:gosec // benchmark output path
 		f, err := os.Create(p)
 		if err != nil {
 			b.Fatal(err)
