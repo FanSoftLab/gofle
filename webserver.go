@@ -210,6 +210,17 @@ func (api *webAPI) handleOpenFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveUpload(file io.Reader, name string) (string, error) {
+	// The filename arrives from the client. Reject anything containing a
+	// separator BEFORE basenaming: on Linux filepath.Base would silently
+	// flatten "../etc/evil.log" and "sub/dir/x.log" to "x.log" (safe but
+	// surprising), while "..\\evil.log" keeps its backslashes entirely —
+	// and that same string IS traversal on Windows. A clean rejection is
+	// deterministic on every platform (W2).
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid upload filename %q", name)
+	}
+	name = filepath.Base(name)
+
 	tmp, err := os.CreateTemp("", "gofle-upload-*"+filepath.Ext(name))
 	if err != nil {
 		return "", err

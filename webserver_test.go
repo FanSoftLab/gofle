@@ -175,3 +175,31 @@ func TestSaveUploadStoresContent(t *testing.T) {
 		t.Fatalf("cleanup: %v", err)
 	}
 }
+
+// A client-supplied filename containing a path separator must not make the
+// rename below escape the temp directory (W2): saveUpload basenames the name
+// and rejects degenerate ones.
+func TestSaveUploadRejectsPathTraversal(t *testing.T) {
+	for _, name := range []string{
+		"../../etc/evil.log",
+		"..\\..\\windows\\evil.log",
+		"sub/dir/evil.log",
+		"",
+		".",
+		"/",
+	} {
+		path, err := saveUpload(strings.NewReader("x"), name)
+		if err == nil {
+			t.Errorf("saveUpload(%q) = %q, want error", name, path)
+			if path != "" {
+				_ = os.Remove(path)
+			}
+
+			continue
+		}
+
+		if path != "" {
+			t.Errorf("saveUpload(%q) returned a path alongside an error", name)
+		}
+	}
+}
