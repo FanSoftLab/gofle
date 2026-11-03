@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 
 	"GoFLE/pkg/config"
 	"GoFLE/pkg/indexer"
@@ -263,5 +266,85 @@ func TestHandleUploadLargeFileSpillsToDisk(t *testing.T) {
 		}
 
 		_ = tab.Indexer.Close()
+	}
+}
+
+// Overflowing a subscriber's 64-slot buffer must be counted, not silent (W3).
+func TestEventHubDropCounting(t *testing.T) {
+	h := NewEventHub()
+	ch := h.Subscribe()
+
+	for range 100 { // 100 > 64-slot buffer, nobody consumes
+		h.Broadcast("evt", map[string]any{"n": 1})
+	}
+
+	if got := h.Drops(); got == 0 {
+		t.Error("Drops() = 0 after overflowing an unconsumed subscriber")
+	}
+
+	// The subscriber still receives the first buffered events in order.
+	for range 64 {
+		select {
+		case <-ch:
+		default:
+			t.Fatal("buffered events missing")
+		}
+	}
+
+	select {
+	case <-ch:
+		t.Fatal("unexpected extra event")
+	default:
+	}
+}
+
+// An abruptly disconnected client (TCP close without a WebSocket close
+// handshake) must end the handler promptly via the read pump, releasing the
+// goroutine and its subscriber channel (W3).
+func TestHandleWSAbruptClientDisconnect(t *testing.T) {
+	app := &App{cfg: config.NewTestConfig(t), hub: NewEventHub()}
+	api := &webAPI{app: app}
+
+	srv := httptest.NewServer(http.HandlerFunc(api.handleWS))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	handlerReturned := make(chan struct{})
+	go func() {
+		// The handler goroutine is the one ServeHTTP runs on; re-running
+		// handleWS on its own conn would race the server's — instead detect
+		// teardown by the hub subscriber count dropping back to zero.
+		t0 := time.Now()
+		for range 100 {
+			app.hub.mu.RLock()
+			n := len(app.hub.subs)
+			app.hub.mu.RUnlock()
+
+			if n == 0 {
+				close(handlerReturned)
+
+				return
+			}
+
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Logf("subscriber still registered after %v", time.Since(t0))
+	}()
+
+	// Abrupt TCP-level close, no WS close frame: with no read deadline this
+	// used to leave ReadMessage blocked for hours; the plain TCP close still
+	// errors immediately, and the deadline path covers the half-open case.
+	conn.UnderlyingConn().Close()
+
+	select {
+	case <-handlerReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WS handler did not release the subscriber after client disconnect")
 	}
 }

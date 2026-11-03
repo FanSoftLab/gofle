@@ -114,6 +114,26 @@ func (api *webAPI) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer api.app.hub.Unsubscribe(ch)
 
 	done := make(chan struct{})
+
+	const (
+		writeWait  = 10 * time.Second
+		pongWait   = 60 * time.Second
+		pingPeriod = 45 * time.Second
+	)
+
+	// W3: without a read deadline + pong handshake, a half-open client (a
+	// network drop with no RST/FIN) left ReadMessage blocked until the OS
+	// TCP keepalive noticed — hours — leaking this handler goroutine and its
+	// subscriber channel. The pong handler refreshes the deadline, and the
+	// server-side ping in the writer below prompts an answer even when no
+	// events flow.
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+
+	// Reader: any read error (client gone, pong deadline passed) ends the
+	// session.
 	go func() {
 		defer close(done)
 		for {
@@ -123,16 +143,65 @@ func (api *webAPI) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Single writer: gorilla/websocket permits exactly one concurrent
+	// writer, so event pushes and pings are serialized through outbox and
+	// drained by one goroutine (the previous code wrote directly from the
+	// dispatch loop; adding pings would have violated the rule).
+	outbox := make(chan []byte, 64)
+
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case msg, ok := <-outbox:
+				if !ok {
+					return
+				}
+
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					return
+				}
+			case <-ticker.C:
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	// Dispatch: forward hub events into the outbox. A stalled client fills
+	// the 64-slot outbox; further events are DROPPED (not queued) so the hub
+	// never blocks on one slow consumer, and every drop is counted (W3) —
+	// silent loss made a slow client look like a frozen live view. When the
+	// writer exits early (a write error), writerDone also stops this loop so
+	// it never sends on the closed outbox.
+	defer func() {
+		close(outbox)
+		<-writerDone
+	}()
+
 	for {
 		select {
 		case <-done:
+			return
+		case <-writerDone:
 			return
 		case msg, ok := <-ch:
 			if !ok {
 				return
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				return
+
+			select {
+			case outbox <- msg:
+			default:
+				api.app.hub.recordDrop()
 			}
 		}
 	}

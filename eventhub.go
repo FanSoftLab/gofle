@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 )
 
 // EventHub broadcasts named events to all registered WebSocket subscribers.
@@ -10,6 +12,12 @@ import (
 type EventHub struct {
 	mu   sync.RWMutex
 	subs map[chan []byte]struct{}
+	// drops counts events that could not be delivered (W3): a subscriber's
+	// 64-slot buffer was full, either at Broadcast time or when the WS
+	// dispatch loop forwarded into a stalled client's outbox. The first drop
+	// is logged once; the counter stays available for tests/diagnostics.
+	drops    atomic.Int64
+	dropOnce sync.Once
 }
 
 func NewEventHub() *EventHub {
@@ -33,6 +41,21 @@ func (h *EventHub) Unsubscribe(ch chan []byte) {
 		close(ch)
 	}
 	h.mu.Unlock()
+}
+
+// recordDrop counts one undeliverable event and logs the first one (W3):
+// silent event loss made a slow WebSocket client indistinguishable from a
+// frozen live view.
+func (h *EventHub) recordDrop() {
+	h.drops.Add(1)
+	h.dropOnce.Do(func() {
+		slog.Warn("event dropped: WebSocket client too slow to consume", "total_dropped", h.drops.Load())
+	})
+}
+
+// Drops returns the number of events dropped for slow subscribers so far.
+func (h *EventHub) Drops() int64 {
+	return h.drops.Load()
 }
 
 // Broadcast sends an event of the given type to all subscribers.
@@ -63,6 +86,7 @@ func (h *EventHub) Broadcast(eventType string, data any) {
 		select {
 		case ch <- msg:
 		default:
+			h.recordDrop()
 		}
 	}
 }
