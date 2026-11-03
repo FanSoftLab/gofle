@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"GoFLE/pkg/config"
 	"GoFLE/pkg/indexer"
 	"GoFLE/pkg/search"
 )
@@ -201,5 +205,63 @@ func TestSaveUploadRejectsPathTraversal(t *testing.T) {
 		if path != "" {
 			t.Errorf("saveUpload(%q) returned a path alongside an error", name)
 		}
+	}
+}
+
+// A 16 MB upload (2x the new 8 MB multipart memory cap) must still open a tab
+// end-to-end through handleUpload: parts larger than the cap spill to
+// disk-backed temp files that saveUpload streams via io.Copy (W1).
+func TestHandleUploadLargeFileSpillsToDisk(t *testing.T) {
+	cfg := config.NewTestConfig(t)
+
+	app := &App{
+		cfg:  cfg,
+		tabs: make(map[string]*TabState),
+		hub:  NewEventHub(),
+	}
+
+	api := &webAPI{app: app}
+
+	line := []byte("2026-08-15T10:00:00.000Z INFO upload spill test line padding\n")
+	payload := bytes.Repeat(line, (16<<20)/len(line)+1)[:(16 << 20)]
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	fw, err := mw.CreateFormFile("file", "spill-test.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := fw.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/api/files/upload", &buf)
+	r.Header.Set("Content-Type", mw.FormDataContentType())
+
+	// Exercise the same middleware chain the server installs so the
+	// MaxBytesReader wrapper is part of the path.
+	w := httptest.NewRecorder()
+	withCORS(http.HandlerFunc(api.handleUpload)).ServeHTTP(w, r)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	if len(app.tabs) != 1 {
+		t.Fatalf("open tabs = %d, want 1", len(app.tabs))
+	}
+
+	for _, tab := range app.tabs {
+		if tab.Indexer.TotalLines() <= 0 {
+			t.Fatal("uploaded file produced an empty index")
+		}
+
+		_ = tab.Indexer.Close()
 	}
 }

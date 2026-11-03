@@ -148,6 +148,13 @@ func writeErr(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
+// maxUploadBytes bounds every request body served by the web API. It must
+// cover the largest legitimate upload (512 MB per file, a few files per
+// multi-upload) with headroom; JSON/state endpoints use a tiny fraction of it.
+// Without a cap, a client could stream an unbounded body to ParseMultipartForm
+// (which spools to disk) or io.ReadAll (which does not) (W1).
+const maxUploadBytes = 1 << 30 // 1 GiB
+
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -157,6 +164,9 @@ func withCORS(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		// Bound the body BEFORE any handler reads it. WebSocket upgrades
+		// carry no body, so the wrapper is a no-op for /ws.
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -246,7 +256,14 @@ func (api *webAPI) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseMultipartForm(512 << 20); err != nil {
+	// maxMemory is deliberately SMALL (W1): parts larger than it spill to
+	// disk-backed temp files that saveUpload then streams via io.Copy. The
+	// previous 512 MB memory cap meant a whole upload was held in RAM per
+	// request (five concurrent clients ≈ 2.5 GB resident) only to be written
+	// back out to a temp file anyway.
+	const uploadMaxMemory = 8 << 20
+
+	if err := r.ParseMultipartForm(uploadMaxMemory); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
@@ -274,7 +291,11 @@ func (api *webAPI) handleUploadMultiple(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := r.ParseMultipartForm(512 << 20); err != nil {
+	// Same W1 rationale as handleUpload: small maxMemory, large parts spill
+	// to disk (see handleUpload).
+	const uploadMaxMemory = 8 << 20
+
+	if err := r.ParseMultipartForm(uploadMaxMemory); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
