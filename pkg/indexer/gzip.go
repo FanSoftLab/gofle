@@ -42,41 +42,74 @@ func isLikelyTarByExtension(path string) bool {
 		strings.HasSuffix(lower, ".tgz")
 }
 
-// findLogFile selects the best log file candidate from a list of extracted files.
-// Preference order: .log extension, largest file, first file.
-func findLogFile(files []string) (string, error) {
-	if len(files) == 0 {
-		return "", errors.New("no regular files found in tar archive")
+// tarHeaderEntry is one regular-file member seen during the tar header walk.
+type tarHeaderEntry struct {
+	name string
+	size int64
+}
+
+// selectTarLog applies the log-file preference order over walked headers:
+// the first .log member, else the largest member, else the first member.
+// Returns nil when there are no regular-file members.
+func selectTarLog(entries []tarHeaderEntry) *tarHeaderEntry {
+	if len(entries) == 0 {
+		return nil
 	}
 
-	// First pass: look for .log files
-	for _, f := range files {
-		if strings.HasSuffix(strings.ToLower(f), ".log") {
-			return f, nil
+	for i := range entries {
+		if strings.HasSuffix(strings.ToLower(entries[i].name), ".log") {
+			return &entries[i]
 		}
 	}
 
-	// Second pass: find largest file
-	var largestFile string
-	var largestSize int64 = -1
-
-	for _, f := range files {
-		info, err := os.Stat(f)
-		if err != nil {
-			continue
-		}
-		if info.Size() > largestSize {
-			largestSize = info.Size()
-			largestFile = f
+	best := &entries[0]
+	for i := 1; i < len(entries); i++ {
+		if entries[i].size > best.size {
+			best = &entries[i]
 		}
 	}
 
-	if largestFile != "" {
-		return largestFile, nil
+	return best
+}
+
+// extractTarFile writes the current tar member (already positioned at its
+// payload) into destDir under its sanitized name and returns the written path.
+func extractTarFile(tr *tar.Reader, hdr *tar.Header, destDir string) (string, error) {
+	safeName := filepath.Clean(hdr.Name)
+	if strings.HasPrefix(safeName, "..") || filepath.IsAbs(safeName) {
+		return "", fmt.Errorf("refusing to extract unsafe tar member %q", hdr.Name)
 	}
 
-	// Fallback: return first file
-	return files[0], nil
+	targetPath := filepath.Join(destDir, safeName)
+
+	// Ensure target directory exists
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return "", fmt.Errorf("failed to create directory for %s: %w", targetPath, err)
+	}
+
+	// Create the file
+	outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("failed to create file %s: %w", targetPath, err)
+	}
+
+	// Limit individual file size to 10GB
+	const maxFileSize = 10 * 1024 * 1024 * 1024
+
+	limitedReader := io.LimitReader(tr, maxFileSize)
+
+	buf := make([]byte, 1024*1024)
+
+	if _, err := io.CopyBuffer(outFile, limitedReader, buf); err != nil {
+		_ = outFile.Close()
+		return "", fmt.Errorf("failed to extract %s: %w", hdr.Name, err)
+	}
+
+	if err := outFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close extracted file %s: %w", targetPath, err)
+	}
+
+	return targetPath, nil
 }
 
 // EnsureDecompressed returns a path the byte-offset indexer can read.
@@ -120,20 +153,13 @@ func EnsureDecompressed(path string) (indexedPath string, cleanup func(), err er
 	isTar := isLikelyTarByExtension(path)
 
 	if isTar {
-		// Extract tar.gz to a temp directory
+		// Extract the primary log file to a temp directory
 		tmpDir, err := os.MkdirTemp("", "gofle-tar-*")
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to create temp directory for tar extraction: %w", err)
 		}
 
-		// Decompress gzip and extract tar in one pass
-		files, err := extractTarFromGzip(zr, tmpDir)
-		if err != nil {
-			_ = os.RemoveAll(tmpDir)
-			return "", nil, fmt.Errorf("failed to extract tar.gz %s: %w", path, err)
-		}
-
-		logFile, err := findLogFile(files)
+		logFile, err := extractPrimaryTarLog(zr, path, tmpDir)
 		if err != nil {
 			_ = os.RemoveAll(tmpDir)
 			return "", nil, err
@@ -170,12 +196,22 @@ func EnsureDecompressed(path string) (indexedPath string, cleanup func(), err er
 	return tmp.Name(), func() { _ = os.Remove(tmp.Name()) }, nil
 }
 
-// extractTarFromGzip reads from a gzip reader and extracts the tar archive
-// to destDir. Returns list of extracted regular file paths.
-func extractTarFromGzip(zr *gzip.Reader, destDir string) ([]string, error) {
+// extractPrimaryTarLog picks and extracts the ONE log file to index from a
+// tar.gz stream (G1). The old shape extracted EVERY regular member to disk and
+// only then picked the best candidate — paying disk writes for members it
+// would never read.
+//
+// The walk is single-inflate when it can be: under the same preference rule
+// as before (first .log, else largest, else first), the first .log member is
+// an unconditional winner, so it is extracted on the spot and the rest of the
+// archive is never inflated. Only when no .log exists does the largest rule
+// need all header sizes: the walk collects them (payloads discarded), and the
+// chosen member is extracted from a fresh pass over the archive file — one
+// extra inflate, still exactly one member written to disk.
+func extractPrimaryTarLog(zr *gzip.Reader, srcPath, destDir string) (string, error) {
 	tr := tar.NewReader(zr)
 
-	var extractedFiles []string
+	var entries []tarHeaderEntry
 
 	for {
 		hdr, err := tr.Next()
@@ -183,51 +219,65 @@ func extractTarFromGzip(zr *gzip.Reader, destDir string) ([]string, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to read tar entry: %w", err)
+			return "", fmt.Errorf("failed to read tar entry: %w", err)
 		}
 
-		// Only extract regular files
+		// Only regular files
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 
-		// Sanitize the file name to prevent path traversal
 		safeName := filepath.Clean(hdr.Name)
 		if strings.HasPrefix(safeName, "..") || filepath.IsAbs(safeName) {
-			continue // Skip potentially dangerous paths
+			continue // Skip potentially dangerous paths (payload is skipped)
 		}
 
-		targetPath := filepath.Join(destDir, safeName)
-
-		// Ensure target directory exists
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create directory for %s: %w", targetPath, err)
+		if strings.HasSuffix(strings.ToLower(safeName), ".log") {
+			return extractTarFile(tr, hdr, destDir)
 		}
 
-		// Create the file
-		outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create file %s: %w", targetPath, err)
-		}
-
-		// Limit individual file size to 10GB
-		const maxFileSize = 10 * 1024 * 1024 * 1024
-
-		limitedReader := io.LimitReader(tr, maxFileSize)
-
-		buf := make([]byte, 1024*1024)
-
-		if _, err := io.CopyBuffer(outFile, limitedReader, buf); err != nil {
-			_ = outFile.Close()
-			return nil, fmt.Errorf("failed to extract %s: %w", hdr.Name, err)
-		}
-
-		if err := outFile.Close(); err != nil {
-			return nil, fmt.Errorf("failed to close extracted file %s: %w", targetPath, err)
-		}
-
-		extractedFiles = append(extractedFiles, targetPath)
+		entries = append(entries, tarHeaderEntry{name: safeName, size: hdr.Size})
 	}
 
-	return extractedFiles, nil
+	best := selectTarLog(entries)
+	if best == nil {
+		return "", errors.New("no regular files found in tar archive")
+	}
+
+	// Re-open and re-inflate the archive; extract only the chosen member.
+	src, err := os.Open(srcPath) //nolint:gosec // user-provided path is intended
+	if err != nil {
+		return "", fmt.Errorf("failed to reopen %s for extraction: %w", srcPath, err)
+	}
+	defer func() { _ = src.Close() }()
+
+	zr2, err := gzip.NewReader(src)
+	if err != nil {
+		return "", fmt.Errorf("failed to re-read gzip header of %s: %w", srcPath, err)
+	}
+
+	tr2 := tar.NewReader(zr2)
+
+	for {
+		hdr, err := tr2.Next()
+		if errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("tar member %q vanished between passes", best.name)
+		}
+		if err != nil {
+			return "", fmt.Errorf("failed to read tar entry: %w", err)
+		}
+
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		safeName := filepath.Clean(hdr.Name)
+		if strings.HasPrefix(safeName, "..") || filepath.IsAbs(safeName) {
+			continue
+		}
+
+		if safeName == best.name {
+			return extractTarFile(tr2, hdr, destDir)
+		}
+	}
 }
