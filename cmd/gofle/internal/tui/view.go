@@ -42,6 +42,12 @@ type bodyKey struct {
 	matchCount  int
 	firstMatch  int64
 	lastMatch   int64
+	// wordWrap and hOffset change how every row is produced
+	// (wrapSegmentsOpts) but used to be missing here: toggling wrap or
+	// scrolling horizontally left all key fields identical, so bodyView()
+	// re-served the body rendered under the previous mode (T1).
+	wordWrap bool
+	hOffset  int
 }
 
 // viewBodyCache memoizes the expensive visible-body render (MED). It is a
@@ -69,6 +75,8 @@ func (m model) bodyKey() bodyKey {
 		splitFocus:  m.splitFocus,
 		totalLines:  m.idx.TotalLines(),
 		matchCount:  len(m.matches),
+		wordWrap:    m.wordWrap,
+		hOffset:     m.hOffset,
 	}
 	if m.selActive {
 		k.selActive = true

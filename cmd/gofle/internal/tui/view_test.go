@@ -225,3 +225,49 @@ func TestRenderSplitBodyPadsEveryRow(t *testing.T) {
 		}
 	}
 }
+
+// TestBodyKeyCoversWrapAndHOffset guards the body memoization key: wordWrap and
+// hOffset change how every row is produced but used to be absent from bodyKey,
+// so toggling wrap or scrolling horizontally re-served the body rendered under
+// the previous mode (T1). Each state change below must invalidate the memo.
+func TestBodyKeyCoversWrapAndHOffset(t *testing.T) {
+	lines := make([]string, 30)
+	for i := range lines {
+		// Long enough to wrap into several rows at the test width.
+		lines[i] = fmt.Sprintf("%02d MATCH %s", i, strings.Repeat("payload-", 30))
+	}
+
+	m := newTestModel(t, lines)
+	m.top = 5
+
+	// Warm the memo under the base state.
+	base := m.bodyView()
+	if base == "" {
+		t.Fatal("empty body")
+	}
+
+	// Toggle word wrap: the body must change (wrapped rows vs clipped rows).
+	m.wordWrap = true
+	wrapped := m.bodyView()
+	if wrapped == base {
+		t.Error("toggling wordWrap returned the stale memoized body")
+	}
+
+	// Back to wrap off with horizontal scroll: the body must change again
+	// (hOffset shifts the visible column window).
+	m.wordWrap = false
+	m.hOffset = 8
+	shifted := m.bodyView()
+	if shifted == base {
+		t.Error("changing hOffset returned the stale memoized body")
+	}
+	if shifted == wrapped {
+		t.Error("hOffset-shifted body equals the wrapped body")
+	}
+
+	// Restore the base state exactly: the memo may legitimately match base.
+	m.hOffset = 0
+	if m.bodyView() != base {
+		t.Error("restored state should render the original body")
+	}
+}
