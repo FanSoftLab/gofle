@@ -798,8 +798,11 @@ func (api *webAPI) handleExportSearch(w http.ResponseWriter, tabID string) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"search_results_%s.log\"", fileName))
 
 	// Buffer through bufio: an unbuffered Fprintf per match issued one syscall
-	// per line, which dominated the export on large match sets.
+	// per line, which dominated the export on large match sets. Line numbers
+	// go through one reusable scratch buffer instead of fmt.Fprintf per line
+	// (H1: interface boxing + reflection per row).
 	writer := bufio.NewWriter(w)
+	num := make([]byte, 0, 32)
 
 	var writeErr error
 
@@ -825,8 +828,19 @@ func (api *webAPI) handleExportSearch(w http.ResponseWriter, tabID string) {
 		start, count := matched[i], int64(runEnd-i)
 
 		serr := tab.Indexer.ScanLinesRetry(start, count, func(idx int64, line []byte) bool {
-			if _, e := fmt.Fprintf(writer, "%d: %s\n", idx+1, line); e != nil {
+			num = strconv.AppendInt(num[:0], idx+1, 10)
+			num = append(num, ':', ' ')
+			num = append(num, line...)
+
+			if _, e := writer.Write(num); e != nil {
 				writeErr = e
+
+				return false
+			}
+
+			if e := writer.WriteByte('\n'); e != nil {
+				writeErr = e
+
 				return false
 			}
 
@@ -847,8 +861,19 @@ func (api *webAPI) handleExportSearch(w http.ResponseWriter, tabID string) {
 					continue
 				}
 
-				if _, e := fmt.Fprintf(writer, "%d: %s\n", matched[k]+1, content); e != nil {
+				num = strconv.AppendInt(num[:0], matched[k]+1, 10)
+				num = append(num, ':', ' ')
+				num = append(num, content...)
+
+				if _, e := writer.Write(num); e != nil {
 					writeErr = e
+
+					break
+				}
+
+				if e := writer.WriteByte('\n'); e != nil {
+					writeErr = e
+
 					break
 				}
 			}

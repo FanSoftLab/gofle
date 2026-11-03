@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strconv"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -66,6 +67,12 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 
 	var writeErr error
 
+	// Line numbers are appended into one reusable buffer per export instead
+	// of fmt.Fprintf per line (H1): Fprintf boxes the line number into an
+	// interface (allocating above 255) and runs reflection over the args for
+	// every row of a multi-million-match export.
+	num := make([]byte, 0, 32)
+
 	// Export via bulk ScanLines over contiguous runs of the (ascending) match
 	// list instead of one pread+string per match — measured ~15x on a 1M-match
 	// export. Matches beyond the live total (snapshot raced a rotation) count
@@ -89,8 +96,19 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 		start, count := matched[i], int64(runEnd-i)
 
 		serr := tab.Indexer.ScanLinesRetry(start, count, func(idx int64, line []byte) bool {
-			if _, e := fmt.Fprintf(writer, "[%d] %s\n", idx+1, line); e != nil {
+			num = strconv.AppendInt(num[:0], idx+1, 10)
+			num = append(num, ']', ' ')
+			num = append(num, line...)
+
+			if _, e := writer.Write(num); e != nil {
 				writeErr = e
+
+				return false
+			}
+
+			if e := writer.WriteByte('\n'); e != nil {
+				writeErr = e
+
 				return false
 			}
 
@@ -111,8 +129,19 @@ func (a *App) SaveSearchResults(tabID string) (string, error) {
 					continue
 				}
 
-				if _, e := fmt.Fprintf(writer, "[%d] %s\n", matched[k]+1, content); e != nil {
+				num = strconv.AppendInt(num[:0], matched[k]+1, 10)
+				num = append(num, ']', ' ')
+				num = append(num, content...)
+
+				if _, e := writer.Write(num); e != nil {
 					writeErr = e
+
+					break
+				}
+
+				if e := writer.WriteByte('\n'); e != nil {
+					writeErr = e
+
 					break
 				}
 			}

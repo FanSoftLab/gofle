@@ -1446,9 +1446,42 @@ func defaultExportName() string {
 	return filepath.Join(".", "gofle-export-"+ts+".log")
 }
 
+// lineWriter funnels export rows into a bufio.Writer, tracking the first write
+// error so every exporter can stop early without reaching into the file handle.
+type lineWriter struct {
+	w   *bufio.Writer
+	err error
+}
+
+func (lw *lineWriter) writeLine(b []byte) bool {
+	if lw.err != nil {
+		return false
+	}
+
+	if _, e := lw.w.Write(b); e != nil {
+		lw.err = e
+
+		return false
+	}
+
+	if e := lw.w.WriteByte('\n'); e != nil {
+		lw.err = e
+
+		return false
+	}
+
+	return true
+}
+
 // doExport writes the current matches (or the whole file when none) to path.
 // Write, flush and close errors are surfaced via m.err; unreadable lines are
 // counted and reported instead of silently shrinking the export.
+//
+// Reads go through the bulk contiguous-run/chunk ScanLines path (T2) — the
+// TUI twin of exports.go SaveFullLogAs/SaveSearchResults: the old per-line
+// GetLoop shape issued one pread + one string + one fmt.Sprintf per line
+// (~10M syscalls on a 10M-line full-file export, the shape benchmarked as
+// BenchmarkExportGetLineLoop at ~15x the bulk path).
 func (m *model) doExport(path string) {
 	//nolint:gosec // the export path is typed by the user in the export prompt; writing where they asked is the feature
 	f, err := os.Create(path)
@@ -1457,44 +1490,27 @@ func (m *model) doExport(path string) {
 		return
 	}
 
-	w := bufio.NewWriter(f)
+	lw := &lineWriter{w: bufio.NewWriter(f)}
 
-	var (
-		written, skipped int
-		writeErr         error
-	)
-
-	writeLine := func(s string) bool {
-		if _, e := w.WriteString(s); e != nil {
-			writeErr = e
-			return false
-		}
-
-		if e := w.WriteByte('\n'); e != nil {
-			writeErr = e
-			return false
-		}
-
-		return true
-	}
+	var written, skipped int
 
 	if len(m.matches) > 0 {
-		written, skipped = m.exportMatchedLines(writeLine)
+		written, skipped = m.exportMatchedLines(lw)
 	} else {
-		written, skipped = m.exportAllLines(writeLine)
+		written, skipped = m.exportAllLines(lw)
 	}
 
 	// Flush before close: the buffer holds the data, the close releases the fd.
-	flushErr := w.Flush()
+	flushErr := lw.w.Flush()
 	closeErr := f.Close()
 
 	switch {
-	case writeErr != nil:
-		m.err = fmt.Errorf("failed to write export: %w", writeErr)
+	case lw.err != nil:
+		m.err = fmt.Errorf("failed to write export: %w", lw.err)
 	case flushErr != nil:
 		m.err = fmt.Errorf("failed to flush export: %w", flushErr)
 	case closeErr != nil:
-		m.err = fmt.Errorf("failed to close export file: %w", closeErr)
+		m.err = fmt.Errorf("failed to close export: %w", closeErr)
 	default:
 		abs, _ := filepath.Abs(path)
 
@@ -1509,40 +1525,106 @@ func (m *model) doExport(path string) {
 
 // exportMatchedLines writes the matched lines, prefixed with their 1-based line
 // number, and reports how many were written and how many were unreadable.
-func (m *model) exportMatchedLines(writeLine func(string) bool) (written, skipped int) {
-	for _, ln := range m.matches {
-		line, e := m.idx.GetLine(ln)
-		if e != nil {
+// Contiguous runs of the ascending match list are read with one bulk
+// ScanLinesRetry pass (C3 semantics); a run whose bulk read fails falls back
+// to per-line reads for exactly that run so skip accounting stays precise.
+// Numbers are appended into a reusable buffer instead of fmt.Sprintf per line
+// (H1: interface boxing + reflection per line).
+func (m *model) exportMatchedLines(lw *lineWriter) (written, skipped int) {
+	total := m.idx.TotalLines()
+	num := make([]byte, 0, 32)
+
+	i := 0
+	for i < len(m.matches) && lw.err == nil {
+		if m.matches[i] >= total {
 			skipped++
+			i++
+
 			continue
 		}
 
-		if !writeLine(fmt.Sprintf("%d:%s", ln+1, line)) {
-			break
+		runEnd := i + 1
+		for runEnd < len(m.matches) && m.matches[runEnd] == m.matches[runEnd-1]+1 && m.matches[runEnd] < total {
+			runEnd++
 		}
 
-		written++
+		start, count := m.matches[i], int64(runEnd-i)
+
+		serr := m.idx.ScanLinesRetry(start, count, func(idx int64, line []byte) bool {
+			num = strconv.AppendInt(num[:0], idx+1, 10)
+			num = append(num, ':')
+			num = append(num, line...)
+
+			return lw.writeLine(num)
+		})
+
+		if serr == nil {
+			written += runEnd - i
+			i = runEnd
+
+			continue
+		}
+
+		// Chunk read failed (e.g. raced a rotation): per-line fallback for
+		// exactly this run so skip accounting stays precise.
+		for k := i; k < runEnd && lw.err == nil; k++ {
+			ln := m.matches[k]
+
+			line, gerr := m.idx.GetLine(ln)
+			if gerr != nil {
+				skipped++
+				continue
+			}
+
+			num = strconv.AppendInt(num[:0], ln+1, 10)
+			num = append(num, ':')
+			num = append(num, line...)
+
+			if lw.writeLine(num) {
+				written++
+			}
+		}
+
+		i = runEnd
 	}
 
 	return written, skipped
 }
 
 // exportAllLines writes the whole file verbatim and reports how many lines were
-// written and how many were unreadable.
-func (m *model) exportAllLines(writeLine func(string) bool) (written, skipped int) {
+// written and how many were unreadable. The file is streamed in 500k-line
+// chunks via ScanLines (round-1 O4); a chunk that fails is re-read per-line so
+// genuinely unreadable lines are still counted, not silently dropped.
+func (m *model) exportAllLines(lw *lineWriter) (written, skipped int) {
 	total := m.idx.TotalLines()
-	for i := range total {
-		line, e := m.idx.GetLine(i)
-		if e != nil {
-			skipped++
+
+	const exportChunk = int64(500_000)
+
+	for start := int64(0); start < total && lw.err == nil; start += exportChunk {
+		count := min(exportChunk, total-start)
+
+		serr := m.idx.ScanLinesRetry(start, count, func(_ int64, line []byte) bool {
+			return lw.writeLine(line)
+		})
+
+		if serr == nil {
+			written += int(count)
 			continue
 		}
 
-		if !writeLine(line) {
-			break
-		}
+		// Chunk read failed (e.g. raced a rotation): per-line fallback for
+		// exactly this chunk.
+		for k := start; k < start+count && lw.err == nil; k++ {
+			line, gerr := m.idx.GetLine(k)
+			if gerr != nil {
+				skipped++
+				continue
+			}
 
-		written++
+			if lw.writeLine([]byte(line)) {
+				written++
+			}
+		}
 	}
 
 	return written, skipped
