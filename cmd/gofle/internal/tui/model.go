@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -114,10 +115,10 @@ type model struct {
 	settingsForm  []textinput.Model
 
 	// Async search state (progress in status bar).
-	searching     bool
-	searchGen     int
-	searchCancel  context.CancelFunc
-	searchProg    *atomic.Int64
+	searching    bool
+	searchGen    int
+	searchCancel context.CancelFunc
+	searchProg   *atomic.Int64
 
 	onlyMatches  bool // results-only filter view
 	help         bool // help overlay open
@@ -489,12 +490,82 @@ func (m model) logPaneWidth() int {
 	return m.width
 }
 
+// wrapStamp captures everything that changes wrap-row counts: window
+// geometry, split layout, file extent, the wrap mode itself, and the indexer
+// generation (a rotation rebuild can change line content without changing
+// the total line count).
+type wrapStamp struct {
+	width      int
+	splitView  bool
+	totalLines int64
+	wordWrap   bool
+	gen        uint64
+}
+
+// The wrap-count cache is package-scoped for the same reason as the view
+// body memo (viewBody above): one tea.Program per process, View()/Update()
+// single-threaded; the lock guards against concurrent callers. Without it,
+// every wrap-mode keypress recomputed wrap counts with one GetLine pread +
+// string per visible line, and clampViewport's walk-back loop re-walked the
+// same lines through remainingVisualRows once per iteration — O(height²)
+// preads per keypress (T3).
+var (
+	wrapCacheMu    sync.Mutex
+	wrapCacheStamp wrapStamp
+	wrapCacheSet   bool
+	wrapCounts     map[int64]int
+)
+
+// wrapCacheMaxEntries bounds the memo (T3): ~24 bytes per entry, so 1<<18
+// entries ≈ a few MB even on pathological full-file wrap scans. Exceeding it
+// resets the cache; the next misses recompute.
+const wrapCacheMaxEntries = 1 << 18
+
 // wrapRows returns how many visual rows the given logical line occupies once
-// hard-wrapped to the current log pane width.
+// hard-wrapped to the current log pane width, serving repeat counts from the
+// wrap cache.
 func (m model) wrapRows(ln int64) int {
 	if !m.wordWrap {
 		return 1
 	}
+
+	wrapCacheMu.Lock()
+	defer wrapCacheMu.Unlock()
+
+	st := wrapStamp{
+		width:      m.width,
+		splitView:  m.splitView,
+		totalLines: m.idx.TotalLines(),
+		wordWrap:   m.wordWrap,
+		gen:        m.idx.Generation(),
+	}
+
+	if !wrapCacheSet || wrapCacheStamp != st {
+		wrapCacheStamp = st
+		wrapCacheSet = true
+		wrapCounts = make(map[int64]int, 1024)
+	}
+
+	if n, ok := wrapCounts[ln]; ok {
+		return n
+	}
+
+	n := m.computeWrapRows(ln)
+	if n < 1 {
+		n = 1
+	}
+
+	if len(wrapCounts) >= wrapCacheMaxEntries {
+		wrapCounts = make(map[int64]int, 1024)
+	}
+
+	wrapCounts[ln] = n
+
+	return n
+}
+
+// computeWrapRows reads the line and counts its wrapped rows (uncached core).
+func (m model) computeWrapRows(ln int64) int {
 	content, e := m.idx.GetLine(ln)
 	if e != nil {
 		content = ""
@@ -508,6 +579,7 @@ func (m model) wrapRows(ln int64) int {
 	if n < 1 {
 		return 1
 	}
+
 	return n
 }
 

@@ -271,3 +271,49 @@ func TestBodyKeyCoversWrapAndHOffset(t *testing.T) {
 		t.Error("restored state should render the original body")
 	}
 }
+
+// The wrap-count cache must return stable counts for repeated calls, and its
+// stamp must invalidate on every input that changes the counts: width, split
+// layout, totalLines, wordWrap and the indexer generation (T3).
+func TestWrapCountCacheInvalidation(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("%02d %s", i, strings.Repeat("payload-", 30))
+	}
+
+	m := newTestModel(t, lines)
+	m.wordWrap = true
+	m.width = 120
+
+	first := m.wrapRows(3)
+	if first < 2 {
+		t.Fatalf("wrapRows(3) = %d, want >=2 for a long line", first)
+	}
+
+	if again := m.wrapRows(3); again != first {
+		t.Errorf("second wrapRows(3) = %d, want cached %d", again, first)
+	}
+
+	// Width change must invalidate.
+	m.width = 40
+	if got := m.wrapRows(3); got <= first {
+		t.Errorf("wrapRows(3) after narrowing = %d, want > %d", got, first)
+	}
+
+	// Split toggle halves the pane width: must invalidate too.
+	m.width = 120
+	wrapCacheMu.Lock()
+	stampBefore := wrapCacheStamp
+	wrapCacheMu.Unlock()
+
+	m.splitView = true
+	_ = m.wrapRows(3)
+
+	wrapCacheMu.Lock()
+	stampAfter := wrapCacheStamp
+	wrapCacheMu.Unlock()
+
+	if stampBefore == stampAfter {
+		t.Error("splitView toggle did not invalidate the wrap cache")
+	}
+}
