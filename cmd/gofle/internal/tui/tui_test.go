@@ -1033,7 +1033,7 @@ func TestSplitNoBleed(t *testing.T) {
 	}
 
 	m = runSearchToCompletion(t, m)
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ 's'}})
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	m = nm.(model)
 
 	// buildLayout: inner = max(termW - gapW - 2, 2); leftW = inner / 2;
@@ -1062,5 +1062,196 @@ func TestSplitNoBleed(t *testing.T) {
 
 	if bodyRows == 0 {
 		t.Fatal("no split rows rendered")
+	}
+}
+
+// wrapJumpModel builds a wrap-mode jump fixture: long lines (every 5th) wrap
+// into several visual rows at the test width, the rest are short. Matches sit
+// on both long and short lines, which is the worst case for jump positioning:
+// a half-page of logical lines above a match can span far more than half a
+// viewport of visual rows.
+func wrapJumpModel(t *testing.T) model {
+	t.Helper()
+
+	lines := make([]string, 120)
+	for i := range lines {
+		if i%5 == 0 {
+			lines[i] = fmt.Sprintf("LONG-%03d %s", i, strings.Repeat("payload-", 40))
+		} else {
+			lines[i] = fmt.Sprintf("short-%03d", i)
+		}
+	}
+
+	m := newTestModel(t, lines)
+	m.width = 100
+	m.height = 10
+	m.wordWrap = true
+
+	return m
+}
+
+// wrapJumpMatches returns match line indices covering both long (ln%5==0) and
+// short (ln%5==2) fixture lines.
+func wrapJumpMatches(total int64) []int64 {
+	var matches []int64
+
+	for ln := range total {
+		if ln%5 == 0 || ln%5 == 2 {
+			matches = append(matches, ln)
+		}
+	}
+
+	return matches
+}
+
+// wrapRowsAbove counts the visual rows the viewport spends above line mc when
+// the viewport starts at (top, topWrap) in wrap mode.
+func wrapRowsAbove(m model, top, mc int64, topWrap int) int {
+	above := 0
+	for ln := top; ln < mc; ln++ {
+		above += m.wrapRows(ln)
+	}
+
+	return above - topWrap
+}
+
+// wrapRowsBelow counts visual rows from the start of line ln to EOF, capped at
+// the given row budget.
+func wrapRowsBelow(m model, ln, budget int64) int {
+	b := int(budget)
+	rows := 0
+
+	for ; ln < m.idx.TotalLines() && rows < b; ln++ {
+		rows += m.wrapRows(ln)
+	}
+
+	return rows
+}
+
+// TestKeepMatchVisibleWrapCentersMatchOnScreen pins the wrap-mode jump: after
+// keepMatchVisible the selected match must be centered in visual rows when
+// both a half-page above and a half-page below exist — and never positioned by
+// raw logical-line count, which leaves the match below the viewport when the
+// lines in between wrap.
+func TestKeepMatchVisibleWrapCentersMatchOnScreen(t *testing.T) {
+	m := wrapJumpModel(t)
+	if m.wrapRows(0) < 3 {
+		t.Fatalf("fixture: wrapRows(0) = %d, want >= 3 wrapped rows", m.wrapRows(0))
+	}
+
+	m.matches = wrapJumpMatches(m.idx.TotalLines())
+
+	need := m.height / 2
+	for cursor := range m.matches {
+		m.matchCursor = cursor
+		m.keepMatchVisible()
+
+		mc := m.matches[cursor]
+		above := wrapRowsAbove(m, m.top, mc, m.topWrap)
+
+		// The core invariant: the match's first visual row is on screen.
+		if above < 0 || above >= m.height {
+			t.Errorf("cursor %d: match first row at %d of a %d-row viewport — off screen (top=%d topWrap=%d)",
+				cursor, above, m.height, m.top, m.topWrap)
+		}
+
+		if m.topWrap < 0 || m.topWrap >= m.wrapRows(m.top) {
+			t.Errorf("cursor %d: topWrap %d outside 0..%d for line %d",
+				cursor, m.topWrap, m.wrapRows(m.top)-1, m.top)
+		}
+
+		// Exact centering is only required when the file has room for half a
+		// page of visual rows above AND below the match; near either end the
+		// viewport pins to the boundary instead.
+		rowsAbove := wrapRowsAbove(m, 0, mc, 0)
+		rowsBelow := wrapRowsBelow(m, mc, int64(m.height-need))
+
+		if rowsAbove >= need && rowsBelow >= m.height-need && above != need {
+			t.Errorf("cursor %d: visual rows above match = %d, want exact center %d (top=%d topWrap=%d)",
+				cursor, above, need, m.top, m.topWrap)
+		}
+
+		body := m.bodyView()
+		if !strings.Contains(body, fmt.Sprintf("LONG-%03d", mc)) && !strings.Contains(body, fmt.Sprintf("short-%03d", mc)) {
+			t.Errorf("cursor %d: rendered body does not show the matched line %d (top=%d topWrap=%d)",
+				cursor, mc, m.top, m.topWrap)
+		}
+	}
+}
+
+// TestKeepMatchVisibleWrapFillsViewportNearEOF checks the wrap-mode jump near
+// the end of the file: clampViewport must walk the top back far enough that
+// the viewport stays filled instead of pinning the match to an empty screen.
+func TestKeepMatchVisibleWrapFillsViewportNearEOF(t *testing.T) {
+	m := wrapJumpModel(t)
+	m.matches = []int64{m.idx.TotalLines() - 1}
+	m.matchCursor = 0
+	m.keepMatchVisible()
+
+	if got := m.remainingVisualRows(); got < m.height {
+		t.Errorf("remainingVisualRows = %d, want >= %d (top=%d topWrap=%d)",
+			got, m.height, m.top, m.topWrap)
+	}
+}
+
+// TestResultsEnterResetsTopWrap pins the enter-from-results jump: the stale
+// wrapped-row offset left by earlier wrap-mode scrolling must be dropped, or
+// the first visual rows of the target line are cut off.
+func TestResultsEnterResetsTopWrap(t *testing.T) {
+	m := wrapJumpModel(t)
+	m.matches = []int64{10, 50}
+	m.splitView = true
+	m.splitFocus = 1
+	m.matchCursor = 1
+
+	// Leave the log pane mid-line: the top line's last visual row is showing.
+	m.top = 5
+	m.topWrap = m.wrapRows(5) - 1
+
+	if m.topWrap < 1 {
+		t.Fatalf("fixture: topWrap = %d, want >= 1", m.topWrap)
+	}
+
+	if !m.resultsPaneKey(keyEnter) {
+		t.Fatal("resultsPaneKey did not handle enter")
+	}
+
+	if m.splitFocus != 0 {
+		t.Errorf("splitFocus = %d, want 0 (back to log pane)", m.splitFocus)
+	}
+
+	if m.top != 50 {
+		t.Errorf("top = %d, want 50 (the match line)", m.top)
+	}
+
+	if m.topWrap != 0 {
+		t.Errorf("topWrap = %d, want 0 after enter", m.topWrap)
+	}
+
+	if !strings.Contains(m.bodyView(), "LONG-050") {
+		t.Error("rendered body does not start at the jumped-to match")
+	}
+}
+
+// TestRunGotoResetsTopWrap covers the goto-line prompt under wrap: a stale
+// topWrap must not chop the target line.
+func TestRunGotoResetsTopWrap(t *testing.T) {
+	m := wrapJumpModel(t)
+	m.top = 5
+	m.topWrap = m.wrapRows(5) - 1
+	m.gotoInput.SetValue("51")
+
+	m.runGoto()
+
+	if m.top != 50 {
+		t.Errorf("top = %d, want 50 (1-based line 51)", m.top)
+	}
+
+	if m.topWrap != 0 {
+		t.Errorf("topWrap = %d, want 0 after goto", m.topWrap)
+	}
+
+	if !strings.Contains(m.bodyView(), "LONG-050") {
+		t.Error("rendered body does not start at the goto target")
 	}
 }

@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Jump to a selected search result with word wrap on.** In the terminal
+  viewer, navigating the results pane (arrows, Enter, next/previous) and the
+  goto-line prompt now position the log pane in visual rows: a match can no
+  longer land below the viewport when the lines above it soft-wrap, and a stale
+  wrapped-row offset no longer hides the first rows of the target line. In the
+  desktop/web UI, clicking a result, next/previous match, and go-to-line jump
+  through the wrap-safe content anchor, so the target row stays in place while
+  row heights are measured (previously the jump could stop well above the
+  target in unvisited regions of wrapped logs).
+
 ### Security
 
 ## [2.0.0] - 2026-10-04

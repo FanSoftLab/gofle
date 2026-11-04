@@ -487,9 +487,13 @@ func (m *model) resultsPaneKey(key string) bool {
 		m.keepMatchVisible()
 	case keyEnter:
 		// Jump back to the log pane with the selected match at the top.
+		// Reset topWrap so no stale wrapped-row offset hides the first
+		// visual rows of the target line.
 		m.splitFocus = 0
 		if !m.onlyMatches {
 			m.top = m.matches[m.matchCursor]
+			m.topWrap = 0
+			m.clampViewport()
 		}
 	default:
 		return false
@@ -1346,6 +1350,10 @@ func (m *model) runGoto() {
 	}
 
 	m.top = n
+	// Drop any stale wrapped-row offset and clamp so the target line is the
+	// first visible row in both wrap and non-wrap modes.
+	m.topWrap = 0
+	m.clampViewport()
 }
 
 // copySelection copies the selected line range (inclusive) to the system
@@ -1807,4 +1815,3 @@ func (m recentPickerModel) View() string {
 
 	return b.String()
 }
-

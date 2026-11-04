@@ -276,29 +276,53 @@ func (m model) selectionBounds() (lo, hi int64, ok bool) {
 	return lo, hi, true
 }
 
-// keepMatchVisible scrolls the log pane (m.top) so the current match is
-// centered in the viewport when possible. When navigating the results list in
-// split view this keeps the match centered with context above/below instead of
-// pinning it to the top. It is a no-op in results-only mode, where m.top is a
-// match index.
+// keepMatchVisible scrolls the log pane (m.top/topWrap) so the current match
+// is centered in the viewport when possible. When navigating the results list
+// in split view this keeps the match centered with context above/below instead
+// of pinning it to the top. It is a no-op in results-only mode, where m.top is
+// a match index.
+//
+// With word wrap the centering happens in visual rows, not logical lines: a
+// long line can occupy several screen rows, so positioning purely by line
+// count would leave the match below the viewport. clampViewport finishes by
+// enforcing the filled-viewport / EOF bounds (match sits lower than center
+// near the end of the file).
 func (m *model) keepMatchVisible() {
 	if m.onlyMatches || len(m.matches) == 0 || m.height <= 0 {
 		return
 	}
 
 	mc := m.matches[m.matchCursor]
-	half := int64(m.height) / 2
 
-	desired := max(mc-half, 0)
-
-	maxTop := max(m.idx.TotalLines()-int64(m.height), 0)
-
-	if desired > maxTop {
-		desired = maxTop
+	if m.wordWrap {
+		m.top, m.topWrap = m.topWrapForCentered(mc)
+	} else {
+		m.topWrap = 0
+		m.top = min(max(mc-int64(m.height)/2, 0), m.viewableEnd())
 	}
 
-	m.top = desired
-	m.topWrap = 0
+	m.clampViewport()
+}
+
+// topWrapForCentered finds the (top, topWrap) pair that leaves roughly half a
+// viewport of visual rows above the match line mc, walking back through the
+// wrap-row counts. wrapRows is cache-backed, so the walk is bounded by the
+// half-page of lines it visits.
+func (m model) topWrapForCentered(mc int64) (int64, int) {
+	need := m.height / 2
+	acc := 0
+
+	for ln := mc; ln > 0 && acc < need; ln-- {
+		wr := m.wrapRows(ln - 1)
+		if acc+wr >= need {
+			// Line ln-1 straddles the boundary: show only its last
+			// need-acc visual rows above the match.
+			return ln - 1, wr - (need - acc)
+		}
+		acc += wr
+	}
+
+	return 0, 0
 }
 
 // ensureResVisible keeps the current match cursor inside the results pane's
