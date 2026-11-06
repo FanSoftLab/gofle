@@ -4,7 +4,8 @@ Thumbs.db
 *.empty
 
 # PhpStorm project files
-/.idea/**
+.idea
+.openidea
 
 # Netbeans project files
 nbproject
