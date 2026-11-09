@@ -1294,7 +1294,7 @@ func (m *model) stepMatch(dir int) {
 		m.top = int64(m.matchCursor)
 	} else {
 		m.top = m.matches[m.matchCursor]
-		m.topWrap = 0
+		m.keepMatchVisible()
 	}
 
 	m.ensureResVisible()
@@ -1319,7 +1319,7 @@ func (m *model) gotoMatch(i int) {
 		m.top = int64(i)
 	} else {
 		m.top = m.matches[i]
-		m.topWrap = 0
+		m.keepMatchVisible()
 	}
 
 	m.ensureResVisible()

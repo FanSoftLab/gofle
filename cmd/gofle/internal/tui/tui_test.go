@@ -222,8 +222,10 @@ func TestModelSearchAndMatchNav(t *testing.T) {
 		t.Errorf("matchCursor = %d, want 1", m.matchCursor)
 	}
 
-	if m.top != m.matches[1] {
-		t.Errorf("top = %d, want match 1 (%d)", m.top, m.matches[1])
+	// With keepMatchVisible, the match is centered in the viewport.
+	// The match line should be visible within the viewport (top <= matchLine < top+height).
+	if m.top > m.matches[1] || m.top+int64(m.height) <= m.matches[1] {
+		t.Errorf("top = %d, match line %d not visible in viewport height %d", m.top, m.matches[1], m.height)
 	}
 }
 
