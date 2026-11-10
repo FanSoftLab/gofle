@@ -3,6 +3,7 @@ package tui
 import (
 	"GoFLE/pkg/config"
 	"GoFLE/pkg/indexer"
+	"GoFLE/pkg/remote"
 	"GoFLE/pkg/search"
 	"context"
 	"fmt"
@@ -1255,5 +1256,178 @@ func TestRunGotoResetsTopWrap(t *testing.T) {
 
 	if !strings.Contains(m.bodyView(), "LONG-050") {
 		t.Error("rendered body does not start at the goto target")
+	}
+}
+
+func TestEnsureResVisibleScrollsResultsPane(t *testing.T) {
+	lines := make([]string, 80)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d match-here", i)
+	}
+	m := newTestModel(t, lines)
+	m.height = 8
+	m.width = 80
+	m.splitView = true
+	m.splitFocus = 1
+	m.wordWrap = false
+
+	matches := make([]int64, 0, 40)
+	for i := int64(0); i < 80; i += 2 {
+		matches = append(matches, i)
+	}
+	m.matches = matches
+	m.matchCursor = 0
+	m.resTop = 0
+
+	// Jump far down the match list; results window must follow.
+	m.matchCursor = 25
+	m.ensureResVisible()
+	if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+		t.Fatalf("matchCursor %d not in window resTop=%d height=%d", m.matchCursor, m.resTop, m.height)
+	}
+
+	// Jump back to the top of the list.
+	m.matchCursor = 0
+	m.ensureResVisible()
+	if m.resTop != 0 {
+		t.Fatalf("resTop = %d, want 0 after jumping to first match", m.resTop)
+	}
+
+	// stepMatch from results pane should keep cursor visible.
+	m.matchCursor = 0
+	m.resTop = 0
+	for i := 0; i < 20; i++ {
+		m.stepMatch(1)
+		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+			t.Fatalf("after step %d: matchCursor %d outside window resTop=%d height=%d",
+				i+1, m.matchCursor, m.resTop, m.height)
+		}
+	}
+}
+
+func TestEnsureResVisibleWordWrap(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		// Long lines that wrap to several visual rows at narrow width.
+		lines[i] = fmt.Sprintf("MATCH-%02d %s", i, strings.Repeat("payload-", 30))
+	}
+	m := newTestModel(t, lines)
+	m.height = 6
+	m.width = 40
+	m.splitView = true
+	m.wordWrap = true
+	m.matches = make([]int64, 40)
+	for i := range m.matches {
+		m.matches[i] = int64(i)
+	}
+	m.matchCursor = 0
+	m.resTop = 0
+
+	m.matchCursor = 15
+	m.ensureResVisible()
+	if !m.matchCursorVisibleFrom(m.resTop) {
+		t.Fatalf("matchCursor %d not visible from resTop=%d (word-wrap)", m.matchCursor, m.resTop)
+	}
+}
+
+func TestRecentPickerScrollsOnSmallTerminal(t *testing.T) {
+	items := make([]config.RecentFileItem, 30)
+	for i := range items {
+		items[i] = config.RecentFileItem{Path: fmt.Sprintf("/tmp/file-%02d.log", i)}
+	}
+	m := newTestModel(t, []string{"x"})
+	m.fullHeight = 12 // small terminal → few visible slots
+	m.height = 8
+	m.recentList = items
+	m.recentMode = true
+	m.recentCursor = 0
+	m.recentTop = 0
+
+	slots := m.recentVisibleSlots()
+	if slots >= len(items) {
+		t.Fatalf("test setup: expected windowed list, slots=%d items=%d", slots, len(items))
+	}
+
+	// Move down past the first window.
+	for i := 0; i < slots+3; i++ {
+		m.recentCursor = i
+		m.ensureRecentVisible()
+	}
+	if m.recentCursor < m.recentTop || m.recentCursor >= m.recentTop+slots {
+		t.Fatalf("recentCursor %d outside window top=%d slots=%d", m.recentCursor, m.recentTop, slots)
+	}
+
+	out := m.recentView()
+	// Highlighted entry should appear; first entry should not when scrolled down.
+	if !strings.Contains(out, fmt.Sprintf("%d. /tmp/file-%02d.log", m.recentCursor+1, m.recentCursor)) {
+		t.Fatalf("recent view missing highlighted entry %d: %q", m.recentCursor, out)
+	}
+	if strings.Contains(out, "1. /tmp/file-00.log") {
+		t.Fatalf("recent view still shows first entry after scrolling: %q", out)
+	}
+
+	// Jump to end.
+	m.recentCursor = len(items) - 1
+	m.ensureRecentVisible()
+	if m.recentCursor < m.recentTop || m.recentCursor >= m.recentTop+slots {
+		t.Fatalf("at end: recentCursor %d outside window top=%d slots=%d", m.recentCursor, m.recentTop, slots)
+	}
+}
+
+func TestRemoteBrowserScrollsOnSmallTerminal(t *testing.T) {
+	m := newTestModel(t, []string{"x"})
+	m.fullHeight = 10
+	m.height = 6
+	m.remoteBrowseMode = true
+	m.remoteEntries = make([]remote.DirEntry, 40)
+	for i := range m.remoteEntries {
+		m.remoteEntries[i] = remote.DirEntry{Name: fmt.Sprintf("entry-%02d", i)}
+	}
+	m.remoteCursor = 0
+	m.remoteTop = 0
+
+	slots := m.remoteVisibleSlots()
+	if slots >= len(m.remoteEntries) {
+		t.Fatalf("test setup: expected windowed list, slots=%d", slots)
+	}
+
+	m.remoteCursor = slots + 5
+	m.ensureRemoteVisible()
+	if m.remoteCursor < m.remoteTop || m.remoteCursor >= m.remoteTop+slots {
+		t.Fatalf("remoteCursor %d outside window top=%d slots=%d", m.remoteCursor, m.remoteTop, slots)
+	}
+
+	out := m.remoteBrowseView()
+	if !strings.Contains(out, fmt.Sprintf("entry-%02d", m.remoteCursor)) {
+		t.Fatalf("remote view missing cursor entry: %q", out)
+	}
+	if strings.Contains(out, "entry-00") && m.remoteTop > 0 {
+		t.Fatalf("remote view still shows first entry after scrolling: %q", out)
+	}
+}
+
+func TestStandaloneRecentPickerScrolls(t *testing.T) {
+	items := make([]config.RecentFileItem, 25)
+	for i := range items {
+		items[i] = config.RecentFileItem{Path: fmt.Sprintf("/var/log/app-%02d.log", i)}
+	}
+	rp := recentPickerModel{items: items, height: 12}
+	slots := rp.visibleSlots()
+	if slots >= len(items) {
+		t.Fatalf("expected windowed list, slots=%d", slots)
+	}
+
+	nm, _ := rp.Update(tea.KeyMsg{Type: tea.KeyDown})
+	rp = nm.(recentPickerModel)
+	for i := 0; i < slots+2; i++ {
+		nm, _ = rp.Update(tea.KeyMsg{Type: tea.KeyDown})
+		rp = nm.(recentPickerModel)
+	}
+	if rp.cursor < rp.top || rp.cursor >= rp.top+slots {
+		t.Fatalf("cursor %d outside window top=%d slots=%d", rp.cursor, rp.top, slots)
+	}
+	out := rp.View()
+	if strings.Contains(out, "1. /var/log/app-00.log") && rp.top > 0 {
+		t.Fatalf("standalone recent still shows first entry: %q", out)
 	}
 }

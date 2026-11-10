@@ -618,14 +618,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         syncSearchClearBtn();
 
         mainScroller.setAutoScroll(tab.autoScroll);
-        // Queue scroll restore BEFORE setTotalLines so pendingScrollTop survives layout.
+        // Queue scroll restore BEFORE setTotalLines so pendingAnchor survives layout.
+        const restoreMain = pendingScrollRestore && !tab.autoScroll && typeof tab.mainScrollIndex === 'number';
+        const restoreFilter = pendingScrollRestore && typeof tab.filterScrollIndex === 'number';
+        const mainIdx = tab.mainScrollIndex ?? 0;
+        const mainFrac = tab.mainScrollFrac ?? 0;
+        const filterIdx = tab.filterScrollIndex ?? 0;
+        const filterFrac = tab.filterScrollFrac ?? 0;
         if (pendingScrollRestore) {
             pendingScrollRestore = false;
-            if (!tab.autoScroll && typeof tab.mainScrollIndex === 'number') {
-                mainScroller.setViewAnchor(tab.mainScrollIndex, tab.mainScrollFrac ?? 0);
+            if (restoreMain) {
+                mainScroller.setViewAnchor(mainIdx, mainFrac);
             }
-            if (typeof tab.filterScrollIndex === 'number') {
-                filterScroller.setViewAnchor(tab.filterScrollIndex, tab.filterScrollFrac ?? 0);
+            if (restoreFilter) {
+                filterScroller.setViewAnchor(filterIdx, filterFrac);
             }
         }
         mainScroller.setTotalLines(tab.totalLines, tab.id);
@@ -637,13 +643,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         validateRegexUI();
         updateSearchNavState();
         // After tab switch / session restore the bottom pane may still have 0 height
-        // until flex layout settles — remeasure both scrollers on next frames.
+        // until flex layout settles — remeasure both scrollers on next frames and
+        // re-apply the saved anchors so a zero-height first pass cannot stick.
         requestAnimationFrame(() => {
             mainScroller.relayout?.();
             filterScroller.relayout?.();
+            if (restoreMain) mainScroller.setViewAnchor(mainIdx, mainFrac);
+            if (restoreFilter) filterScroller.setViewAnchor(filterIdx, filterFrac);
             requestAnimationFrame(() => {
                 mainScroller.relayout?.();
                 filterScroller.relayout?.();
+                if (restoreMain) mainScroller.setViewAnchor(mainIdx, mainFrac);
+                if (restoreFilter) filterScroller.setViewAnchor(filterIdx, filterFrac);
             });
         });
     };

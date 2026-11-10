@@ -324,17 +324,33 @@ func (m model) renderStatus() string {
 }
 
 // recentView renders the recent-files picker overlay.
-// renderRecentList renders the recent-entries body (shared by the in-viewer
-// picker and the standalone `gofle recent` picker). The entry at `cursor` is
-// highlighted.
-func renderRecentList(items []config.RecentFileItem, cursor int) string {
+// renderRecentList renders a windowed slice of recent-entries (shared by the
+// in-viewer picker and the standalone `gofle recent` picker). The entry at
+// `cursor` is highlighted. top is the first visible index; maxItems is the
+// number of entries to show (0 = all remaining).
+func renderRecentList(items []config.RecentFileItem, cursor, top, maxItems int) string {
 	if len(items) == 0 {
 		return dimStyle.Render("  No recent files.")
 	}
 
-	var b strings.Builder
+	if top < 0 {
+		top = 0
+	}
+	if top >= len(items) {
+		top = max(0, len(items)-1)
+	}
+	end := len(items)
+	if maxItems > 0 {
+		end = min(top+maxItems, len(items))
+	}
 
-	for i, it := range items {
+	var b strings.Builder
+	if top > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more above", top)) + "\n")
+	}
+
+	for i := top; i < end; i++ {
+		it := items[i]
 		label := it.Path
 		if it.IsSSH && it.SSH != nil {
 			// No username/credentials in the listing — connection details stay
@@ -363,13 +379,18 @@ func renderRecentList(items []config.RecentFileItem, cursor int) string {
 			kind, it.LastOpened, shared.HumanSize(it.FileSize))) + "\n")
 	}
 
+	if end < len(items) {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more below", len(items)-end)) + "\n")
+	}
+
 	return b.String()
 }
 
 func (m model) recentView() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("Open recent") + "\n\n")
-	b.WriteString(renderRecentList(m.recentList, m.recentCursor))
+	slots := m.recentVisibleSlots()
+	b.WriteString(renderRecentList(m.recentList, m.recentCursor, m.recentTop, slots))
 	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  t new tab  ·  b browse server  ·  esc cancel"))
 
 	return b.String()
@@ -435,7 +456,17 @@ func (m model) remoteBrowseView() string {
 	case len(m.remoteEntries) == 0 && m.remoteBrowseErr == "":
 		b.WriteString(dimStyle.Render("  (empty directory)") + "\n")
 	default:
-		for i, e := range m.remoteEntries {
+		slots := m.remoteVisibleSlots()
+		top := m.remoteTop
+		if top < 0 {
+			top = 0
+		}
+		end := min(top+slots, len(m.remoteEntries))
+		if top > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more above", top)) + "\n")
+		}
+		for i := top; i < end; i++ {
+			e := m.remoteEntries[i]
 			icon := "·"
 			suffix := ""
 			switch e.Kind {
@@ -452,6 +483,9 @@ func (m model) remoteBrowseView() string {
 			} else {
 				b.WriteString("  " + line + "\n")
 			}
+		}
+		if end < len(m.remoteEntries) {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more below", len(m.remoteEntries)-end)) + "\n")
 		}
 	}
 

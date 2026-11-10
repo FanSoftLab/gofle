@@ -125,6 +125,7 @@ type model struct {
 	recentMode   bool // recent-files picker overlay open
 	recentList   []config.RecentFileItem
 	recentCursor int
+	recentTop    int // first visible entry in the recent picker (windowed list)
 
 	// Remote interactive connect + optional-path remote directory browser.
 	// Protocol-agnostic: the form carries a protocol field and the lister /
@@ -135,6 +136,7 @@ type model struct {
 	remoteFormFocus      int                      // focused form field index
 	remoteEntries        []remote.DirEntry        // current directory listing
 	remoteCursor         int                      // highlighted entry index
+	remoteTop            int                      // first visible entry in the remote browser (windowed list)
 	remoteCurrentPath    string                   // path being browsed (""/"~" = home)
 	remoteLoading        bool                     // listing in flight
 	remoteOpening        bool                     // stream open (dial+index) in flight
@@ -326,21 +328,152 @@ func (m model) topWrapForCentered(mc int64) (int64, int) {
 }
 
 // ensureResVisible keeps the current match cursor inside the results pane's
-// visible window (resTop..resTop+height-1) by adjusting resTop. It is a no-op
-// when there are no matches or the height is unknown.
+// visible window by adjusting resTop. When word wrap is off the window is
+// measured in match indices (1 row = 1 match). When word wrap is on the pane
+// fills visual rows, so fewer matches fit; we walk forward from candidate
+// starts until the cursor's first visual row is on screen.
+// It is a no-op when there are no matches or the height is unknown.
 func (m *model) ensureResVisible() {
+	if len(m.matches) == 0 || m.height <= 0 {
+		return
+	}
+	if m.matchCursor < 0 {
+		m.matchCursor = 0
+	}
+	if m.matchCursor >= len(m.matches) {
+		m.matchCursor = len(m.matches) - 1
+	}
+
+	if !m.wordWrap {
+		if m.matchCursor < m.resTop {
+			m.resTop = m.matchCursor
+		} else if m.matchCursor >= m.resTop+m.height {
+			m.resTop = m.matchCursor - m.height + 1
+		}
+		if m.resTop < 0 {
+			m.resTop = 0
+		}
+		if m.resTop > len(m.matches)-1 {
+			m.resTop = max(0, len(m.matches)-m.height)
+		}
+		return
+	}
+
+	// Word-wrap path: ensure matchCursor's first visual row is within the
+	// body height when rendering from resTop.
+	if m.matchCursorVisibleFrom(m.resTop) {
+		return
+	}
+	// Cursor above the window — pin it to the top.
 	if m.matchCursor < m.resTop {
 		m.resTop = m.matchCursor
-	} else if m.matchCursor >= m.resTop+m.height {
-		m.resTop = m.matchCursor - m.height + 1
+		return
 	}
-
-	if m.resTop < 0 {
-		m.resTop = 0
+	// Cursor below the window: find the largest start index such that the
+	// cursor still fits in the visual row budget.
+	start := m.matchCursor
+	for start > 0 && m.matchCursorVisibleFrom(start-1) {
+		start--
 	}
+	m.resTop = start
+}
 
-	if m.resTop > len(m.matches)-1 {
-		m.resTop = max(0, len(m.matches)-m.height)
+// matchCursorVisibleFrom reports whether rendering the results pane from
+// startIndex places matchCursor's first visual row inside the body height.
+func (m model) matchCursorVisibleFrom(startIndex int) bool {
+	if startIndex < 0 || m.matchCursor < startIndex || m.height <= 0 {
+		return false
+	}
+	gutterW := shared.MaxLineNumWidth(m.idx.TotalLines())
+	// Approximate content width; exact split width is not required for the
+	// visibility test — we only need a consistent wrap budget.
+	avail := max(m.width/2-gutterW-3, 1)
+	rows := 0
+	for i := startIndex; i < len(m.matches); i++ {
+		ln := m.matches[i]
+		content, err := m.idx.GetLine(ln)
+		if err != nil {
+			content = ""
+		}
+		wr := 1
+		if m.wordWrap {
+			wr = max(1, len(wrapSegmentsOpts(content, avail, nil, true, 0)))
+		}
+		if i == m.matchCursor {
+			// First visual row of the cursor match must land on screen.
+			return rows < m.height
+		}
+		rows += wr
+		if rows >= m.height {
+			return false
+		}
+	}
+	return false
+}
+
+// recentVisibleSlots is how many recent entries fit in the current terminal
+// (each entry occupies 2 rows: path + metadata). Header and footer take a few
+// rows; we keep at least 1 slot.
+func (m model) recentVisibleSlots() int {
+	// Header (~2) + blank + footer hint (~2) ≈ 5 reserved rows.
+	const reserved = 5
+	h := m.fullHeight
+	if h <= 0 {
+		h = m.height
+	}
+	rows := max(h-reserved, 2)
+	return max(1, rows/2)
+}
+
+// ensureRecentVisible keeps recentCursor inside the windowed recent list.
+func (m *model) ensureRecentVisible() {
+	if len(m.recentList) == 0 {
+		m.recentTop = 0
+		return
+	}
+	slots := m.recentVisibleSlots()
+	if m.recentCursor < m.recentTop {
+		m.recentTop = m.recentCursor
+	} else if m.recentCursor >= m.recentTop+slots {
+		m.recentTop = m.recentCursor - slots + 1
+	}
+	if m.recentTop < 0 {
+		m.recentTop = 0
+	}
+	maxTop := max(0, len(m.recentList)-slots)
+	if m.recentTop > maxTop {
+		m.recentTop = maxTop
+	}
+}
+
+// remoteVisibleSlots is how many remote directory entries fit on screen.
+func (m model) remoteVisibleSlots() int {
+	const reserved = 6 // header, path, blank, footer
+	h := m.fullHeight
+	if h <= 0 {
+		h = m.height
+	}
+	return max(1, h-reserved)
+}
+
+// ensureRemoteVisible keeps remoteCursor inside the windowed remote browser.
+func (m *model) ensureRemoteVisible() {
+	if len(m.remoteEntries) == 0 {
+		m.remoteTop = 0
+		return
+	}
+	slots := m.remoteVisibleSlots()
+	if m.remoteCursor < m.remoteTop {
+		m.remoteTop = m.remoteCursor
+	} else if m.remoteCursor >= m.remoteTop+slots {
+		m.remoteTop = m.remoteCursor - slots + 1
+	}
+	if m.remoteTop < 0 {
+		m.remoteTop = 0
+	}
+	maxTop := max(0, len(m.remoteEntries)-slots)
+	if m.remoteTop > maxTop {
+		m.remoteTop = maxTop
 	}
 }
 

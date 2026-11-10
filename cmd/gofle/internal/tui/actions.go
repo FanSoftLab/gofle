@@ -323,10 +323,34 @@ func (m *model) recentPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if len(m.recentList) > 0 {
 			m.recentCursor = (m.recentCursor + len(m.recentList) - 1) % len(m.recentList)
+			m.ensureRecentVisible()
 		}
 	case keyDown, "j":
 		if len(m.recentList) > 0 {
 			m.recentCursor = (m.recentCursor + 1) % len(m.recentList)
+			m.ensureRecentVisible()
+		}
+	case "pgup", "ctrl+u":
+		if len(m.recentList) > 0 {
+			page := max(1, m.recentVisibleSlots())
+			m.recentCursor = max(0, m.recentCursor-page)
+			m.ensureRecentVisible()
+		}
+	case "pgdown", "pgdn", "ctrl+d":
+		if len(m.recentList) > 0 {
+			page := max(1, m.recentVisibleSlots())
+			m.recentCursor = min(len(m.recentList)-1, m.recentCursor+page)
+			m.ensureRecentVisible()
+		}
+	case "home":
+		if len(m.recentList) > 0 {
+			m.recentCursor = 0
+			m.ensureRecentVisible()
+		}
+	case "end", "G":
+		if len(m.recentList) > 0 {
+			m.recentCursor = len(m.recentList) - 1
+			m.ensureRecentVisible()
 		}
 	case keyEnter:
 		if m.openRecentAsTab {
@@ -467,10 +491,14 @@ func (m *model) resultsPaneKey(key string) bool {
 	switch key {
 	case "up", "k":
 		m.stepMatch(-1)
+		// stepMatch already scrolls the log and ensures the results cursor is
+		// on screen; keepMatchVisible is idempotent and keeps the log centered.
 		m.keepMatchVisible()
+		m.ensureResVisible()
 	case keyDown, "j":
 		m.stepMatch(1)
 		m.keepMatchVisible()
+		m.ensureResVisible()
 	case "pgup", "ctrl+u":
 		m.matchCursor = max(0, m.matchCursor-m.height)
 		m.keepMatchVisible()
@@ -482,9 +510,11 @@ func (m *model) resultsPaneKey(key string) bool {
 	case "home":
 		m.gotoMatch(0)
 		m.keepMatchVisible()
+		m.ensureResVisible()
 	case "end", "G":
 		m.gotoMatch(len(m.matches) - 1)
 		m.keepMatchVisible()
+		m.ensureResVisible()
 	case keyEnter:
 		// Jump back to the log pane with the selected match at the top.
 		// Reset topWrap so no stale wrapped-row offset hides the first
@@ -590,6 +620,7 @@ func (m *model) openRecentPicker() {
 
 	m.recentMode = true
 	m.recentCursor = 0
+	m.recentTop = 0
 }
 
 // scrollKey handles the viewport-scrolling keys. In split view the results pane
@@ -1757,6 +1788,8 @@ func (m *model) resetViewerState() {
 type recentPickerModel struct {
 	items    []config.RecentFileItem
 	cursor   int
+	top      int
+	height   int // terminal rows; 0 → show all (fallback)
 	canceled bool
 	// browse is set when the user presses "b" on a remote entry: the caller
 	// should open the remote directory browser with that entry's credentials
@@ -1766,42 +1799,97 @@ type recentPickerModel struct {
 
 func (m recentPickerModel) Init() tea.Cmd { return nil }
 
-func (m recentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
+func (m recentPickerModel) visibleSlots() int {
+	const reserved = 5
+	h := m.height
+	if h <= 0 {
+		return max(1, len(m.items))
 	}
+	return max(1, (h-reserved)/2)
+}
 
-	switch key.String() {
-	case "ctrl+c", "q", keyEsc:
-		m.canceled = true
-		return m, tea.Quit
-	case "up", "k":
-		if len(m.items) > 0 {
-			m.cursor = (m.cursor + len(m.items) - 1) % len(m.items)
-		}
-	case keyDown, "j":
-		if len(m.items) > 0 {
-			m.cursor = (m.cursor + 1) % len(m.items)
-		}
-	case keyEnter:
-		if len(m.items) == 0 {
+func (m *recentPickerModel) ensureVisible() {
+	if len(m.items) == 0 {
+		m.top = 0
+		return
+	}
+	slots := m.visibleSlots()
+	if m.cursor < m.top {
+		m.top = m.cursor
+	} else if m.cursor >= m.top+slots {
+		m.top = m.cursor - slots + 1
+	}
+	if m.top < 0 {
+		m.top = 0
+	}
+	maxTop := max(0, len(m.items)-slots)
+	if m.top > maxTop {
+		m.top = maxTop
+	}
+}
+
+func (m recentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.height = msg.Height
+		m.ensureVisible()
+		return m, nil
+	case tea.KeyMsg:
+		key := msg
+		switch key.String() {
+		case "ctrl+c", "q", keyEsc:
 			m.canceled = true
+			return m, tea.Quit
+		case "up", "k":
+			if len(m.items) > 0 {
+				m.cursor = (m.cursor + len(m.items) - 1) % len(m.items)
+				m.ensureVisible()
+			}
+		case keyDown, "j":
+			if len(m.items) > 0 {
+				m.cursor = (m.cursor + 1) % len(m.items)
+				m.ensureVisible()
+			}
+		case "pgup", "ctrl+u":
+			if len(m.items) > 0 {
+				page := max(1, m.visibleSlots())
+				m.cursor = max(0, m.cursor-page)
+				m.ensureVisible()
+			}
+		case "pgdown", "pgdn", "ctrl+d":
+			if len(m.items) > 0 {
+				page := max(1, m.visibleSlots())
+				m.cursor = min(len(m.items)-1, m.cursor+page)
+				m.ensureVisible()
+			}
+		case "home":
+			if len(m.items) > 0 {
+				m.cursor = 0
+				m.ensureVisible()
+			}
+		case "end", "G":
+			if len(m.items) > 0 {
+				m.cursor = len(m.items) - 1
+				m.ensureVisible()
+			}
+		case keyEnter:
+			if len(m.items) == 0 {
+				m.canceled = true
+			}
+			return m, tea.Quit
+		case "b":
+			// Browse another file on the same remote server (SSH/FTP recent only).
+			if len(m.items) == 0 {
+				return m, nil
+			}
+			item := m.items[m.cursor]
+			if !item.IsSSH || item.SSH == nil {
+				// Local entry: ignore (same as in-viewer status); stay in picker.
+				return m, nil
+			}
+			m.browse = true
+			return m, tea.Quit
 		}
-
-		return m, tea.Quit
-	case "b":
-		// Browse another file on the same remote server (SSH/FTP recent only).
-		if len(m.items) == 0 {
-			return m, nil
-		}
-		item := m.items[m.cursor]
-		if !item.IsSSH || item.SSH == nil {
-			// Local entry: ignore (same as in-viewer status); stay in picker.
-			return m, nil
-		}
-		m.browse = true
-		return m, tea.Quit
 	}
 
 	return m, nil
@@ -1810,7 +1898,7 @@ func (m recentPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m recentPickerModel) View() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("Open recent") + "\n\n")
-	b.WriteString(renderRecentList(m.items, m.cursor))
+	b.WriteString(renderRecentList(m.items, m.cursor, m.top, m.visibleSlots()))
 	b.WriteString("\n" + hintStyle.Render("↑↓/jk move  ·  enter open  ·  b browse other file on server  ·  esc cancel"))
 
 	return b.String()

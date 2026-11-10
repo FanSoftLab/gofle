@@ -476,42 +476,18 @@ export class VirtualScroller {
     this.onScrollPositionCallback = cb;
   }
 
-  /** Map a content anchor to pixel scrollTop for the current spacer metrics. */
+  /** Map a content anchor to pixel scrollTop for the current spacer metrics.
+   *  Always uses the same proportional index map as windowFromScrollTop so
+   *  jump/restore and free-scroll stay consistent. Variable wrap heights are
+   *  handled by anchorAboveTarget (picks the right first-visible index) and
+   *  by pendingAnchor pinning in windowFromScrollTop during jumps. */
   private scrollTopForAnchor(index: number, fraction: number): number {
     const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
     if (maxScroll <= 0) return 0;
-    if (this.wordWrap) {
-      const idx = Math.max(0, Math.min(this.totalLines - 1, Math.floor(index)));
-      const maxFirst = Math.max(0, this.totalLines - this.visibleCount);
-      const proportional = () => {
-        const exact = Math.min(maxFirst, Math.max(0, index + fraction));
-        return maxFirst > 0 ? (exact / maxFirst) * maxScroll : 0;
-      };
-      // Every row height is >= lineHeight (estimate, cache and avg all clamp
-      // to it), so this O(1) bound proves the sum exceeds the scroll range —
-      // skip the O(index) walk entirely on capped, very large files.
-      if (idx * this.lineHeight > maxScroll) {
-        // Spacer pixel cap engaged: the height-sum range is not representable.
-        // Fall back to the proportional index map — the same map
-        // windowFromScrollTop uses, so scroll position and content stay
-        // consistent instead of clamping every deep jump to the bottom.
-        return proportional();
-      }
-      let acc = 0;
-      for (let i = 0; i < idx; i++) {
-        acc += this.heightOf(i);
-        // The sum only grows: once it leaves the representable range, the
-        // proportional fallback is final — no need to finish the walk.
-        if (acc > maxScroll) return proportional();
-      }
-      acc += Math.max(0, Math.min(1, fraction)) * this.heightOf(idx);
-      return Math.max(0, Math.min(maxScroll, acc));
-    }
     const maxFirst = Math.max(0, this.totalLines - this.visibleCount);
     if (maxFirst <= 0) return 0;
     const exact = Math.min(maxFirst, Math.max(0, index + fraction));
-    const targetFrac = exact / maxFirst;
-    return targetFrac * maxScroll;
+    return (exact / maxFirst) * maxScroll;
   }
 
   private applyPendingAnchor() {
@@ -554,29 +530,19 @@ export class VirtualScroller {
     if (lineIndex < 0 || lineIndex >= this.totalLines) return;
     this.pendingJump = null;
     this.setHighlightedLine(lineIndex);
-    if (this.wordWrap) {
-      // Anchor-based jump: place the target ~35% from the viewport top via a
-      // content anchor instead of a one-shot pixel write. Heights for lines
-      // never rendered are only estimated (heightCache / avgHeight), so the
-      // first scroll can land short of the target — the anchor is re-applied
-      // with refined heights after each fetch/layout pass (pendingJump below),
-      // which converges on the target. The anchor survives until the user
-      // scrolls, exactly like the session-restore anchor.
-      this.pendingAnchor = this.anchorAboveTarget(lineIndex, VirtualScroller.JUMP_VIEWPORT_FRACTION);
-      if (!this.renderedNodes.has(lineIndex)) {
-        this.pendingJump = { index: lineIndex, passes: VirtualScroller.MAX_JUMP_PASSES };
-      }
-      this.applyPendingAnchor();
-    } else {
-      const maxScroll = Math.max(0, this.scrollSpacerHeight - this.effectiveClientHeight());
-      const maxFirst = Math.max(1, this.totalLines - this.visibleCount);
-      const targetFirst = Math.max(0, Math.min(maxFirst, lineIndex - Math.floor(this.visibleCount * 0.4)));
-      const frac = maxFirst > 0 ? targetFirst / maxFirst : 0;
-      const y = frac * maxScroll;
-      this.suppressScrollEvent = true;
-      this.viewport.scrollTop = Math.max(0, Math.min(maxScroll, y));
-      queueMicrotask(() => { this.suppressScrollEvent = false; });
+    // Always use a content anchor so jumps survive spacer caps, zero-height
+    // layout passes, and async row fetches. Place the target ~35% from the
+    // viewport top. For word-wrap, heights of never-rendered lines are only
+    // estimated — pendingJump re-applies the anchor after each fetch/layout
+    // pass until the target row is mounted (or passes run out).
+    this.pendingAnchor = this.anchorAboveTarget(lineIndex, VirtualScroller.JUMP_VIEWPORT_FRACTION);
+    if (this.wordWrap && !this.renderedNodes.has(lineIndex)) {
+      this.pendingJump = { index: lineIndex, passes: VirtualScroller.MAX_JUMP_PASSES };
+    } else if (!this.wordWrap && !this.renderedNodes.has(lineIndex)) {
+      // Non-wrap: one refinement pass is enough once the row window is fetched.
+      this.pendingJump = { index: lineIndex, passes: 2 };
     }
+    this.applyPendingAnchor();
     // Soft render — keep existing rows to avoid flicker
     this.render(false);
   }
@@ -602,11 +568,11 @@ export class VirtualScroller {
   }
 
   /**
-   * Continue a wrap-mode jump after a height-refinement pass: drop it once the
-   * target row is mounted, re-apply the anchor and render the next window
-   * toward the target otherwise (each pass caches measured heights, so the
-   * estimate error shrinks quickly). Cleared eagerly when the user scrolls —
-   * pendingAnchor is dropped there too.
+   * Continue a jump after a fetch/layout pass. When the target row is mounted
+   * (and, in wrap mode, measured), recompute the content anchor from refined
+   * heights and apply it once more so variable line heights do not leave the
+   * match short of the viewport. Otherwise re-apply the current anchor and
+   * render the next window toward the target. Cleared when the user scrolls.
    */
   private continuePendingJump() {
     if (!this.pendingJump) return;
@@ -614,16 +580,34 @@ export class VirtualScroller {
       this.pendingJump = null;
       return;
     }
-    if (this.renderedNodes.has(this.pendingJump.index) || this.pendingJump.passes <= 0) {
+    const target = this.pendingJump.index;
+    if (this.renderedNodes.has(target) || this.pendingJump.passes <= 0) {
+      // Final pass with the best height data we have (measured if wrap).
+      this.pendingAnchor = this.anchorAboveTarget(target, VirtualScroller.JUMP_VIEWPORT_FRACTION);
+      this.applyPendingAnchor();
+      const w = this.windowFromScrollTop(this.viewport.scrollTop || 0);
+      this.positionRows(w.firstVisibleIndex, w.fractional);
       this.pendingJump = null;
       return;
     }
     this.pendingJump.passes--;
+    // Heights near the current window may have improved — rebuild the anchor.
+    this.pendingAnchor = this.anchorAboveTarget(target, VirtualScroller.JUMP_VIEWPORT_FRACTION);
     this.applyPendingAnchor();
     this.render(false);
   }
 
   private windowFromScrollTop(scrollTop: number) {
+    // During jump/restore the content anchor is authoritative. Variable wrap
+    // heights make pure scrollTop→index inversion unreliable until rows near
+    // the target are measured; pinning to pendingAnchor keeps the target on
+    // screen across refinement passes.
+    if (this.pendingAnchor) {
+      return {
+        firstVisibleIndex: this.pendingAnchor.index,
+        fractional: this.pendingAnchor.fraction,
+      };
+    }
     const maxFirst = Math.max(0, this.totalLines - this.visibleCount);
     const exact = this.fractionFromScrollTop(scrollTop) * maxFirst;
     const firstVisibleIndex = Math.floor(exact);
@@ -772,15 +756,17 @@ export class VirtualScroller {
       const win2 = this.windowFromScrollTop(this.viewport.scrollTop);
       this.positionRows(win2.firstVisibleIndex, win2.fractional);
 
-      if (this.wordWrap) {
-        const anchorIdx = win.firstVisibleIndex;
-        const anchorFrac = win.fractional;
-        requestAnimationFrame(() => {
-          if (gen !== this.generation) return;
+      // Refine measured row heights (wrap) then continue any jump so both
+      // wrap and non-wrap land on the target after async fetches.
+      const anchorIdx = win.firstVisibleIndex;
+      const anchorFrac = win.fractional;
+      requestAnimationFrame(() => {
+        if (gen !== this.generation) return;
+        if (this.wordWrap) {
           this.refineMeasuredHeights(anchorIdx, anchorFrac);
-          this.continuePendingJump();
-        });
-      }
+        }
+        this.continuePendingJump();
+      });
 
       this.applyHighlighting();
       this.applySelectionStyle();

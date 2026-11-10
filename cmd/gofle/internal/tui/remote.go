@@ -85,6 +85,7 @@ func (m *model) browseFromRecent(item config.RecentFileItem) tea.Cmd {
 	m.remoteBrowseMode = true
 	m.remoteCurrentPath = startPathFromRemoteSummary(item.SSH)
 	m.remoteCursor = 0
+	m.remoteTop = 0
 	m.remoteLoading = true
 	m.remoteBrowseErr = ""
 	m.remoteAfterTrustOpen = false
@@ -115,6 +116,7 @@ func (m *model) browseSameServer() tea.Cmd {
 		}
 		m.remoteCurrentPath = start
 		m.remoteCursor = 0
+		m.remoteTop = 0
 		m.remoteLoading = true
 		m.remoteBrowseErr = ""
 		m.remoteAfterTrustOpen = false
@@ -138,6 +140,7 @@ func (m *model) browseSameServer() tea.Cmd {
 		}
 		m.remoteCurrentPath = start
 		m.remoteCursor = 0
+		m.remoteTop = 0
 		m.remoteLoading = true
 		m.remoteBrowseErr = ""
 		m.remoteAfterTrustOpen = false
@@ -479,6 +482,7 @@ func (m *model) remoteSubmit() (tea.Model, tea.Cmd) {
 		m.remoteBrowseMode = true
 		m.remoteCurrentPath = "~"
 		m.remoteCursor = 0
+		m.remoteTop = 0
 		m.remoteLoading = true
 		m.remoteBrowseErr = ""
 		m.remoteAfterTrustOpen = false
@@ -512,10 +516,34 @@ func (m *model) remoteBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if len(m.remoteEntries) > 0 {
 			m.remoteCursor = (m.remoteCursor + len(m.remoteEntries) - 1) % len(m.remoteEntries)
+			m.ensureRemoteVisible()
 		}
 	case keyDown, "j":
 		if len(m.remoteEntries) > 0 {
 			m.remoteCursor = (m.remoteCursor + 1) % len(m.remoteEntries)
+			m.ensureRemoteVisible()
+		}
+	case "pgup", "ctrl+u":
+		if len(m.remoteEntries) > 0 {
+			page := max(1, m.remoteVisibleSlots())
+			m.remoteCursor = max(0, m.remoteCursor-page)
+			m.ensureRemoteVisible()
+		}
+	case "pgdown", "pgdn", "ctrl+d":
+		if len(m.remoteEntries) > 0 {
+			page := max(1, m.remoteVisibleSlots())
+			m.remoteCursor = min(len(m.remoteEntries)-1, m.remoteCursor+page)
+			m.ensureRemoteVisible()
+		}
+	case "home":
+		if len(m.remoteEntries) > 0 {
+			m.remoteCursor = 0
+			m.ensureRemoteVisible()
+		}
+	case "end", "G":
+		if len(m.remoteEntries) > 0 {
+			m.remoteCursor = len(m.remoteEntries) - 1
+			m.ensureRemoteVisible()
 		}
 	case keyEnter:
 		return m.remoteBrowseOpen()
