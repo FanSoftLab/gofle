@@ -322,3 +322,50 @@ func TestRunGotoWithWrap(t *testing.T) {
 		t.Error("rendered body does not start at the goto target")
 	}
 }
+
+// TestEnsureResVisibleWordWrap_StepCycle tests that repeated stepMatch
+// calls with word wrap keep the match cursor visible, and that the
+// rendered resultRows contains the current match marker.
+func TestEnsureResVisibleWordWrap_StepCycle(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		// Long lines that wrap to several visual rows at narrow width.
+		lines[i] = fmt.Sprintf("MATCH-%02d %s", i, strings.Repeat("payload-", 30))
+	}
+	m := newTestModel(t, lines)
+	m.height = 6
+	m.width = 40
+	m.splitView = true
+	m.wordWrap = true
+	m.matches = make([]int64, 40)
+	for i := range m.matches {
+		m.matches[i] = int64(i)
+	}
+	m.matchCursor = 0
+	m.resTop = 0
+
+	// Step through matches and verify visibility after each step
+	for i := 0; i < 20; i++ {
+		m.matchCursor = i
+		m.ensureResVisible()
+		if !m.matchCursorVisibleFrom(m.resTop) {
+			t.Fatalf("step %d: matchCursor %d not visible from resTop=%d (word-wrap)", i, m.matchCursor, m.resTop)
+		}
+	}
+
+	// Also verify resultRows renders the current match marker
+	m.matchCursor = 15
+	m.ensureResVisible()
+	rightW := m.width/2 - 2 // approximate results pane width
+	rows := m.resultRows(rightW)
+	found := false
+	for _, row := range rows {
+		if strings.Contains(row, "MATCH-15") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("resultRows does not contain current match marker MATCH-15: %v", rows)
+	}
+}

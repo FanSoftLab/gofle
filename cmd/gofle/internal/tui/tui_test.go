@@ -1305,6 +1305,180 @@ func TestEnsureResVisibleScrollsResultsPane(t *testing.T) {
 	}
 }
 
+// TestEnsureResVisibleScrollsResultsPane_WithKeys tests pgup, pgdown, home, end keys
+// in the results pane keep the cursor in the visible window.
+func TestEnsureResVisibleScrollsResultsPane_WithKeys(t *testing.T) {
+	lines := make([]string, 80)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%02d match-here", i)
+	}
+	m := newTestModel(t, lines)
+	m.height = 8
+	m.width = 80
+	m.splitView = true
+	m.splitFocus = 1
+	m.wordWrap = false
+
+	matches := make([]int64, 0, 40)
+	for i := int64(0); i < 80; i += 2 {
+		matches = append(matches, i)
+	}
+	m.matches = matches
+	m.matchCursor = 0
+	m.resTop = 0
+
+	// Test pgdown (ctrl+d)
+	for i := 0; i < 10; i++ {
+		m.resultsPaneKey("pgdown")
+		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+			t.Fatalf("after pgdown %d: matchCursor %d outside window resTop=%d height=%d",
+				i+1, m.matchCursor, m.resTop, m.height)
+		}
+	}
+
+	// Test pgup (ctrl+u)
+	for i := 0; i < 10; i++ {
+		m.resultsPaneKey("pgup")
+		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+			t.Fatalf("after pgup %d: matchCursor %d outside window resTop=%d height=%d",
+				i+1, m.matchCursor, m.resTop, m.height)
+		}
+	}
+
+	// Test home
+	m.resultsPaneKey("home")
+	if m.matchCursor != 0 {
+		t.Fatalf("after home: matchCursor = %d, want 0", m.matchCursor)
+	}
+	if m.resTop != 0 {
+		t.Fatalf("after home: resTop = %d, want 0", m.resTop)
+	}
+
+	// Test end
+	m.resultsPaneKey("end")
+	if m.matchCursor != len(m.matches)-1 {
+		t.Fatalf("after end: matchCursor = %d, want %d", m.matchCursor, len(m.matches)-1)
+	}
+	if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+		t.Fatalf("after end: matchCursor %d outside window resTop=%d height=%d",
+			m.matchCursor, m.resTop, m.height)
+	}
+
+	// Test 'G' (same as end)
+	m.resultsPaneKey("G")
+	if m.matchCursor != len(m.matches)-1 {
+		t.Fatalf("after G: matchCursor = %d, want %d", m.matchCursor, len(m.matches)-1)
+	}
+}
+
+// TestSplitViewSyncScrollRegression tests that in split view:
+// - navigating results pane keeps log pane centered on match (keepMatchVisible)
+// - scrolling log pane syncs results pane (syncMatchToView)
+// - after tab+nav, results pane ensures visibility
+func TestSplitViewSyncScrollRegression(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		if i%10 == 0 {
+			lines[i] = fmt.Sprintf("line-%d MATCH", i)
+		} else {
+			lines[i] = fmt.Sprintf("line-%d filler", i)
+		}
+	}
+
+	m := newTestModel(t, lines)
+	m.height = 10
+	m.width = 100
+
+	// Search for MATCH -> matches at lines 0,10,...,90.
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = nm.(model)
+	for _, r := range "MATCH" {
+		nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = nm.(model)
+	}
+	m = runSearchToCompletion(t, m)
+
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = nm.(model)
+	if !m.splitView {
+		t.Fatal("split view not enabled")
+	}
+
+	// Initial state: log pane at top, results pane at first match
+	if m.top != 0 {
+		t.Fatalf("initial log top = %d, want 0", m.top)
+	}
+	if m.matchCursor != 0 {
+		t.Fatalf("initial matchCursor = %d, want 0", m.matchCursor)
+	}
+	if m.resTop != 0 {
+		t.Fatalf("initial resTop = %d, want 0", m.resTop)
+	}
+
+	// Switch focus to results pane (Tab)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = nm.(model)
+	if m.splitFocus != 1 {
+		t.Fatalf("splitFocus = %d, want 1 after Tab", m.splitFocus)
+	}
+
+	// Navigate results pane with Down - log pane should center on selected match
+	for i := 1; i < 5; i++ {
+		nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = nm.(model)
+
+		wantLine := m.matches[m.matchCursor]
+		if m.top > wantLine || m.top+int64(m.height) <= wantLine {
+			t.Errorf("step %d: log pane (top=%d, height=%d) does not contain selected match line %d",
+				i, m.top, m.height, wantLine)
+		}
+		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+			t.Errorf("step %d: matchCursor %d outside results window resTop=%d height=%d",
+				i, m.matchCursor, m.resTop, m.height)
+		}
+	}
+
+	// Switch back to log pane (Tab) and scroll log
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = nm.(model)
+	if m.splitFocus != 0 {
+		t.Fatalf("splitFocus = %d, want 0 after Tab back to log", m.splitFocus)
+	}
+
+	// Scroll log pane down
+	for range 15 {
+		nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = nm.(model)
+	}
+
+	// Results pane should sync to first match at/after log top (syncMatchToView)
+	if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+		t.Errorf("after log scroll: matchCursor %d outside results window resTop=%d height=%d",
+			m.matchCursor, m.resTop, m.height)
+	}
+
+	// Switch to results pane and navigate - should keep visibility
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = nm.(model)
+	if m.splitFocus != 1 {
+		t.Fatalf("splitFocus = %d, want 1 after Tab to results", m.splitFocus)
+	}
+
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nm.(model)
+
+	if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
+		t.Errorf("after results nav: matchCursor %d outside results window resTop=%d height=%d",
+			m.matchCursor, m.resTop, m.height)
+	}
+
+	wantLine := m.matches[m.matchCursor]
+	if m.top > wantLine || m.top+int64(m.height) <= wantLine {
+		t.Errorf("after results nav: log pane (top=%d, height=%d) does not contain selected match line %d",
+			m.top, m.height, wantLine)
+	}
+}
+
 func TestEnsureResVisibleWordWrap(t *testing.T) {
 	lines := make([]string, 40)
 	for i := range lines {

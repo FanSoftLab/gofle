@@ -366,3 +366,355 @@ describe('VirtualScroller', () => {
     expect((scroller as any).pendingJump).toBe(null);
   });
 });
+
+// =============================================================================
+// G1: scrollToIndex with word wrap
+// =============================================================================
+describe('scrollToIndex with wordWrap', () => {
+  let doc: ReturnType<typeof createMockDocument>;
+  let viewport: ReturnType<typeof createMockViewport>;
+
+  beforeEach(() => {
+    doc = createMockDocument();
+    viewport = doc.getElementById('viewport');
+    (globalThis as any).document = doc;
+    mockWindow();
+  });
+
+  const LINE_H = 20;
+  const VIEW_H = 400;
+
+  function flushTicks(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  function makeVariableLineFetcher(): FetchLinesCallback {
+    return async (start, count) => {
+      const lines: LogLineData[] = [];
+      for (let i = 0; i < count; i++) {
+        const idx = start + i;
+        // Mix of short and very long lines
+        let content: string;
+        if (idx % 5 === 0) {
+          // Long line that wraps many times
+          content = `LONG-${idx} ${'payload-'.repeat(30)}`;
+        } else if (idx % 5 === 2) {
+          // Medium line
+          content = `MEDIUM-${idx} ${'data-'.repeat(10)}`;
+        } else {
+          // Short line
+          content = `short-${idx}`;
+        }
+        lines.push({ index: idx, content });
+      }
+      return lines;
+    };
+  }
+
+  it('far jump lands near target after convergence', async () => {
+    const scroller = new VirtualScroller('viewport', makeVariableLineFetcher());
+    scroller.setWordWrap(true);
+    scroller.setTotalLines(200);
+    scroller.scrollToIndex(150);
+
+    // Let the async fetch/render/refine chain settle
+    await flushTicks();
+    await flushTicks();
+
+    const sc = scroller as any;
+    expect(sc.renderedNodes.has(150)).toBe(true);
+    expect(sc.pendingJump).toBe(null);
+    // Anchor survives (user has not scrolled) and still resolves to the same position
+    expect(sc.pendingAnchor).not.toBe(null);
+
+    // Verify the target is in the visible window
+    const anchor = scroller.getViewAnchor();
+    // Target should be roughly JUMP_VIEWPORT_FRACTION (0.35) from top
+    // So firstVisible should be around 150 - 0.35 * visibleCount
+    const visibleCount = Math.floor(VIEW_H / LINE_H); // ~20
+    const expectedFirstVisible = Math.max(0, 150 - Math.floor(visibleCount * 0.35));
+    expect(anchor.index).toBeGreaterThanOrEqual(expectedFirstVisible - 2);
+    expect(anchor.index).toBeLessThanOrEqual(expectedFirstVisible + 2);
+  });
+
+  it('sequential jumps: 10 -> 120 -> 40, anchor not stuck', async () => {
+    const scroller = new VirtualScroller('viewport', makeVariableLineFetcher());
+    scroller.setWordWrap(true);
+    scroller.setTotalLines(200);
+
+    // First jump
+    scroller.scrollToIndex(10);
+    await flushTicks();
+    await flushTicks();
+
+    // Second jump
+    scroller.scrollToIndex(120);
+    await flushTicks();
+    await flushTicks();
+
+    // Third jump
+    scroller.scrollToIndex(40);
+    await flushTicks();
+    await flushTicks();
+
+    const sc = scroller as any;
+    expect(sc.renderedNodes.has(40)).toBe(true);
+    expect(sc.pendingJump).toBe(null);
+    expect(sc.pendingAnchor).not.toBe(null);
+
+    // Final highlight should be 40
+    expect(scroller.getHighlightedLine()).toBe(40);
+  });
+
+  it('non-wrap regression: target in visible window', () => {
+    const scroller = new VirtualScroller('viewport', makeVariableLineFetcher());
+    scroller.setWordWrap(false);
+    scroller.setTotalLines(200);
+    scroller.scrollToIndex(150);
+
+    // In non-wrap mode, target should be in visible window immediately
+    const anchor = scroller.getViewAnchor();
+    const visibleCount = Math.floor(VIEW_H / LINE_H); // 20
+    // First visible should be target - visibleCount * JUMP_VIEWPORT_FRACTION
+    const expectedFirst = Math.max(0, 150 - Math.floor(visibleCount * 0.35));
+    expect(anchor.index).toBeGreaterThanOrEqual(expectedFirst - 1);
+    expect(anchor.index).toBeLessThanOrEqual(expectedFirst + 1);
+    expect((scroller as any).pendingJump).toBe(null);
+  });
+});
+
+// =============================================================================
+// G2: Tab switch position restore (dataKey)
+// =============================================================================
+describe('setViewAnchor / getViewAnchor with dataKey (tab switch)', () => {
+  let doc: ReturnType<typeof createMockDocument>;
+  let viewport: ReturnType<typeof createMockViewport>;
+
+  beforeEach(() => {
+    doc = createMockDocument();
+    viewport = doc.getElementById('viewport');
+    (globalThis as any).document = doc;
+    mockWindow();
+  });
+
+  function makeLineFetcher(): FetchLinesCallback {
+    return async (start, count) => {
+      const lines: LogLineData[] = [];
+      for (let i = 0; i < count; i++) {
+        lines.push({ index: start + i, content: `line ${start + i}` });
+      }
+      return lines;
+    };
+  }
+
+  function flushTicks(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it('save anchor A, switch to B, restore A', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+
+    // Tab A: set up with dataKey 'A'
+    scroller.setTotalLines(100, 'A');
+    scroller.setViewAnchor(50, 0.25);
+    await flushTicks();
+
+    const anchorA = scroller.getViewAnchor();
+    expect(anchorA.index).toBeCloseTo(50, 0);
+    expect(anchorA.fraction).toBeCloseTo(0.25, 2);
+
+    // Tab B: different document
+    scroller.setTotalLines(200, 'B');
+    scroller.setViewAnchor(120, 0.5);
+    await flushTicks();
+
+    const anchorB = scroller.getViewAnchor();
+    expect(anchorB.index).toBeCloseTo(120, 0);
+    expect(anchorB.fraction).toBeCloseTo(0.5, 2);
+
+    // Back to Tab A: restore anchor
+    scroller.setViewAnchor(anchorA.index, anchorA.fraction);
+    scroller.setTotalLines(100, 'A'); // Re-set with same key
+    await flushTicks();
+
+    const restoredA = scroller.getViewAnchor();
+    // Allow small tolerance for fraction (±0.05) and index (±1)
+    expect(restoredA.index).toBeGreaterThanOrEqual(anchorA.index - 1);
+    expect(restoredA.index).toBeLessThanOrEqual(anchorA.index + 1);
+    expect(restoredA.fraction).toBeGreaterThanOrEqual(anchorA.fraction - 0.05);
+    expect(restoredA.fraction).toBeLessThanOrEqual(anchorA.fraction + 0.05);
+  });
+
+  it('wordWrap=true preserves anchor across tab switch', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+    scroller.setWordWrap(true);
+
+    // Tab A with wrap
+    scroller.setTotalLines(150, 'A');
+    scroller.setViewAnchor(80, 0.3);
+    await flushTicks();
+    await flushTicks();
+
+    const anchorA = scroller.getViewAnchor();
+
+    // Tab B
+    scroller.setTotalLines(300, 'B');
+    scroller.setViewAnchor(200, 0.4);
+    await flushTicks();
+    await flushTicks();
+
+    // Back to A
+    scroller.setViewAnchor(anchorA.index, anchorA.fraction);
+    scroller.setTotalLines(150, 'A');
+    await flushTicks();
+    await flushTicks();
+
+    const restoredA = scroller.getViewAnchor();
+    expect(restoredA.index).toBeGreaterThanOrEqual(anchorA.index - 1);
+    expect(restoredA.index).toBeLessThanOrEqual(anchorA.index + 1);
+    expect(restoredA.fraction).toBeGreaterThanOrEqual(anchorA.fraction - 0.05);
+    expect(restoredA.fraction).toBeLessThanOrEqual(anchorA.fraction + 0.05);
+  });
+
+  it('double RAF / repeated setViewAnchor after setTotalLines does not reset to 0', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+    scroller.setTotalLines(100, 'tab1');
+    scroller.setViewAnchor(60, 0.5);
+    await flushTicks();
+
+    // Call setViewAnchor again (simulating double RAF)
+    scroller.setViewAnchor(60, 0.5);
+    await flushTicks();
+
+    // Call setTotalLines again with same key (simulating relayout)
+    scroller.setTotalLines(100, 'tab1');
+    await flushTicks();
+
+    const anchor = scroller.getViewAnchor();
+    expect(anchor.index).toBeCloseTo(60, 0);
+    expect(anchor.fraction).toBeCloseTo(0.5, 2);
+    // Should not be reset to 0
+    expect(anchor.index).not.toBe(0);
+  });
+
+  it('filter scroller: dataKey = tabId + ":f:" + query', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+
+    // Filter for tab1, query "error"
+    const filterKey = 'tab1:f:error';
+    scroller.setTotalLines(50, filterKey);
+    scroller.setViewAnchor(20, 0.2);
+    await flushTicks();
+
+    const anchor1 = scroller.getViewAnchor();
+
+    // Switch to different filter (same tab, different query)
+    const filterKey2 = 'tab1:f:warn';
+    scroller.setTotalLines(30, filterKey2);
+    scroller.setViewAnchor(10, 0.5);
+    await flushTicks();
+
+    // Back to first filter
+    scroller.setViewAnchor(anchor1.index, anchor1.fraction);
+    scroller.setTotalLines(50, filterKey);
+    await flushTicks();
+
+    const restored = scroller.getViewAnchor();
+    expect(restored.index).toBeGreaterThanOrEqual(anchor1.index - 1);
+    expect(restored.index).toBeLessThanOrEqual(anchor1.index + 1);
+    expect(restored.fraction).toBeGreaterThanOrEqual(anchor1.fraction - 0.05);
+    expect(restored.fraction).toBeLessThanOrEqual(anchor1.fraction + 0.05);
+  });
+});
+
+// =============================================================================
+// G3: Scroll map consistency (wrap)
+// =============================================================================
+describe('scroll map consistency with wordWrap', () => {
+  let doc: ReturnType<typeof createMockDocument>;
+  let viewport: ReturnType<typeof createMockViewport>;
+
+  beforeEach(() => {
+    doc = createMockDocument();
+    viewport = doc.getElementById('viewport');
+    (globalThis as any).document = doc;
+    mockWindow();
+  });
+
+  function makeLineFetcher(): FetchLinesCallback {
+    return async (start, count) => {
+      const lines: LogLineData[] = [];
+      for (let i = 0; i < count; i++) {
+        lines.push({ index: start + i, content: `line ${start + i}` });
+      }
+      return lines;
+    };
+  }
+
+  function flushTicks(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  it('setViewAnchor immediately reflected in getViewAnchor', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+    scroller.setWordWrap(true);
+    scroller.setTotalLines(200);
+
+    scroller.setViewAnchor(75, 0.4);
+    await flushTicks();
+
+    const anchor = scroller.getViewAnchor();
+    expect(anchor.index).toBe(75);
+    expect(anchor.fraction).toBeCloseTo(0.4, 2);
+  });
+
+  it('during pending jump/anchor, window matches anchor not foreign scrollTop', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+    scroller.setWordWrap(true);
+    scroller.setTotalLines(200);
+
+    // Trigger a far jump - this sets up pendingAnchor and pendingJump
+    scroller.scrollToIndex(150);
+
+    const sc = scroller as any;
+    // Before fetch resolves, pendingAnchor should be active
+    expect(sc.pendingAnchor).not.toBe(null);
+    expect(sc.pendingJump).not.toBe(null);
+
+    // The window should reflect the pending anchor, not some arbitrary scrollTop
+    // (we can't easily test the exact window without full render, but we can verify
+    // the anchor is set)
+    expect(sc.pendingAnchor?.index).toBeGreaterThan(0);
+  });
+
+  it('user scroll clears pending anchor, next scrollToIndex works', async () => {
+    const scroller = new VirtualScroller('viewport', makeLineFetcher());
+    scroller.setWordWrap(true);
+    scroller.setTotalLines(200);
+
+    // Start a jump
+    scroller.scrollToIndex(100);
+    await flushTicks();
+
+    const sc = scroller as any;
+    expect(sc.pendingAnchor).not.toBe(null);
+    expect(sc.pendingJump).not.toBe(null);
+
+    // Simulate user scroll (onScroll)
+    viewport.scrollTop = 500;
+    sc.onScroll();
+
+    // Pending anchor and jump should be cleared
+    expect(sc.pendingAnchor).toBe(null);
+    expect(sc.pendingJump).toBe(null);
+
+    // Next scrollToIndex should work normally
+    scroller.scrollToIndex(50);
+    await flushTicks();
+    await flushTicks();
+
+    const anchor = scroller.getViewAnchor();
+    expect(anchor.index).toBeGreaterThanOrEqual(40);
+    expect(anchor.index).toBeLessThanOrEqual(60);
+  });
+});
