@@ -70,40 +70,28 @@ else
   echo "Tag $TAG already exists."
 fi
 
-# ── build.sh: CLI + GUI for all platforms ──────────────────────────────────
+# ── build.sh: GUI only (CLI is built by GoReleaser — pure Go, cross-compiles easily) ──
 if [[ "$SKIP_BUILD" == false ]]; then
   echo "──────────────────────────────────────────────────"
-  echo "build.sh  →  CLI + GUI  ($VERSION, all OS/arch)"
+  echo "build.sh  →  GUI only  ($VERSION)"
   echo "──────────────────────────────────────────────────"
-  # linux + windows only (macOS skipped — no simple cross-build for Wails GUI)
-  ./build.sh -os linux -arch all -target all -v "$VERSION"
-  ./build.sh -os windows -arch all -target all -v "$VERSION"
+  # linux: GUI only amd64 (arm64 GUI cross-compile needs target GTK/WebKit libs)
+  # windows: GUI only amd64 (arm64 MinGW not in Debian bookworm)
+  # macOS skipped — no simple cross-build for Wails GUI
+  ./build.sh -os linux -arch amd64 -target gui -v "$VERSION"
+  # Normalize name (first build uses MULTI=false → no platform suffix)
+  [[ -f dist/gofle ]] && mv dist/gofle dist/gofle-linux-amd64
+  ./build.sh -os windows -arch amd64 -target gui -v "$VERSION"
   echo ""
   echo "dist/ after build:"
   ls -la dist/ 2>/dev/null || true
 fi
 
-# Required CLI prebuilts for GoReleaser
-missing=0
-for pair in \
-  linux/amd64 linux/arm64 \
-  windows/amd64 windows/arm64
-do
-  os="${pair%/*}"
-  arch="${pair#*/}"
-  ext=""
-  [[ "$os" == windows ]] && ext=".exe"
-  f="dist/gofle_cli-${os}-${arch}${ext}"
-  if [[ ! -f "$f" ]]; then
-    echo "missing prebuilt CLI: $f" >&2
-    missing=1
-  fi
-done
-
-# Required GUI prebuilts for GoReleaser (extra_files: ./dist/gofle*)
+# Required GUI prebuilts for GoReleaser
+# GUI: linux/amd64, windows/amd64 only (arm64 GUI cross-compile not supported from x86_64)
 gui_missing=0
 for pair in \
-  linux/amd64 linux/arm64 \
+  linux/amd64 \
   windows/amd64
 do
   os="${pair%/*}"
@@ -117,10 +105,15 @@ do
   fi
 done
 
-if [[ "$missing" -ne 0 ]] || [[ "$gui_missing" -ne 0 ]]; then
-  echo "Run without --skip-build, or build missing targets first." >&2
+if [[ "$gui_missing" -ne 0 ]]; then
+  echo "Run without --skip-build, or build missing GUI targets first." >&2
   exit 1
 fi
+
+# Copy prebuilt GUI binaries to staging for GoReleaser extra_files
+mkdir -p .goreleaser/staging
+cp dist/gofle-linux-amd64 .goreleaser/staging/gofle-linux-amd64
+cp dist/gofle-windows-amd64.exe .goreleaser/staging/gofle-windows-amd64.exe
 
 echo "──────────────────────────────────────────────────"
 echo "GoReleaser  →  package + release ($TAG)"

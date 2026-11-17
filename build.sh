@@ -259,6 +259,7 @@ chown -R "${TARGET_UID}:${TARGET_GID}" . 2>/dev/null || true
 if [ -d "$OUT_DIR/build/bin" ]; then
     if [ "$MULTI" = "false" ]; then
         # Single linux/amd64 prod
+        mkdir -p dist
         if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then
             # Prefer the normalised name, fall back to plain name
             src=""

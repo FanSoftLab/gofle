@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # GoReleaser v2 — packaging + GitHub Release only.
-# Binaries come from ./build.sh (Docker). Platforms: linux + windows only.
+# CLI is built by GoReleaser (pure Go, cross-compiles easily).
+# GUI is prebuilt by ./build.sh (Docker) because it needs CGO + Wails.
 # macOS is omitted: Wails GUI cannot be cross-built from Linux without extra setup.
 #
 #   ./scripts/release.sh v2.1.0
@@ -8,20 +9,24 @@ version: 2
 
 project_name: gofle
 
+# Build CLI with GoReleaser (pure Go, cross-compiles easily)
 builds:
   - id: gofle-cli
-    builder: prebuilt
     binary: gofle_cli
+    main: ./cmd/gofle
     goos:
       - linux
       - windows
     goarch:
       - amd64
       - arm64
-    prebuilt:
-      # dist/gofle_cli-linux-amd64
-      # dist/gofle_cli-windows-amd64.exe
-      path: "dist/gofle_cli-{{.Os}}-{{.Arch}}{{.Ext}}"
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X GoFLE/pkg/version.Version={{.Version}}
+      - -X GoFLE/pkg/version.BuildTime={{.Date}}
+      - -X GoFLE/pkg/version.BuildCommit={{.Commit}}
+      - -X GoFLE/pkg/version.BuildSource=release
 
 archives:
   - id: gofle-cli-archive
@@ -45,6 +50,19 @@ archives:
       - README.md
       - CHANGELOG.md
 
+release:
+  github:
+    owner: sankam-nikolya
+    name: GoFLE
+  name_template: "v{{ .Version }}"
+  # Include prebuilt GUI binaries as separate release assets (not in archives)
+  extra_files:
+    - glob: ".goreleaser/staging/gofle-*"
+  footer: |
+    ---
+    CLI built by GoReleaser; GUI built by `./build.sh` (Docker).
+    Packaged by [GoReleaser](https://goreleaser.com).
+
 checksum:
   name_template: checksums.txt
   algorithm: sha256
@@ -60,17 +78,6 @@ changelog:
       - "^ci:"
       - Merge pull request
       - Merge branch
-
-release:
-  github:
-    owner: sankam-nikolya
-    name: GoFLE
-  name_template: "v{{ .Version }}"
-  extra_files:
-    - glob: ./dist/gofle*
-  footer: |
-    ---
-    Built with `./build.sh` (linux + windows), packaged by [GoReleaser](https://goreleaser.com).
 
 snapshot:
   version_template: "{{ .Version }}-next"
