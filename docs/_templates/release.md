@@ -51,6 +51,6 @@
 
 ## Links
 
-- [GitHub Release](https://github.com/sankam-nikolya/GoFLE/releases/tag/vX.Y.Z)
+- [GitHub Release](https://github.com/FanSoftLab/gofle/releases/tag/vX.Y.Z)
 - [Full Changelog](changelog.md)
 - [Migration Guide](migration-guides.md)

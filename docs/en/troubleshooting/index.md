@@ -78,7 +78,7 @@ Log level: `INFO` by default. Set `GOFLE_LOG_LEVEL=debug` for more detail.
 If troubleshooting doesn't resolve:
 
 1. Collect: version, OS, steps to reproduce, relevant log excerpt
-2. Check existing issues: https://github.com/sankam-nikolya/GoFLE/issues
+2. Check existing issues: https://github.com/FanSoftLab/gofle/issues
 3. Open new issue with: **Description**, **Steps to Reproduce**, **Expected vs Actual**, **Logs**
 
 ---

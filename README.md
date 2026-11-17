@@ -1,8 +1,8 @@
 # GoFLE
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/sankam-nikolya/GoFLE)](https://go.dev/)
-[![License](https://img.shields.io/github/license/sankam-nikolya/GoFLE)](./LICENSE.md)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sankam-nikolya/GoFLE)](https://goreportcard.com/report/github.com/sankam-nikolya/GoFLE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/FanSoftLab/gofle)](https://go.dev/)
+[![License](https://img.shields.io/github/license/FanSoftLab/gofle)](./LICENSE.md)
+[![Go Report Card](https://goreportcard.com/badge/github.com/FanSoftLab/gofle)](https://goreportcard.com/report/github.com/FanSoftLab/gofle)
 
 **Go Fast Log Explorer** — a cross-platform desktop application for browsing,
 searching, and tailing very large log files and remote (SSH) logs.

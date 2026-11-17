@@ -424,4 +424,4 @@ Set at build time via `-ldflags` in `build.sh` and `.goreleaser.yaml`.
 
 - [Wails Bridge](wails-bridge.md)
 - [Frontend Modules](frontend-modules.md)
-- [Source Code](https://github.com/sankam-nikolya/GoFLE/tree/main/pkg)
+- [Source Code](https://github.com/FanSoftLab/gofle/tree/main/pkg)

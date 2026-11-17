@@ -19,7 +19,7 @@ Build a production GoFLE binary using the reproducible Docker build. This is the
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/sankam-nikolya/GoFLE.git
+   git clone https://github.com/FanSoftLab/gofle.git
    cd GoFLE
    ```
 

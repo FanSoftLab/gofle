@@ -146,5 +146,5 @@ goreleaser release --clean
 
 echo "──────────────────────────────────────────────────"
 echo "Release $TAG published."
-echo "  https://github.com/sankam-nikolya/GoFLE/releases/tag/$TAG"
+echo "  https://github.com/FanSoftLab/gofle/releases/tag/$TAG"
 echo "──────────────────────────────────────────────────"

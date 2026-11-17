@@ -54,7 +54,7 @@ xcode-select --install
 ## Clone & Build
 
 ```bash
-git clone https://github.com/sankam-nikolya/GoFLE.git
+git clone https://github.com/FanSoftLab/gofle.git
 cd GoFLE
 
 # 1. Build frontend (required before any Go build)

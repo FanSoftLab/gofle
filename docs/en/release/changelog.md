@@ -96,4 +96,4 @@ Only `feat`, `fix`, `refactor`, `perf`, `security` appear in changelog.
 
 - [Release Process](release-process.md)
 - [Migration Guides](migration-guides.md)
-- [GitHub Releases](https://github.com/sankam-nikolya/GoFLE/releases)
+- [GitHub Releases](https://github.com/FanSoftLab/gofle/releases)

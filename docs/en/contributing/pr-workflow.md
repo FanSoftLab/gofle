@@ -28,7 +28,7 @@ git clone https://github.com/YOUR_USERNAME/GoFLE.git
 cd GoFLE
 
 # Add upstream
-git remote add upstream https://github.com/sankam-nikolya/GoFLE.git
+git remote add upstream https://github.com/FanSoftLab/gofle.git
 
 # Create branch
 git checkout -b feat/your-feature-name

@@ -418,4 +418,4 @@ Component (tab_manager, modal_controller, etc.)
 
 - [Wails Bridge](wails-bridge.md)
 - [Go Packages](go-packages.md)
-- [Frontend Source](https://github.com/sankam-nikolya/GoFLE/tree/main/frontend/src)
+- [Frontend Source](https://github.com/FanSoftLab/gofle/tree/main/frontend/src)

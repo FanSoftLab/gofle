@@ -182,7 +182,7 @@ goreleaser release --clean
 
 ## Post-Release Verification
 
-1. **Check GitHub Release**: https://github.com/sankam-nikolya/GoFLE/releases/tag/v2.1.0
+1. **Check GitHub Release**: https://github.com/FanSoftLab/gofle/releases/tag/v2.1.0
 2. **Download each artifact** and verify:
    - `./GoFLE --version` → `v2.1.0`
    - `./gofle version` → `v2.1.0`

@@ -33,7 +33,7 @@ macOS needs only `xcode-select --install`. Windows needs the
 ## Clone & build
 
 ```bash
-git clone https://github.com/sankam-nikolya/GoFLE.git
+git clone https://github.com/FanSoftLab/gofle.git
 cd GoFLE
 
 # 1. Build the frontend bundle (embedded by Go via //go:embed)

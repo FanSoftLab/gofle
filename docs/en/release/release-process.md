@@ -182,7 +182,7 @@ Accessible via:
 
 ## Post-Release
 
-1. Verify GitHub Release page: https://github.com/sankam-nikolya/GoFLE/releases
+1. Verify GitHub Release page: https://github.com/FanSoftLab/gofle/releases
 2. Download and test each artifact
 3. Update `CHANGELOG.md` (if not done via conventional commits)
 4. Announce in relevant channels
