@@ -1,4 +1,4 @@
-import { resolveLang, resolveTheme, setLang } from './i18n';
+import { resolveLang, resolveTheme, setLang, setOnLangChange } from './i18n';
 import { showToast } from './toast';
 import type { AppContext } from './app_context';
 
@@ -98,6 +98,10 @@ export class SettingsManager {
     constructor(ctx: AppContext, onPrefsApplied?: (prefs: AppPrefs) => void) {
         this.ctx = ctx;
         this.onPrefsApplied = onPrefsApplied;
+        // Register callback to refresh status bar when language changes
+        setOnLangChange(() => {
+            this.ctx.updateUIState?.();
+        });
         this.initHandlers();
     }
 

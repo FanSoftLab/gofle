@@ -25,9 +25,18 @@ export async function initI18n(): Promise<void> {
     applyI18n();
 }
 
-export function setLang(lang: LangCode) {
+type LangChangeCallback = () => void;
+let onLangChange: LangChangeCallback | null = null;
+
+export function setLang(lang: LangCode, callback?: LangChangeCallback) {
     currentLang = lang;
     applyI18n();
+    if (callback) callback();
+    if (onLangChange) onLangChange();
+}
+
+export function setOnLangChange(cb: LangChangeCallback) {
+    onLangChange = cb;
 }
 
 export function getLang(): LangCode {
