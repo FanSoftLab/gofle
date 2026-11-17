@@ -3,9 +3,10 @@ Thumbs.db
 *.DS_Store
 *.empty
 
-# PhpStorm project files
+# project files
 .idea
 .openidea
+.goreleaser
 
 # Netbeans project files
 nbproject
