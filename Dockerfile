@@ -9,13 +9,13 @@
 # Global build-args (used only after the system stage so apt is not cache-busted
 # by version/commit/time that change on every build).
 ARG RUN_TESTS=false
-ARG APP_NAME=GoFLE
+ARG APP_NAME=gofle
 ARG GO_VERSION=1.27
 ARG BUILD_MODE=prod
 ARG PLATFORMS=linux/amd64
 ARG MULTI=false
-ARG CLI_APP_NAME=gofle
-ARG GOFILE_VERSION=dev
+ARG CLI_APP_NAME=gofle_cli
+ARG GOFILE_VERSION=prod
 ARG BUILD_TIME=unknown
 ARG BUILD_COMMIT=unknown
 ARG BUILD_SOURCE=local

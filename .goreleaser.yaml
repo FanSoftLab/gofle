@@ -11,7 +11,7 @@ project_name: gofle
 builds:
   - id: gofle-cli
     builder: prebuilt
-    binary: gofle
+    binary: gofle_cli
     goos:
       - linux
       - windows
@@ -19,9 +19,9 @@ builds:
       - amd64
       - arm64
     prebuilt:
-      # dist/gofle-linux-amd64
-      # dist/gofle-windows-amd64.exe
-      path: "dist/gofle-{{.Os}}-{{.Arch}}{{.Ext}}"
+      # dist/gofle_cli-linux-amd64
+      # dist/gofle_cli-windows-amd64.exe
+      path: "dist/gofle_cli-{{.Os}}-{{.Arch}}{{.Ext}}"
 
 archives:
   - id: gofle-cli-archive
@@ -67,7 +67,7 @@ release:
     name: GoFLE
   name_template: "v{{ .Version }}"
   extra_files:
-    - glob: ./dist/GoFLE*
+    - glob: ./dist/gofle*
   footer: |
     ---
     Built with `./build.sh` (linux + windows), packaged by [GoReleaser](https://goreleaser.com).

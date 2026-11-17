@@ -13,6 +13,13 @@ Linux, macOS, and Windows from a single codebase. The backend (file indexing, se
 SSH streaming) is written in Go; the UI is a lightweight TypeScript + Vite web frontend
 rendered inside a native webview.
 
+## Screenshots
+
+<div align="center">
+   <img src="assets/gofle-1.png" alt="GoFLE main interface" width="100%">
+   <img src="assets/gofle-2.png" alt="GoFLE CLI interface" width="100%">
+</div>
+
 ---
 
 ## Table of Contents
@@ -58,7 +65,7 @@ Minimal terminal example (after building the binary):
 
 ```bash
 # Build once (see Getting Started), then launch and open two files directly
-./GoFLE /var/log/syslog /srv/app/app.log
+./gofle /var/log/syslog /srv/app/app.log
 ```
 
 > No screenshot image is committed to the repository, so the UI is described in
@@ -81,8 +88,8 @@ Minimal terminal example (after building the binary):
 GTK/WebKit toolchain is required, and produces the binary at the repository root:
 
 ```bash
-./build.sh        # → ./GoFLE at the repo root
-./GoFLE           # launch the GUI
+./build.sh        # → ./gofle at the repo root
+./gofle           # launch the GUI
 ```
 
 **Local build** — requires the native toolchain (Go, Node, Wails CLI, and on Linux
@@ -90,8 +97,8 @@ the GTK/WebKit dev packages) to be installed on your machine:
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-wails build                              # → build/bin/GoFLE
-./build/bin/GoFLE
+wails build                              # → build/bin/gofle
+./build/bin/gofle
 ```
 
 For live front-end hot-reload during development, use `wails dev` (see [Development](#development)).
@@ -325,7 +332,7 @@ and the `gofle` CLI, writing to stderr and `gofle.log` beside the config dir.
     ├── build.sh               # Reproducible multi-platform build via Docker
     ├── Dockerfile             # Build image: Go + GTK/WebKit + Node, runs wails build
 ├── scripts/install.sh     # Linux install helper: copies binary + icon, generates the .desktop entry
-└── GoFLE                   # Binary produced at the repo root by ./build.sh (raw wails build → build/bin/GoFLE)
+└── gofle                   # Binary produced at the repo root by ./build.sh (raw wails build → build/bin/gofle)
     ├── .golangci.yml          # golangci-lint configuration
     ├── .github/workflows/     # CI: lint + vet + test on push/PR
     ├── build/
@@ -348,7 +355,7 @@ and the `gofle` CLI, writing to stderr and `gofle.log` beside the config dir.
     │   ├── ftp/
     │   │   └── ftp.go          # Streamer/Lister over FTP/FTPS (explicit/implicit); pins server certs in the ftp_certs trust store.
     │   ├── logging/
-    │   │   └── logging.go      # Centralized slog setup for the desktop binary and the gofle CLI (stderr + gofle.log).
+    │   │   └── logging.go      # Centralized slog setup for the desktop binary and the gofle_cli CLI (stderr + gofle.log).
     │   └── ssh/
     │       └── ssh.go             # Streamer: streams a remote file over SSH to a local temp file, tails it every 2 s, verifies host keys via OpenSSH `known_hosts`.
     └── frontend/
@@ -415,7 +422,7 @@ npm run build
 cd ..
 
 # 2. Build the desktop binary (CGO required on Linux)
-wails build            # production → build/bin/GoFLE
+wails build            # production → build/bin/gofle
 wails dev               # dev build with hot-reload + dev tools (not "wails build -dev")
 wails build -platform windows/amd64,darwin/arm64,linux/amd64   # cross-build
 ```
@@ -423,8 +430,8 @@ wails build -platform windows/amd64,darwin/arm64,linux/amd64   # cross-build
 The binary is created under `build/bin/`.
 
 > **Binary location depends on the build path you chose:**
-> - `./build.sh` (Docker build) → produces the binary at the **repository root** as `./GoFLE`.
-> - a raw `wails build` → produces `build/bin/GoFLE`.
+> - `./build.sh` (Docker build) → produces the binary at the **repository root** as `./gofle`.
+> - a raw `wails build` → produces `build/bin/gofle`.
 >
 > See [Running](#running) for how to launch either one.
 
@@ -434,7 +441,7 @@ The binary is created under `build/bin/`.
 dependencies, producing deterministic artifacts for one or many platforms.
 
 ```bash
-# Native linux/amd64 production binary → ./GoFLE
+# Native linux/amd64 production binary → ./gofle
 ./build.sh
 
 # Cross-platform / multi-arch binaries → ./dist/
@@ -466,18 +473,18 @@ binary to a `bin/` directory, installs the icon into the hicolor theme, and
 part of the repo — the installer creates it at install time).
 
 The installer **automatically detects the current platform** (Linux/Windows/macOS, amd64/arm64)
-and selects the matching binary from `dist/` (e.g., `GoFLE-linux-amd64`, `GoFLE-windows-amd64.exe`).
+and selects the matching binary from `dist/` (e.g., `gofle-linux-amd64`, `gofle-windows-amd64.exe`).
 This works with both single-target builds (`./build.sh`) and multi-platform builds
 (`./build.sh -os all -arch all`).
 
 ```bash
-# System-wide install (copies to /usr/local/bin/GoFLE and registers the menu entry)
+# System-wide install (copies to /usr/local/bin/gofle and registers the menu entry)
 sudo ./scripts/install.sh --system
 
 # Or install for the current user only (default; no sudo needed)
 ./scripts/install.sh --user
 
-# Also install the CLI companion (gofle)
+# Also install the CLI companion (gofle_cli)
 ./scripts/install.sh --user --install-cli
 sudo ./scripts/install.sh --system --install-cli
 ```
@@ -531,10 +538,10 @@ sudo ./scripts/uninstall.sh --system --uninstall-cli
 
 1. **`./build.sh`** збирає CLI + GUI у `dist/`.
 2. **GoReleaser** пакує готові CLI (`builder: prebuilt`), checksums і публікує Release;
-   GUI з `dist/GoFLE*` — як `extra_files`.
+   GUI з `dist/gofle*` — як `extra_files`.
 
 The `scripts/release.sh` script verifies **both CLI and GUI artifacts** exist in `dist/`
-before running GoReleaser (CLI: `gofle-*`, GUI: `GoFLE-*`).
+before running GoReleaser (CLI: `gofle_cli-*`, GUI: `gofle-*`).
 
 ```bash
 export GITHUB_TOKEN=ghp_…   # classic PAT, scope: repo
@@ -563,8 +570,8 @@ goreleaser release --clean
 The same frontend runs in a browser when you start the HTTP server:
 
 ```bash
-./GoFLE -web          # listen on :8080
-./GoFLE -web :9090    # custom address
+./gofle -web          # listen on :8080
+./gofle -web :9090    # custom address
 ```
 
 Open `http://localhost:8080/` — the UI is identical to the desktop app. Local files
@@ -578,13 +585,13 @@ are pushed over WebSocket.
 
 ```bash
 # If you built with ./build.sh, the binary is at the repo root:
-./GoFLE
+./gofle
 
 # If you built with a raw `wails build`, it is under build/bin/:
-./build/bin/GoFLE
+./build/bin/gofle
 
 # Open specific files at launch (also works via file association / "Open with")
-./GoFLE /var/log/syslog /srv/app/app.log
+./gofle /var/log/syslog /srv/app/app.log
 
 # Or run via the Wails dev server (frontend hot-reload) instead of a built binary
 wails dev

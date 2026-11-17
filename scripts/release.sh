@@ -93,14 +93,14 @@ do
   arch="${pair#*/}"
   ext=""
   [[ "$os" == windows ]] && ext=".exe"
-  f="dist/gofle-${os}-${arch}${ext}"
+  f="dist/gofle_cli-${os}-${arch}${ext}"
   if [[ ! -f "$f" ]]; then
     echo "missing prebuilt CLI: $f" >&2
     missing=1
   fi
 done
 
-# Required GUI prebuilts for GoReleaser (extra_files: ./dist/GoFLE*)
+# Required GUI prebuilts for GoReleaser (extra_files: ./dist/gofle*)
 gui_missing=0
 for pair in \
   linux/amd64 linux/arm64 \
@@ -110,7 +110,7 @@ do
   arch="${pair#*/}"
   ext=""
   [[ "$os" == windows ]] && ext=".exe"
-  f="dist/GoFLE-${os}-${arch}${ext}"
+  f="dist/gofle-${os}-${arch}${ext}"
   if [[ ! -f "$f" ]]; then
     echo "missing prebuilt GUI: $f" >&2
     gui_missing=1

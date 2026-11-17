@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-APP="GoFLE"
-CLI_APP="gofle"
+APP="gofle"
+CLI_APP="gofle_cli"
 
 # Detect current platform for binary selection
 detect_platform() {

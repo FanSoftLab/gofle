@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-APP="GoFLE"
-CLI_APP="gofle"
+APP="gofle"
+CLI_APP="gofle_cli"
 
 # 1. Precise directory resolution
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -127,10 +127,10 @@ done
 if [ ! -f "$BIN_SRC" ]; then
     echo "Error: Executable file '$APP' not found!" >&2
     echo "Checked locations for platform '$PLATFORM':" >&2
-    echo "  - $SCRIPT_DIR/GoFLE-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
-    echo "  - $SCRIPT_DIR/GoFLE" >&2
-    echo "  - $PROJECT_DIR/dist/GoFLE-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
-    echo "  - $PROJECT_DIR/dist/GoFLE" >&2
+    echo "  - $SCRIPT_DIR/gofle-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
+    echo "  - $SCRIPT_DIR/gofle" >&2
+    echo "  - $PROJECT_DIR/dist/gofle-${PLATFORM_OS}-${PLATFORM_ARCH}" >&2
+    echo "  - $PROJECT_DIR/dist/gofle" >&2
     echo "Run ./build.sh first (or ./build.sh -os all -arch all for multi-platform)." >&2
     exit 1
 fi

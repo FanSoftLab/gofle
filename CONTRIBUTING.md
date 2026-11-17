@@ -40,11 +40,11 @@ cd GoFLE
 cd frontend && npm install && npm run build && cd ..
 
 # 2. Build the desktop binary (CGO required on Linux)
-wails build            # production binary at build/bin/GoFLE
+wails build            # production binary at build/bin/gofle
 wails dev              # dev build with hot-reload + dev tools
 ```
 
-A raw `wails build` places the binary at `build/bin/GoFLE`.
+A raw `wails build` places the binary at `build/bin/gofle`.
 
 ## Run the dev loop
 
@@ -109,6 +109,6 @@ Releases are built with `./build.sh` (Docker, reproducible) and published via
 GitHub Releases. See `build.sh -h` for flags.
 
 Build output locations:
-- `wails build` → binary at `build/bin/GoFLE`.
-- `./build.sh` (single target) → binary at `./GoFLE` in the repo root.
+- `wails build` → binary at `build/bin/gofle`.
+- `./build.sh` (single target) → binary at `./gofle` in the repo root.
 - `./build.sh` (multi-target) → artifacts under `./dist/`.

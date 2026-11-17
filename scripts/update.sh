@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-APP="GoFLE"
-CLI_APP="gofle"
+APP="gofle"
+CLI_APP="gofle_cli"
 
 # 1. Визначення шляхів до директорій проєкту
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

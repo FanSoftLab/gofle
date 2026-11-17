@@ -442,6 +442,11 @@ export class VirtualScroller {
     this.applySelectionStyle();
   }
 
+  /** Get the currently highlighted line index, or null if none. */
+  public getHighlightedLine(): number | null {
+    return this.highlightedLineIndex;
+  }
+
   public setOnRowClick(cb: (index: number) => void) {
     this.onRowClickCallback = cb;
   }

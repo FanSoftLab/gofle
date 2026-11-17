@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-APP_NAME="GoFLE"
-CLI_APP_NAME="gofle"
+APP_NAME="gofle"
+CLI_APP_NAME="gofle_cli"
 TARGET_UID=$(id -u)
 TARGET_GID=$(id -g)
 RUN_TESTS=false
@@ -25,7 +25,7 @@ Usage: $0 [options]
   -os <target>        linux | mac | windows | all   (default: linux)
   -arch <target>      amd64 | arm64 | all           (default: amd64)
   -target <target>    cli | gui | all               (default: all)
-  -cli-name <name>    CLI binary name (default: gofle)
+  -cli-name <name>    CLI binary name (default: gofle_cli)
   -v, --version <ver> Explicit version string (SemVer, e.g. 2.1.0). If omitted,
                       derived from git: tag (v2.1.0) or short commit (dev-abc123).
   -h, --help          Show this help
