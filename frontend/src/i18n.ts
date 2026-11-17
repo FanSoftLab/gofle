@@ -44,9 +44,14 @@ export function getLang(): LangCode {
 }
 
 export function resolveLang(raw: string | undefined): LangCode {
-    if (raw === 'uk' || raw === 'en') return raw;
-    const nav = (navigator.language || 'en').toLowerCase();
-    return nav.startsWith('uk') ? 'uk' : 'en';
+    if (!raw) {
+      const nav = (navigator.language || 'en').toLowerCase();
+      return nav.startsWith('uk') ? 'uk' : 'en';
+    }
+    const r = raw.toLowerCase();
+    if (r.startsWith('uk')) return 'uk';
+    if (r.startsWith('en')) return 'en';
+    return 'en';
 }
 
 export function resolveTheme(raw: string | undefined): 'dark' | 'light' {

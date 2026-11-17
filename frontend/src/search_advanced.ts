@@ -1,4 +1,3 @@
-
 import { t } from './i18n';
 import { getPrefs } from './settings_manager';
 
@@ -39,6 +38,22 @@ export function splitStoredTime(v: string): { date: string; hh: string; mm: stri
   if (!v) return { date: '', hh: '', mm: '' };
   const m = v.trim().match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?/);
   if (!m) return { date: '', hh: '', mm: '' };
+  // Validate the date is actually a real calendar date (check month/day bounds)
+  const dateStr = m[1];
+  const year = parseInt(dateStr.slice(0, 4), 10);
+  const month = parseInt(dateStr.slice(5, 7), 10);
+  const day = parseInt(dateStr.slice(8, 10), 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return { date: '', hh: '', mm: '' };
+  }
+  // Check days in month
+  const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month === 2) {
+    const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    if (day > (isLeap ? 29 : 28)) return { date: '', hh: '', mm: '' };
+  } else if (day > daysInMonth[month - 1]) {
+    return { date: '', hh: '', mm: '' };
+  }
   return { date: m[1], hh: m[2] || '', mm: m[3] || '' };
 }
 
@@ -47,6 +62,18 @@ export function joinBackendTime(date: string, hh: string, mm: string, endOfDay: 
   date = (date || '').trim();
   if (!date) return '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  // Validate the date is actually a real calendar date (check month/day bounds)
+  const year = parseInt(date.slice(0, 4), 10);
+  const month = parseInt(date.slice(5, 7), 10);
+  const day = parseInt(date.slice(8, 10), 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+  const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month === 2) {
+    const isLeap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    if (day > (isLeap ? 29 : 28)) return '';
+  } else if (day > daysInMonth[month - 1]) {
+    return '';
+  }
   hh = (hh || '').trim();
   mm = (mm || '').trim();
   if (!hh && !mm) {
@@ -487,5 +514,6 @@ export function escapeAttr(s: string): string {
   return String(s || '')
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;');
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

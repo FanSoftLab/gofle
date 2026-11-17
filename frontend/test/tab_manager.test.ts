@@ -1,6 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import { TabManager } from '../src/tab_manager';
+import { initI18n } from '../src/i18n';
 import type { AppContext, TabData, TabGroup, StripEntry } from '../src/app_context';
+import { showConfirm } from '../src/confirm_dialog';
+
+vi.mock('../src/confirm_dialog', () => ({
+  showConfirm: vi.fn(() => Promise.resolve(true)),
+}));
 
 function createTab(id: string, overrides: Partial<TabData> = {}): TabData {
   return {
@@ -45,6 +51,16 @@ function createMockContext(overrides: Record<string, unknown> = {}): AppContext 
   const groups = new Map<string, TabGroup>();
   const strip: StripEntry[] = [];
 
+  const mockScroller = {
+    getViewAnchor: vi.fn(() => ({ index: 0, fraction: 0 })),
+    setHighlightedLine: vi.fn(),
+    setViewAnchor: vi.fn(),
+    scrollToIndex: vi.fn(),
+    setTotalLines: vi.fn(),
+    setWordWrap: vi.fn(),
+    getWordWrap: vi.fn(() => false),
+  };
+
   const ctx: AppContext = {
     getApi: () => null,
     tabs,
@@ -52,8 +68,8 @@ function createMockContext(overrides: Record<string, unknown> = {}): AppContext 
     strip,
     activeTabId: null,
     selectedGroupId: null,
-    mainScroller: null as unknown as never,
-    filterScroller: null as unknown as never,
+    mainScroller: mockScroller as unknown as never,
+    filterScroller: mockScroller as unknown as never,
     panelBottom: null as unknown as never,
     panelTop: null as unknown as never,
     mainContainer: { classList: { toggle: vi.fn() } } as unknown as never,
@@ -143,6 +159,10 @@ function createMockContext(overrides: Record<string, unknown> = {}): AppContext 
 describe('TabManager', () => {
   let ctx: AppContext;
   let tm: TabManager;
+
+  beforeAll(async () => {
+    await initI18n();
+  });
 
   beforeEach(() => {
     ctx = createMockContext();
@@ -378,13 +398,14 @@ describe('TabManager', () => {
       ctx.tabs.set('t2', t2);
       const grp = createGroup('g1', { memberIds: ['t1'] });
       ctx.groups.set('g1', grp);
-      ctx.strip = [{ type: 'group', id: 'g1' }, { type: 'tab', id: 't2' }];
+      const t2Entry: StripEntry = { type: 'tab', id: 't2' };
+      ctx.strip = [{ type: 'group', id: 'g1' }, t2Entry];
 
-      tm.ungroupTab('t1', { type: 'tab', id: 't2' });
+      tm.ungroupTab('t1', t2Entry);
 
       const tabEntry = ctx.strip.find(e => e.type === 'tab' && e.id === 't1');
       expect(tabEntry).toEqual({ type: 'tab', id: 't1' });
-      expect(ctx.strip.indexOf(tabEntry!)).toBeLessThan(ctx.strip.findIndex(e => e.type === 'tab' && e.id === 't2'));
+      expect(ctx.strip.indexOf(tabEntry!)).toBeLessThan(ctx.strip.indexOf(t2Entry));
     });
   });
 
@@ -396,9 +417,10 @@ describe('TabManager', () => {
       const g2 = createGroup('g2');
       ctx.groups.set('g1', g1);
       ctx.groups.set('g2', g2);
-      ctx.strip = [{ type: 'group', id: 'g1' }, { type: 'tab', id: 't1' }, { type: 'group', id: 'g2' }];
+      const g1Entry: StripEntry = { type: 'group', id: 'g1' };
+      ctx.strip = [g1Entry, { type: 'tab', id: 't1' }, { type: 'group', id: 'g2' }];
 
-      tm.moveGroup('g2', { type: 'group', id: 'g1' });
+      tm.moveGroup('g2', g1Entry);
 
       expect(ctx.strip[0]).toEqual({ type: 'group', id: 'g2' });
       expect(ctx.strip[1]).toEqual({ type: 'group', id: 'g1' });
@@ -416,8 +438,9 @@ describe('TabManager', () => {
     it('does nothing when beforeEntry is the same entry', () => {
       const g1 = createGroup('g1');
       ctx.groups.set('g1', g1);
-      ctx.strip = [{ type: 'group', id: 'g1' }];
-      tm.moveGroup('g1', { type: 'group', id: 'g1' });
+      const g1Entry: StripEntry = { type: 'group', id: 'g1' };
+      ctx.strip = [g1Entry];
+      tm.moveGroup('g1', g1Entry);
       expect(ctx.strip.length).toBe(1);
     });
   });

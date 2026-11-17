@@ -40,6 +40,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libwebkit2gtk-4.1-dev \
         gcc-mingw-w64-x86-64 \
         g++-mingw-w64-x86-64 \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
         nsis
 
 # Compatibility symlink for older Wails templates that look for webkit2gtk-4.0
@@ -93,7 +95,8 @@ RUN --mount=type=cache,target=/root/.npm \
             npm ci --no-audit --no-fund; \
         else \
             npm install --no-audit --no-fund; \
-        fi; \
+        fi && \
+        npm install --no-audit --no-fund jsdom; \
     fi
 
 # Source code — this layer invalidates on any code change, but deps layers above stay cached.
@@ -162,12 +165,20 @@ RUN --mount=type=cache,target=/go/pkg/mod \
                     [ "$BUILD_MODE" = "prod" ] && TAGS="$TAGS,production"; \
                     FLAGS=""; \
                     [ "$BUILD_MODE" = "dev" ] && FLAGS="-debug"; \
+                    if [ "$goarch" = "arm64" ]; then \
+                        export CC=aarch64-linux-gnu-gcc; \
+                        export CXX=aarch64-linux-gnu-g++; \
+                        export CGO_ENABLED=1; \
+                    fi; \
                     if [ "$FIRST" = "true" ]; then \
                         wails build $FLAGS -platform "$goos/$goarch" \
                             -ldflags="${VERSION_LDFLAGS} -s -w" -tags "$TAGS" -o "$APP_NAME"; \
                     else \
                         wails build $FLAGS -platform "$goos/$goarch" -skipbindings \
                             -ldflags="${VERSION_LDFLAGS} -s -w" -tags "$TAGS" -o "$APP_NAME"; \
+                    fi; \
+                    if [ "$goarch" = "arm64" ]; then \
+                        unset CC CXX; \
                     fi; \
                     if [ -f "build/bin/$APP_NAME" ]; then \
                         mv "build/bin/$APP_NAME" "build/bin/${APP_NAME}-linux-${goarch}"; \

@@ -47,7 +47,7 @@ describe('i18n t()', () => {
 
   it('replaces multiple parameters', () => {
     expect(t('err_restore_tab_failed', { path: '/var/log/app.log', err: 'файл не знайдено' }))
-      .toBe('Вкладку не відновлено: /var/log/app.log: файл не знайдено');
+      .toBe('Не вдалося відновити вкладку: /var/log/app.log: файл не знайдено');
   });
 
   it('switches between uk and en', () => {
