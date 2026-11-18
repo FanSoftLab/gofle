@@ -52,8 +52,8 @@ archives:
 
 release:
   github:
-    owner: sankam-nikolya
-    name: GoFLE
+    owner: FanSoftLab
+    name: gofle
   name_template: "v{{ .Version }}"
   # Include prebuilt GUI binaries as separate release assets (not in archives)
   extra_files:
