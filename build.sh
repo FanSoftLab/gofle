@@ -297,6 +297,14 @@ fi
 
 [ -f "$OUT_DIR/test_results.log" ] && cp "$OUT_DIR/test_results.log" ./test_results.log 2>/dev/null || true
 
+# Generate SHA256 checksums for all artifacts in dist/
+if [ -d "dist" ] && [ -n "$(ls -A dist/ 2>/dev/null)" ]; then
+    echo "Generating checksums..."
+    (cd dist && sha256sum * > checksums.txt 2>/dev/null || true)
+    echo "Checksums saved to dist/checksums.txt"
+    cat dist/checksums.txt 2>/dev/null || true
+fi
+
 echo "──────────────────────────────────────────────────"
 echo "Build complete. Working directory: $(pwd)"
 echo "Binaries are in ./dist/"
