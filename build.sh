@@ -22,8 +22,8 @@ Usage: $0 [options]
   -run-tests          Run go tests + vet inside the build container
   -no-cache           Force full rebuild (ignore Docker/BuildKit layer cache)
   -mode <dev|prod>    Build mode (default: prod)
-  -os <target>        linux | mac | windows | all   (default: linux)
-  -arch <target>      amd64 | arm64 | all           (default: amd64)
+  -os <target>        linux,mac,windows,all or comma-separated list (default: linux)
+  -arch <target>      amd64,arm64,all or comma-separated list       (default: amd64)
   -target <target>    cli | gui | all               (default: all)
   -cli-name <name>    CLI binary name (default: gofle_cli)
   -v, --version <ver> Explicit version string (SemVer, e.g. 2.1.0). If omitted,
@@ -72,32 +72,48 @@ case "$BUILD_TARGET" in
     *) echo "Invalid -target: $BUILD_TARGET (use cli|gui|all)" >&2; exit 1;;
 esac
 
-# Validate OS
-case "$TARGET_OS" in
-    linux|mac|darwin|windows|all) ;;
-    *) echo "Invalid -os: $TARGET_OS (use linux|mac|windows|all)" >&2; exit 1;;
-esac
+# Validate and expand OS targets (supports comma-separated: linux,windows)
+# Valid values: linux, mac, darwin, windows, all
+parse_os_list() {
+    local input="$1"
+    local result=()
+    IFS=',' read -ra parts <<< "$input"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            linux) result+=(linux);;
+            mac|darwin) result+=(darwin);;
+            windows) result+=(windows);;
+            all) result+=(linux windows darwin);;
+            *) echo "Invalid -os value: $part (use linux,mac,darwin,windows,all or comma-separated list)" >&2; exit 1;;
+        esac
+    done
+    # Deduplicate
+    printf '%s\n' "${result[@]}" | sort -u
+}
 
-# Validate arch
-case "$TARGET_ARCH" in
-    amd64|arm64|all) ;;
-    *) echo "Invalid -arch: $TARGET_ARCH (use amd64|arm64|all)" >&2; exit 1;;
-esac
+# Validate and expand arch targets (supports comma-separated: amd64,arm64)
+# Valid values: amd64, arm64, all
+parse_arch_list() {
+    local input="$1"
+    local result=()
+    IFS=',' read -ra parts <<< "$input"
+    for part in "${parts[@]}"; do
+        case "$part" in
+            amd64) result+=(amd64);;
+            arm64) result+=(arm64);;
+            all) result+=(amd64 arm64);;
+            *) echo "Invalid -arch value: $part (use amd64,arm64,all or comma-separated list)" >&2; exit 1;;
+        esac
+    done
+    # Deduplicate
+    printf '%s\n' "${result[@]}" | sort -u
+}
 
 # Expand OS targets
-case "$TARGET_OS" in
-    linux) OS_LIST=(linux);;
-    mac|darwin) OS_LIST=(darwin);;
-    windows) OS_LIST=(windows);;
-    all) OS_LIST=(linux windows darwin);;
-esac
+mapfile -t OS_LIST < <(parse_os_list "$TARGET_OS")
 
 # Expand architecture targets
-case "$TARGET_ARCH" in
-    amd64) ARCH_LIST=(amd64);;
-    arm64) ARCH_LIST=(arm64);;
-    all) ARCH_LIST=(amd64 arm64);;
-esac
+mapfile -t ARCH_LIST < <(parse_arch_list "$TARGET_ARCH")
 
 # Build the GOOS/GOARCH platform list (comma-separated)
 PLATFORMS=""
