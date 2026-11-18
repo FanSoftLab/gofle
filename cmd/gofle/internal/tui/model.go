@@ -530,10 +530,7 @@ func (m model) viewableEndWrapped() int64 {
 	// Walk backward from EOF counting visual rows until we fill the viewport.
 	need := m.height
 	for ln := total - 1; ln >= 0; ln-- {
-		wr := m.wrapRows(ln)
-		if wr < 1 {
-			wr = 1
-		}
+		wr := max(m.wrapRows(ln), 1)
 		need -= wr
 		if need <= 0 {
 			// top should be this line; topWrap may be >0 for partial first line.
@@ -554,21 +551,12 @@ func (m model) remainingVisualRows() int {
 		return 0
 	}
 	rows := 0
-	capN := m.height + 1
-	if capN < 2 {
-		capN = 2
-	}
+	capN := max(m.height+1, 2)
 	for ln := m.top; ln < total; ln++ {
-		wr := m.wrapRows(ln)
-		if wr < 1 {
-			wr = 1
-		}
+		wr := max(m.wrapRows(ln), 1)
 		start := 0
 		if ln == m.top {
-			start = m.topWrap
-			if start > wr {
-				start = wr
-			}
+			start = min(m.topWrap, wr)
 			if start < 0 {
 				start = 0
 			}
@@ -602,10 +590,7 @@ func (m *model) clampViewport() {
 		m.top = last
 	}
 	if m.wordWrap {
-		wr := m.wrapRows(m.top)
-		if wr < 1 {
-			wr = 1
-		}
+		wr := max(m.wrapRows(m.top), 1)
 		if m.topWrap >= wr {
 			m.topWrap = wr - 1
 		}
@@ -614,13 +599,12 @@ func (m *model) clampViewport() {
 		}
 		// If we overshot past the filled viewport, walk back.
 		for m.remainingVisualRows() < m.height && (m.top > 0 || m.topWrap > 0) {
-			if m.topWrap > 0 {
+			switch {
+			case m.topWrap > 0:
 				m.topWrap--
-			} else if m.top > 0 {
+			case m.top > 0:
 				m.top--
 				m.topWrap = max(0, m.wrapRows(m.top)-1)
-			} else {
-				break
 			}
 		}
 	} else {

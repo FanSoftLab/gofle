@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -424,27 +425,27 @@ func TestListerInterfaceError(t *testing.T) {
 	}
 
 	_, err := l.ListDir(ctx, "/")
-	if err != expectedErr {
+	if !errors.Is(err, expectedErr) {
 		t.Errorf("ListDir error = %v, want %v", err, expectedErr)
 	}
 
 	_, err = l.HomeDir(ctx)
-	if err != expectedErr {
+	if !errors.Is(err, expectedErr) {
 		t.Errorf("HomeDir error = %v, want %v", err, expectedErr)
 	}
 
 	err = l.Close()
-	if err != expectedErr {
+	if !errors.Is(err, expectedErr) {
 		t.Errorf("Close error = %v, want %v", err, expectedErr)
 	}
 }
 
 type mockStreamer struct {
-	localPathFunc     func() string
-	downloadedFunc    func() int64
-	remoteTotalFunc   func() int64
-	keepTempFileFunc  func()
-	closeFunc         func() error
+	localPathFunc    func() string
+	downloadedFunc   func() int64
+	remoteTotalFunc  func() int64
+	keepTempFileFunc func()
+	closeFunc        func() error
 }
 
 func (m *mockStreamer) LocalPath() string {
@@ -561,9 +562,9 @@ func TestStreamerInterfaceError(t *testing.T) {
 	expectedErr := context.DeadlineExceeded
 
 	s := &mockStreamer{
-		localPathFunc: func() string { return "" },
-		downloadedFunc: func() int64 { return 0 },
-		remoteTotalFunc: func() int64 { return 0 },
+		localPathFunc:    func() string { return "" },
+		downloadedFunc:   func() int64 { return 0 },
+		remoteTotalFunc:  func() int64 { return 0 },
 		keepTempFileFunc: func() {},
 		closeFunc: func() error {
 			return expectedErr
@@ -571,7 +572,7 @@ func TestStreamerInterfaceError(t *testing.T) {
 	}
 
 	err := s.Close()
-	if err != expectedErr {
+	if !errors.Is(err, expectedErr) {
 		t.Errorf("Close error = %v, want %v", err, expectedErr)
 	}
 }

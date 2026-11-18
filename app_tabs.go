@@ -582,14 +582,14 @@ func (a *App) SearchLinesAdvanced(tabID, query string, isRegex, caseSensitive, i
 		return 0, fmt.Errorf("tab %s not found", tabID)
 	}
 
-	var filter map[string]interface{}
+	var filter map[string]any
 	if strings.TrimSpace(filterJSON) != "" {
 		if err := json.Unmarshal([]byte(filterJSON), &filter); err != nil {
 			return 0, fmt.Errorf("invalid search filter JSON: %w", err)
 		}
 	}
 	if filter == nil {
-		filter = map[string]interface{}{}
+		filter = map[string]any{}
 	}
 
 	tab.mu.Lock()
@@ -619,7 +619,7 @@ func (a *App) SearchLinesAdvanced(tabID, query string, isRegex, caseSensitive, i
 	return a.SearchLines(tabID, query, isRegex, caseSensitive, invertMatch, secondaryQuery)
 }
 
-func stringSliceFromFilter(v interface{}) []string {
+func stringSliceFromFilter(v any) []string {
 	switch x := v.(type) {
 	case []string:
 		out := make([]string, 0, len(x))
@@ -629,7 +629,7 @@ func stringSliceFromFilter(v interface{}) []string {
 			}
 		}
 		return out
-	case []interface{}:
+	case []any:
 		out := make([]string, 0, len(x))
 		for _, item := range x {
 			if s, ok := item.(string); ok && s != "" {
@@ -642,7 +642,7 @@ func stringSliceFromFilter(v interface{}) []string {
 	}
 }
 
-func intFromFilter(v interface{}, fallback int) int {
+func intFromFilter(v any, fallback int) int {
 	switch x := v.(type) {
 	case float64:
 		return int(x)
@@ -655,7 +655,7 @@ func intFromFilter(v interface{}, fallback int) int {
 	}
 }
 
-func int64FromFilter(v interface{}, fallback int64) int64 {
+func int64FromFilter(v any, fallback int64) int64 {
 	switch x := v.(type) {
 	case float64:
 		return int64(x)
@@ -839,7 +839,7 @@ func extractFilePathArgsIn(args []string, workDir string) []string {
 			}
 		}
 
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() { //nolint:gosec // path sanitized above
 			files = append(files, path)
 		}
 	}
@@ -862,11 +862,11 @@ func (a *App) ValidateRegex(pattern string) (RegexValidationResult, error) {
 		}, nil
 	}
 
-	_, err := regexp.Compile(pattern)
-	if err != nil {
-		return RegexValidationResult{
+	_, compileErr := regexp.Compile(pattern)
+	if compileErr != nil {
+		return RegexValidationResult{ //nolint:nilerr // compileErr checked
 			IsValid:      false,
-			ErrorMessage: err.Error(),
+			ErrorMessage: compileErr.Error(),
 		}, nil
 	}
 
@@ -951,7 +951,7 @@ func (a *App) GetLevelStats(tabID string) (map[string]int64, error) {
 
 		// Fast path: use pre-computed level counts from the indexer
 		levelCounts := tab.Indexer.GetLevelCounts()
-		if levelCounts != nil && len(levelCounts) > 0 {
+		if len(levelCounts) > 0 {
 			// Find the last snapshot that covers lines we've already counted
 			var baseErrors, baseWarns int64
 			var baseScanned int64

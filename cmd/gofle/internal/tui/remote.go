@@ -230,7 +230,6 @@ func findRecentSummaryForTarget(cfg *config.AppConfig, target string) *config.SS
 	return nil
 }
 
-
 // enterRemoteMode opens the protocol-agnostic remote connect form, focusing the
 // first field. The form carries a protocol selector (ssh|ftp) so the same overlay
 // drives both transports.
@@ -773,8 +772,7 @@ func (m *model) openRemoteCmd(cfg remote.Config) tea.Cmd {
 		}
 
 		if err != nil {
-			var hk *ssh.HostKeyUnknownError
-			if errors.As(err, &hk) {
+			if hk, ok := errors.AsType[*ssh.HostKeyUnknownError](err); ok {
 				return remoteOpenedMsg{cfg: cfg, hkErr: hk}
 			}
 

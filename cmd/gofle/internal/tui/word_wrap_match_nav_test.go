@@ -16,11 +16,13 @@ func TestWordWrapMatchNavigation(t *testing.T) {
 	// others are short. Matches on both long and short lines.
 	lines := make([]string, 120)
 	for i := range lines {
-		if i%5 == 0 {
+		//nolint:gocritic // simple test fixture setup
+		switch i % 5 {
+		case 0:
 			lines[i] = fmt.Sprintf("LONG-%03d %s", i, strings.Repeat("payload-", 40))
-		} else if i%5 == 2 {
+		case 2:
 			lines[i] = fmt.Sprintf("MATCH-short-%03d", i)
-		} else {
+		default:
 			lines[i] = fmt.Sprintf("short-%03d", i)
 		}
 	}
@@ -73,7 +75,7 @@ func TestWordWrapMatchNavigation(t *testing.T) {
 
 		// Verify exact centering when there's room above and below
 		rowsAbove := 0
-		for ln := int64(0); ln < mc; ln++ {
+		for ln := range mc {
 			rowsAbove += m.wrapRows(ln)
 		}
 
@@ -169,11 +171,13 @@ func TestStepMatchWithWrap(t *testing.T) {
 func TestGotoMatchWithWrap(t *testing.T) {
 	lines := make([]string, 50)
 	for i := range lines {
-		if i%5 == 0 {
+		//nolint:gocritic // simple test fixture setup
+		switch i % 5 {
+		case 0:
 			lines[i] = fmt.Sprintf("LONG-%03d %s", i, strings.Repeat("payload-", 40))
-		} else if i%5 == 2 {
+		case 2:
 			lines[i] = fmt.Sprintf("MATCH-short-%03d", i)
-		} else {
+		default:
 			lines[i] = fmt.Sprintf("short-%03d", i)
 		}
 	}
@@ -345,7 +349,7 @@ func TestEnsureResVisibleWordWrap_StepCycle(t *testing.T) {
 	m.resTop = 0
 
 	// Step through matches and verify visibility after each step
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		m.matchCursor = i
 		m.ensureResVisible()
 		if !m.matchCursorVisibleFrom(m.resTop) {

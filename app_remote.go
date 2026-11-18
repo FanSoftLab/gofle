@@ -122,35 +122,35 @@ func (a *App) OpenRemoteFile(cfg remote.Config) (*FileStatsResponse, error) {
 			TLSMode:        cfg.TLSMode,
 		}
 
-stats, err := a.openFTPStream(ftpCfg, displayPath, summary, "")
-	if err != nil {
-		var certErr *ftp.CertUnknownError
-		if errors.As(err, &certErr) && a.autoAcceptHostKey() {
-			if werr := ftp.WriteCertTrust(resolveFTPCertStore(cfg), certErr.Line); werr != nil {
-				a.recordConnFailure(cfg.Host, cfg.Port)
-				return nil, fmt.Errorf("failed to auto-accept FTP certificate: %w", werr)
-			}
-			slog.Warn("ftp: auto-accepted unknown server certificate", "host", certErr.Host)
-			stats, err = a.openFTPStream(ftpCfg, displayPath, summary, "")
-		}
+		stats, err := a.openFTPStream(ftpCfg, displayPath, summary, "")
 		if err != nil {
-			a.recordConnFailure(cfg.Host, cfg.Port)
-			if errors.As(err, &certErr) {
-				// Stash the connection + the cert store line so AckFTPCert can
-				// persist the certificate and the frontend can re-open/re-list.
-				a.mu.Lock()
-				a.pendingFTPHost[certErr.Host] = certErr.Line
-				a.pendingFTPConfig[certErr.Host] = cfg
-				a.mu.Unlock()
+			var certErr *ftp.CertUnknownError
+			if errors.As(err, &certErr) && a.autoAcceptHostKey() {
+				if werr := ftp.WriteCertTrust(resolveFTPCertStore(cfg), certErr.Line); werr != nil {
+					a.recordConnFailure(cfg.Host, cfg.Port)
+					return nil, fmt.Errorf("failed to auto-accept FTP certificate: %w", werr)
+				}
+				slog.Warn("ftp: auto-accepted unknown server certificate", "host", certErr.Host)
+				stats, err = a.openFTPStream(ftpCfg, displayPath, summary, "")
 			}
-			return nil, err
+			if err != nil {
+				a.recordConnFailure(cfg.Host, cfg.Port)
+				if errors.As(err, &certErr) {
+					// Stash the connection + the cert store line so AckFTPCert can
+					// persist the certificate and the frontend can re-open/re-list.
+					a.mu.Lock()
+					a.pendingFTPHost[certErr.Host] = certErr.Line
+					a.pendingFTPConfig[certErr.Host] = cfg
+					a.mu.Unlock()
+				}
+				return nil, err
+			}
 		}
-	}
 
-	a.recordConnSuccess(cfg.Host, cfg.Port)
+		a.recordConnSuccess(cfg.Host, cfg.Port)
 
-	// Only record the entry in the recent list after a real, successful
-	// open (same policy as OpenSSHFile).
+		// Only record the entry in the recent list after a real, successful
+		// open (same policy as OpenSSHFile).
 		if err := a.cfg.AddRecentFile(displayPath, 0, true, summary); err != nil {
 			slog.Warn("failed to persist recent FTP entry", "path", displayPath, "err", err)
 		}
@@ -380,7 +380,7 @@ func (a *App) ListRemoteFiles(cfg remote.Config, path string) ([]remote.DirEntry
 			RemoteFilePath: cfg.RemoteFilePath,
 			TLSMode:        cfg.TLSMode,
 			KnownHostsPath: resolveFTPCertStore(cfg),
-		
+
 			ConnectTimeout: connectTO,
 			StallTimeout:   stallTO,
 		}
@@ -400,8 +400,7 @@ func (a *App) ListRemoteFiles(cfg remote.Config, path string) ([]remote.DirEntry
 
 			l, err := ftp.NewLister(ftpCfg)
 			if err != nil {
-				var certErr *ftp.CertUnknownError
-				if errors.As(err, &certErr) {
+				if certErr, ok := errors.AsType[*ftp.CertUnknownError](err); ok {
 					a.mu.Lock()
 					a.pendingFTPHost[certErr.Host] = certErr.Line
 					a.pendingFTPConfig[certErr.Host] = cfg

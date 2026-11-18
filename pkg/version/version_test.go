@@ -243,14 +243,14 @@ func TestInfoStringEdgeCases(t *testing.T) {
 
 func TestParseSemVerVersionPrefix(t *testing.T) {
 	tests := []struct {
-		input    string
-		major    int
-		minor    int
-		patch    int
-		ok       bool
+		input string
+		major int
+		minor int
+		patch int
+		ok    bool
 	}{
-		{"v1.2.3", 1, 2, 3, true},   // lowercase v is stripped
-		{"V1.2.3", 0, 2, 3, true},   // uppercase V is NOT stripped, atoi("V1")=0
+		{"v1.2.3", 1, 2, 3, true}, // lowercase v is stripped
+		{"V1.2.3", 0, 2, 3, true}, // uppercase V is NOT stripped, atoi("V1")=0
 		{"1.2.3", 1, 2, 3, true},
 	}
 
@@ -332,10 +332,10 @@ func TestParseSemVerInvalidCases(t *testing.T) {
 		"1.2",
 		"1.2.3.4",
 		"",
-		"-1.0.0",  // leading "-" splits into prerelease
-		"1.-1.0",  // "-" in middle splits prerelease
-		"+",       // split by "+" gives ["", ""], coreAndPre="", split("") by "-" gives []
-		"+build",  // same, coreAndPre=""
+		"-1.0.0", // leading "-" splits into prerelease
+		"1.-1.0", // "-" in middle splits prerelease
+		"+",      // split by "+" gives ["", ""], coreAndPre="", split("") by "-" gives []
+		"+build", // same, coreAndPre=""
 	}
 
 	for _, tc := range invalidCases {
@@ -351,14 +351,14 @@ func TestParseSemVerInvalidCases(t *testing.T) {
 	// These cases parse but with atoi returning 0 for non-numeric parts
 	// (atoi returns 0 on non-digits, so these technically "succeed" with 0 values)
 	atoiZeroCases := []struct {
-		input  string
-		major  int
-		minor  int
-		patch  int
+		input string
+		major int
+		minor int
+		patch int
 	}{
 		{"1.2.x", 1, 2, 0},
 		{"a.b.c", 0, 0, 0},
-		{"1.0.-1", 1, 0, 0},  // "-1" after prerelease split, atoi("-1")=0
+		{"1.0.-1", 1, 0, 0}, // "-1" after prerelease split, atoi("-1")=0
 	}
 
 	for _, tc := range atoiZeroCases {

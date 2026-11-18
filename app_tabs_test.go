@@ -21,9 +21,9 @@ func TestOpenFileCreatesTab(t *testing.T) {
 	}
 
 	app := &App{
-		cfg:        config.NewTestConfig(t),
-		tabs:       make(map[string]*TabState),
-		activeTab:  "",
+		cfg:       config.NewTestConfig(t),
+		tabs:      make(map[string]*TabState),
+		activeTab: "",
 	}
 
 	stats, err := app.OpenFile(path)
@@ -66,9 +66,9 @@ func TestOpenFileReusesExistingTab(t *testing.T) {
 	}
 
 	app := &App{
-		cfg:        config.NewTestConfig(t),
-		tabs:       make(map[string]*TabState),
-		activeTab:  "",
+		cfg:       config.NewTestConfig(t),
+		tabs:      make(map[string]*TabState),
+		activeTab: "",
 	}
 
 	stats1, err := app.OpenFile(path)
@@ -102,11 +102,11 @@ func TestCloseTab(t *testing.T) {
 	}
 
 	tab := &TabState{
-		ID:          "tab1",
-		FilePath:    path,
-		FileName:    "app.log",
-		Indexer:     idx,
-		AutoScroll:  true,
+		ID:         "tab1",
+		FilePath:   path,
+		FileName:   "app.log",
+		Indexer:    idx,
+		AutoScroll: true,
 	}
 
 	app := &App{
@@ -447,10 +447,10 @@ func TestGetFilteredLinesMissingTab(t *testing.T) {
 
 func TestSetAutoScroll(t *testing.T) {
 	tab := &TabState{
-		ID:          "tab1",
-		FilePath:    "/var/log/app.log",
-		FileName:    "app.log",
-		AutoScroll:  false,
+		ID:         "tab1",
+		FilePath:   "/var/log/app.log",
+		FileName:   "app.log",
+		AutoScroll: false,
 	}
 
 	app := &App{tabs: map[string]*TabState{"tab1": tab}}
@@ -551,7 +551,7 @@ func TestCountLevelMarkersCancelled(t *testing.T) {
 
 	// Write enough lines that the cancel stride will trigger.
 	var b strings.Builder
-	for i := 0; i < levelStatsCancelStride*3; i++ {
+	for range levelStatsCancelStride * 3 {
 		b.WriteString("ERROR line\n")
 	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {

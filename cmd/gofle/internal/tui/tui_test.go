@@ -249,7 +249,7 @@ func TestModelSplitView(t *testing.T) {
 		m = nm.(model)
 	}
 
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	m = runSearchToCompletion(t, m)
 	if len(m.matches) != 4 {
@@ -1296,7 +1296,7 @@ func TestEnsureResVisibleScrollsResultsPane(t *testing.T) {
 	// stepMatch from results pane should keep cursor visible.
 	m.matchCursor = 0
 	m.resTop = 0
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		m.stepMatch(1)
 		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
 			t.Fatalf("after step %d: matchCursor %d outside window resTop=%d height=%d",
@@ -1328,7 +1328,7 @@ func TestEnsureResVisibleScrollsResultsPane_WithKeys(t *testing.T) {
 	m.resTop = 0
 
 	// Test pgdown (ctrl+d)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		m.resultsPaneKey("pgdown")
 		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
 			t.Fatalf("after pgdown %d: matchCursor %d outside window resTop=%d height=%d",
@@ -1337,7 +1337,7 @@ func TestEnsureResVisibleScrollsResultsPane_WithKeys(t *testing.T) {
 	}
 
 	// Test pgup (ctrl+u)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		m.resultsPaneKey("pgup")
 		if m.matchCursor < m.resTop || m.matchCursor >= m.resTop+m.height {
 			t.Fatalf("after pgup %d: matchCursor %d outside window resTop=%d height=%d",
@@ -1372,9 +1372,9 @@ func TestEnsureResVisibleScrollsResultsPane_WithKeys(t *testing.T) {
 }
 
 // TestSplitViewSyncScrollRegression tests that in split view:
-// - navigating results pane keeps log pane centered on match (keepMatchVisible)
-// - scrolling log pane syncs results pane (syncMatchToView)
-// - after tab+nav, results pane ensures visibility
+// - navigating results pane keeps log pane centered on match (keepMatchVisible).
+// - scrolling log pane syncs results pane (syncMatchToView).
+// - after tab+nav, results pane ensures visibility.
 func TestSplitViewSyncScrollRegression(t *testing.T) {
 	lines := make([]string, 100)
 	for i := range lines {

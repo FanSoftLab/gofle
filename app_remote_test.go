@@ -121,7 +121,7 @@ func TestAckFTPCertWritesCertTrust(t *testing.T) {
 func TestAckFTPCertPartialPending(t *testing.T) {
 	cfg := config.NewTestConfig(t)
 	app := &App{
-		cfg: cfg,
+		cfg:              cfg,
 		pendingFTPHost:   map[string]string{"ftp.example.com": "some-line"},
 		pendingFTPConfig: map[string]remote.Config{}, // no config for this host
 	}
@@ -131,4 +131,3 @@ func TestAckFTPCertPartialPending(t *testing.T) {
 		t.Fatal("expected error when only host line pending but no config")
 	}
 }
-

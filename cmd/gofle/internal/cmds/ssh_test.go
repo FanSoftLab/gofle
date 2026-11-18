@@ -43,8 +43,7 @@ func TestResolveSSHHost(t *testing.T) {
 					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 				}
 
-				var ue *UsageError
-				if !errors.As(err, &ue) {
+				if _, ok := errors.AsType[*UsageError](err); !ok {
 					t.Fatalf("expected UsageError classification, got %T", err)
 				}
 

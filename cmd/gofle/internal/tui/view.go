@@ -457,10 +457,7 @@ func (m model) remoteBrowseView() string {
 		b.WriteString(dimStyle.Render("  (empty directory)") + "\n")
 	default:
 		slots := m.remoteVisibleSlots()
-		top := m.remoteTop
-		if top < 0 {
-			top = 0
-		}
+		top := max(m.remoteTop, 0)
 		end := min(top+slots, len(m.remoteEntries))
 		if top > 0 {
 			b.WriteString(dimStyle.Render(fmt.Sprintf("  … %d more above", top)) + "\n")
@@ -1074,16 +1071,6 @@ func isRTLRune(r rune) bool {
 	}
 }
 
-// containsRTL reports whether s has characters from common RTL scripts.
-func containsRTL(s string) bool {
-	for _, r := range s {
-		if isRTLRune(r) {
-			return true
-		}
-	}
-	return false
-}
-
 // displayWidth returns the number of terminal cells a string occupies.
 // It implements a simplified East Asian Width algorithm: most characters are
 // width 1, but CJK unified ideographs, fullwidth forms, and related blocks
@@ -1158,59 +1145,19 @@ func hasANSIIntroducer(s string) bool {
 	return false
 }
 
-// wideRuneRanges lists the inclusive rune ranges that terminals render two cells
-// wide: a simplified East Asian Width table (CJK unified ideographs, fullwidth
-// forms, Hangul and related blocks). It is a sorted, non-overlapping table so
-// runeWidth can binary-search it — as a switch this was one 56-branch function,
-// while the data it encodes is a plain lookup table.
-var wideRuneRanges = [...][2]rune{
-	{0x1100, 0x11FF},   // Hangul Jamo
-	{0x2E80, 0x2EFF},   // CJK Radicals Supplement
-	{0x2F00, 0x2FDF},   // Kangxi Radicals
-	{0x3000, 0x303F},   // CJK Symbols and Punctuation
-	{0x3040, 0x309F},   // Hiragana
-	{0x30A0, 0x30FF},   // Katakana
-	{0x3100, 0x312F},   // Bopomofo
-	{0x3130, 0x318F},   // Hangul Compatibility Jamo
-	{0x3190, 0x319F},   // Kanbun
-	{0x31A0, 0x31BF},   // Bopomofo Extended
-	{0x31C0, 0x31EF},   // CJK Strokes
-	{0x31F0, 0x31FF},   // Katakana Phonetic Extensions
-	{0x3200, 0x32FF},   // Enclosed CJK Letters and Months
-	{0x3300, 0x33FF},   // CJK Compatibility
-	{0x3400, 0x4DBF},   // CJK Unified Ideographs Extension A
-	{0x4E00, 0x9FFF},   // CJK Unified Ideographs
-	{0xA960, 0xA97F},   // Hangul Jamo Extended-A
-	{0xAC00, 0xD7A3},   // Hangul Syllables (modern Korean) — fullwidth in terminals
-	{0xD7B0, 0xD7FF},   // Hangul Jamo Extended-B
-	{0xF900, 0xFAFF},   // CJK Compatibility Ideographs
-	{0xFE10, 0xFE1F},   // Vertical Forms
-	{0xFE30, 0xFE4F},   // CJK Compatibility Forms
-	{0xFE50, 0xFE6F},   // Small Form Variants
-	{0xFF00, 0xFFEF},   // Halfwidth and Fullwidth Forms
-	{0x1F000, 0x1FFFF}, // symbols and emoji
-	{0x20000, 0x2FFFF}, // CJK Unified Ideographs Extension B+
-	{0x30000, 0x3FFFF}, // CJK Unified Ideographs Extension G+
-}
-
 // runeWidth returns the display width of a single rune (terminal cells).
 func runeWidth(r rune) int {
 	return runewidth.RuneWidth(r)
 }
 
-// wrapSegments prepares one visual row per logical log line.
+// wrapSegmentsOpts prepares one visual row per logical log line.
 //
 // Soft-wrapping was disabled on purpose: multi-segment wraps inserted extra
 // terminal rows between line numbers (vertical gaps / "shifted" rows). Long
 // lines are hard-truncated to `width` cells instead — one logical line always
 // occupies exactly one screen row.
-// wrapSegments prepares visual row(s) for one logical log line.
 // When doWrap is true the line is hard-wrapped to width cells; otherwise a
 // single segment is returned, optionally starting at hOffset (horizontal scroll).
-func wrapSegments(content string, width int, segs []string) []string {
-	return wrapSegmentsOpts(content, width, segs, false, 0)
-}
-
 func wrapSegmentsOpts(content string, width int, segs []string, doWrap bool, hOffset int) []string {
 	// Drop file-embedded ANSI first — our own styles are applied later.
 	content = sanitizeLogDisplay(stripANSI(content))
@@ -1301,13 +1248,6 @@ func sliceDisplayWidth(s string, skip, maxW int) string {
 	return chunk
 }
 
-// contentDisplayWidth returns the display width of sanitized log content.
-func contentDisplayWidth(content string) int {
-	content = sanitizeLogDisplay(stripANSI(content))
-	content = isolateLTR(content)
-	return runewidth.StringWidth(content)
-}
-
 // ansiReset restores default SGR attributes. Appended after any hard truncate
 // of a styled string so a cut-off background/foreground cannot bleed into the
 // rest of the row (the dark "fill" that appeared in split view).
@@ -1348,19 +1288,6 @@ func forceFitWidth(s string, width int) string {
 		return cut + ansiReset
 	}
 	return cut
-}
-
-// truncateToWidth truncates s to at most width display cells. ANSI-aware:
-// escape sequences do not consume width, and a trailing reset prevents
-// attribute bleed when a styled run is cut mid-sequence.
-func truncateToWidth(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if displayWidthNoANSI(s) <= width {
-		return s
-	}
-	return truncateANSIAware(s, width)
 }
 
 // truncateANSIAware walks s, copying ANSI sequences without charging width,
@@ -1587,10 +1514,7 @@ func (m model) helpView() string {
 		for len(right) < len(left) {
 			right = append(right, "")
 		}
-		colW := (w - 4) / 2
-		if colW < 36 {
-			colW = 36
-		}
+		colW := max((w-4)/2, 36)
 		for i := range left {
 			l := padHelpCol(left[i], colW)
 			r := right[i]
@@ -1659,12 +1583,12 @@ var (
 
 	// statusFileStyle: filename stands out slightly inside the bar.
 	statusFileStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#cba6f7")).
-				Bold(true)
+			Foreground(lipgloss.Color("#cba6f7")).
+			Bold(true)
 
 	// statusSepStyle: subtle separators between status fields.
 	statusSepStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#585b70"))
+			Foreground(lipgloss.Color("#585b70"))
 
 	// statusValueStyle highlights numeric values (line counts, match index).
 	statusValueStyle = lipgloss.NewStyle().
@@ -1675,9 +1599,6 @@ var (
 	selectionStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#1e1e2e")).
 			Background(lipgloss.Color("#89dceb"))
-
-	// divStyle draws the vertical divider between the split panes.
-	divStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
 
 	statusOnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6e3a1")).Bold(true)
 	statusOffStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f38ba8")).Bold(true)

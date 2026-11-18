@@ -179,7 +179,7 @@ func (api *webAPI) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	ch := api.app.hub.Subscribe()
 
@@ -325,15 +325,15 @@ func saveUpload(file io.Reader, name string) (string, error) {
 		return "", err
 	}
 	if _, err := io.Copy(tmp, file); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 		return "", err
 	}
-	tmp.Close()
+	_ = tmp.Close()
 	dest := filepath.Join(filepath.Dir(tmp.Name()), name)
 	if dest != tmp.Name() {
-		if err := os.Rename(tmp.Name(), dest); err != nil {
-			return tmp.Name(), nil
+		if renameErr := os.Rename(tmp.Name(), dest); renameErr != nil {
+			return tmp.Name(), renameErr
 		}
 		return dest, nil
 	}
@@ -363,7 +363,7 @@ func (api *webAPI) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	path, err := saveUpload(file, hdr.Filename)
 	if err != nil {
 		writeErr(w, 500, err)
@@ -401,7 +401,7 @@ func (api *webAPI) handleUploadMultiple(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		path, err := saveUpload(f, hdr.Filename)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			writeErr(w, 500, err)
 			return
@@ -1003,12 +1003,12 @@ func (api *webAPI) handleExportFull(w http.ResponseWriter, tabID string) {
 	path := tab.FilePath
 	tab.mu.RUnlock()
 
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path from internal tab state, validated on open
 	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
 	_, _ = io.Copy(w, f)

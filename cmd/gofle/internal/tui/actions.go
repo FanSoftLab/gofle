@@ -61,7 +61,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		var next tea.Model
 		next, cmd = m.handleKey(msg)
-		m = next.(model)
+		if m2, ok := next.(model); ok {
+			m = m2
+		}
 
 	case remoteOpenedMsg:
 		m.applyRemoteOpened(msg)
@@ -437,12 +439,8 @@ func (m *model) navKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// key is never swallowed by scroll/match handlers. Use KeyTab type as well
 	// as the "tab" string (terminals differ).
 	if m.effectiveSplit() && (msg.Type == tea.KeyTab || key == "tab" || key == "shift+tab") {
-		if key == "shift+tab" {
-			// Cycle opposite direction (same 2-pane toggle in practice).
-			m.splitFocus ^= 1
-		} else {
-			m.splitFocus ^= 1
-		}
+		// Tab and Shift+Tab both toggle split focus (2 panes).
+		m.splitFocus ^= 1
 		if m.splitFocus == 1 {
 			m.status = "pane: RESULTS  (↑↓ matches · Enter → log)"
 		} else {
@@ -696,10 +694,7 @@ func (m *model) scrollDown() {
 		if m.remainingVisualRows() <= m.height {
 			return
 		}
-		wr := m.wrapRows(m.top)
-		if wr < 1 {
-			wr = 1
-		}
+		wr := max(m.wrapRows(m.top), 1)
 		if m.topWrap < wr-1 {
 			m.topWrap++
 			return
@@ -1133,8 +1128,7 @@ func (m *model) applyRemoteListed(msg remoteListedMsg) {
 
 	if msg.err != nil {
 		// An unknown host key surfaces a trust prompt instead of a bare error.
-		var hk *ssh.HostKeyUnknownError
-		if errors.As(msg.err, &hk) {
+		if hk, ok := errors.AsType[*ssh.HostKeyUnknownError](msg.err); ok {
 			m.remoteHostPrompt = hk
 			m.remoteAfterTrustOpen = false // listing is always a browse context
 			m.remoteBrowseErr = ""
@@ -1212,100 +1206,6 @@ func (m *model) applyMatchResult(matches []int64) {
 	} else {
 		m.status = "no matches"
 	}
-}
-
-// runSearch executes the current search-box query and jumps to the first match.
-// Pipeline mirrors the GUI (app_tabs.SearchLines):
-//  1. primary scan (optional LineStart/LineEnd range, MatchAll when only advanced)
-//  2. secondary AND via FilterLines
-//  3. ApplyAdvancedFilters (exclude / nearby / levels / time)
-//  4. optional ExpandMatchesWithContext for display
-//
-// When only the secondary AND-filter changed and advanced filters are unchanged,
-// it refines the cached primary matches in O(matches) instead of O(totalLines).
-func (m *model) runSearch() {
-	m.query = m.searchInput.Value()
-	m.secondaryQuery = strings.TrimSpace(m.secondaryInput.Value())
-
-	opts := m.effectiveSearchOptions()
-	hasAdv := m.hasAdvancedFilters()
-
-	if opts.Query == "" && !hasAdv && opts.SecondaryQuery == "" {
-		m.matches = nil
-		m.primaryMatches = nil
-		m.primaryKey = ""
-		m.matchCursor = 0
-		return
-	}
-
-	// Empty primary + advanced (and/or secondary) → MatchAll indices, then post-filter.
-	if opts.Query == "" {
-		opts.MatchAll = true
-		opts.IsRegex = false
-		opts.InvertMatch = false
-	}
-
-	key := searchPrimaryKey(opts)
-	// secondaryOnly refine only when advanced filters are stable (same key path as GUI).
-	secondaryOnly := m.primaryMatches != nil && key == m.primaryKey &&
-		!hasAdv && opts.SecondaryQuery != ""
-
-	var res []int64
-	var err error
-
-	if secondaryOnly {
-		res, err = m.se.FilterLines(m.ctx, opts, m.primaryMatches)
-		if err != nil {
-			m.err = err
-			return
-		}
-		if m.hasContextExpand() {
-			res = search.ExpandMatchesWithContext(res, m.advCtxBefore, m.advCtxAfter, m.idx.TotalLines())
-		}
-		m.applyMatchResult(res)
-		return
-	}
-
-	primaryOpts := opts
-	primaryOpts.SecondaryQuery = ""
-
-	if opts.LineStart > 0 || opts.LineEnd > 0 {
-		end := opts.LineEnd
-		if end <= 0 {
-			end = m.idx.TotalLines()
-		}
-		res, err = m.se.SearchRange(m.ctx, primaryOpts, opts.LineStart, end)
-	} else {
-		res, err = m.se.SearchWithContext(m.ctx, primaryOpts)
-	}
-	if err != nil {
-		m.err = err
-		return
-	}
-
-	m.primaryMatches = slices.Clone(res)
-	m.primaryKey = key
-
-	if opts.SecondaryQuery != "" {
-		res, err = m.se.FilterLines(m.ctx, opts, res)
-		if err != nil {
-			m.err = err
-			return
-		}
-	}
-
-	// Advanced post-filters live in pkg/search — TUI never reimplements them.
-	res, err = m.se.ApplyAdvancedFilters(m.ctx, opts, res)
-	if err != nil {
-		m.err = err
-		return
-	}
-
-	if m.hasContextExpand() {
-		res = search.ExpandMatchesWithContext(res, m.advCtxBefore, m.advCtxAfter, m.idx.TotalLines())
-	}
-
-	m.applyMatchResult(res)
 }
 
 // stepMatch moves the match cursor by dir (+1 forward, -1 backward) and scrolls

@@ -1,115 +1,115 @@
 // Package indexer provides fast, memory-efficient log file indexing and random access.
 //
- // FileIndexer builds a byte-offset index of a log file on open, enabling O(1) random
- // access to any line without loading the entire file into memory. It supports
- // incremental tailing (detecting appended lines), line scanning for search, and
- // concurrent access from multiple goroutines.
- package indexer
- 
- import (
- 	"bufio"
- 	"bytes"
- 	"errors"
- 	"fmt"
- 	"io"
- 	"log/slog"
- 	"os"
- 	"path/filepath"
- 	"slices"
- 	"sort"
- 	"strconv"
- 	"strings"
- 	"sync"
- )
- 
- // ErrPathTraversal is returned when a file path attempts to escape allowed directories.
- var ErrPathTraversal = errors.New("path traversal attempt blocked")
- 
- // allowedBaseDirs returns the list of base directories that are allowed for file access.
- // This includes the user's home directory, current working directory, and common log directories.
- func allowedBaseDirs() ([]string, error) {
- 	var dirs []string
- 
- 	// User's home directory
- 	if home, err := os.UserHomeDir(); err == nil {
- 		dirs = append(dirs, home)
- 	}
- 
- 	// Current working directory
- 	if cwd, err := os.Getwd(); err == nil {
- 		dirs = append(dirs, cwd)
- 	}
- 
- 	// Common system log directories (read-only for most users, but included for completeness)
- 	systemDirs := []string{
- 		"/var/log",
- 		"/var/log/nginx",
- 		"/var/log/apache2",
- 		"/var/log/httpd",
- 		"/var/log/mysql",
- 		"/var/log/postgresql",
- 	}
-for _, d := range systemDirs {
- 		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
- 			dirs = append(dirs, d)
- 		}
- 	}
+// FileIndexer builds a byte-offset index of a log file on open, enabling O(1) random
+// access to any line without loading the entire file into memory. It supports
+// incremental tailing (detecting appended lines), line scanning for search, and
+// concurrent access from multiple goroutines.
+package indexer
 
- 	// Temp directory (for tests and temporary files)
- 	if tmpDir := os.TempDir(); tmpDir != "" {
- 		dirs = append(dirs, tmpDir)
- 	}
+import (
+	"bufio"
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+)
 
- 	// Deduplicate and resolve symlinks
- 	seen := make(map[string]bool)
- 	var result []string
- 	for _, d := range dirs {
- 		resolved, err := filepath.EvalSymlinks(d)
- 		if err != nil {
- 			resolved = d
- 		}
- 		if !seen[resolved] {
- 			seen[resolved] = true
- 			result = append(result, resolved)
- 		}
- 	}
- 
- 	return result, nil
- }
- 
- // validateFilePath resolves symlinks in path and ensures it's within allowed base directories.
- func validateFilePath(path string) error {
- 	// Resolve symlinks in the path
- 	resolvedPath, err := filepath.EvalSymlinks(path)
- 	if err != nil {
- 		// If we can't resolve symlinks (e.g., file doesn't exist yet), use the path as-is
- 		resolvedPath = path
- 	}
- 
- 	// Make absolute
- 	absPath, err := filepath.Abs(resolvedPath)
- 	if err != nil {
- 		return fmt.Errorf("failed to resolve absolute path: %w", err)
- 	}
- 
- 	allowed, err := allowedBaseDirs()
- 	if err != nil {
- 		return fmt.Errorf("failed to get allowed directories: %w", err)
- 	}
- 
- 	for _, base := range allowed {
- 		// Ensure base has a trailing separator for prefix matching
- 		base = filepath.Clean(base)
- 		if !strings.HasSuffix(base, string(filepath.Separator)) {
- 			base += string(filepath.Separator)
- 		}
- 		if strings.HasPrefix(absPath, base) {
- 			return nil // Path is within allowed directory
- 		}
- 	}
- 
- 	return fmt.Errorf("%w: %s not in allowed directories", ErrPathTraversal, path)
- }
+// ErrPathTraversal is returned when a file path attempts to escape allowed directories.
+var ErrPathTraversal = errors.New("path traversal attempt blocked")
+
+// allowedBaseDirs returns the list of base directories that are allowed for file access.
+// This includes the user's home directory, current working directory, and common log directories.
+func allowedBaseDirs() ([]string, error) {
+	var dirs []string
+
+	// User's home directory
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, home)
+	}
+
+	// Current working directory
+	if cwd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, cwd)
+	}
+
+	// Common system log directories (read-only for most users, but included for completeness)
+	systemDirs := []string{
+		"/var/log",
+		"/var/log/nginx",
+		"/var/log/apache2",
+		"/var/log/httpd",
+		"/var/log/mysql",
+		"/var/log/postgresql",
+	}
+	for _, d := range systemDirs {
+		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+			dirs = append(dirs, d)
+		}
+	}
+
+	// Temp directory (for tests and temporary files)
+	if tmpDir := os.TempDir(); tmpDir != "" {
+		dirs = append(dirs, tmpDir)
+	}
+
+	// Deduplicate and resolve symlinks
+	seen := make(map[string]bool)
+	var result []string
+	for _, d := range dirs {
+		resolved, err := filepath.EvalSymlinks(d)
+		if err != nil {
+			resolved = d
+		}
+		if !seen[resolved] {
+			seen[resolved] = true
+			result = append(result, resolved)
+		}
+	}
+
+	return result, nil
+}
+
+// validateFilePath resolves symlinks in path and ensures it's within allowed base directories.
+func validateFilePath(path string) error {
+	// Resolve symlinks in the path
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// If we can't resolve symlinks (e.g., file doesn't exist yet), use the path as-is
+		resolvedPath = path
+	}
+
+	// Make absolute
+	absPath, err := filepath.Abs(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	allowed, err := allowedBaseDirs()
+	if err != nil {
+		return fmt.Errorf("failed to get allowed directories: %w", err)
+	}
+
+	for _, base := range allowed {
+		// Ensure base has a trailing separator for prefix matching
+		base = filepath.Clean(base)
+		if !strings.HasSuffix(base, string(filepath.Separator)) {
+			base += string(filepath.Separator)
+		}
+		if strings.HasPrefix(absPath, base) {
+			return nil // Path is within allowed directory
+		}
+	}
+
+	return fmt.Errorf("%w: %s not in allowed directories", ErrPathTraversal, path)
+}
 
 // Sentinel read-guard errors. Dynamic detail (line index, byte length) is
 // attached via %w wrapping so callers can classify failures with errors.Is
@@ -123,11 +123,11 @@ var (
 	// ErrLineTooLarge reports content spanning more bytes than addressable in
 	// one read buffer.
 	ErrLineTooLarge = errors.New("line too large to read")
-// ErrIndexRebuilt reports that the offset table was rebuilt (the file was
-// rotated or truncated) while a long ScanLines pass was in flight, so the
-// line indices it was walking no longer denote the same content. The caller
-// must restart the operation against the refreshed index.
-ErrIndexRebuilt = errors.New("index rebuilt during scan")
+	// ErrIndexRebuilt reports that the offset table was rebuilt (the file was
+	// rotated or truncated) while a long ScanLines pass was in flight, so the
+	// line indices it was walking no longer denote the same content. The caller
+	// must restart the operation against the refreshed index.
+	ErrIndexRebuilt = errors.New("index rebuilt during scan")
 )
 
 // LevelCount holds the cumulative count of log level markers up to a certain
@@ -258,9 +258,9 @@ type FileIndexer struct {
 	// levelCounts stores cumulative level marker counts at regular intervals
 	// (every levelCountInterval lines). Used for O(1) level stats retrieval.
 	levelCounts []LevelCount
-	mu       sync.RWMutex
-	file     *os.File
-	isClosed bool
+	mu          sync.RWMutex
+	file        *os.File
+	isClosed    bool
 	// rebuilt is set by UpdateIndex when a rotation/truncation forced the
 	// offset table to be rebuilt from scratch. TakeRebuiltFlag consumes it so
 	// callers (the tail poller) can discard stale per-line state that points at
@@ -303,19 +303,19 @@ type FileIndexer struct {
 //	idx, err := NewFileIndexer("app.log")
 //	if err != nil {
 //	    log.Fatal(err)
- //	}
- //	defer idx.Close()
- //	fmt.Printf("Indexed %d lines\n", idx.TotalLines())
- func NewFileIndexer(filePath string) (*FileIndexer, error) {
- 	// Validate path to prevent path traversal via symlinks
- 	if err := validateFilePath(filePath); err != nil {
- 		return nil, err
- 	}
- 
- 	file, err := os.Open(filePath) //nolint:gosec // user-provided path is intended
- 	if err != nil {
- 		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
- 	}
+//	}
+//	defer idx.Close()
+//	fmt.Printf("Indexed %d lines\n", idx.TotalLines())
+func NewFileIndexer(filePath string) (*FileIndexer, error) {
+	// Validate path to prevent path traversal via symlinks
+	if err := validateFilePath(filePath); err != nil {
+		return nil, err
+	}
+
+	file, err := os.Open(filePath) //nolint:gosec // user-provided path is intended
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
+	}
 
 	info, err := file.Stat()
 	if err != nil {
@@ -435,7 +435,10 @@ func (fi *FileIndexer) scanIndexUnlocked(limit int64) error {
 // internal buffer — and the deferred Put covers all return paths; the next Get
 // always Resets first.
 func appendLineOffsetsWithLevels(r io.Reader, offsets []int64, levelCounts []LevelCount, startOffset, limit int64, path string) ([]int64, []LevelCount, error) {
-	reader := indexReaderPool.Get().(*bufio.Reader)
+	reader, ok := indexReaderPool.Get().(*bufio.Reader)
+	if !ok {
+		return nil, nil, fmt.Errorf("pool returned unexpected type")
+	}
 	reader.Reset(r)
 	defer indexReaderPool.Put(reader)
 
@@ -443,8 +446,8 @@ func appendLineOffsetsWithLevels(r io.Reader, offsets []int64, levelCounts []Lev
 
 	// Current running counts
 	var errs, warns int64
-	// Next line index that will get a levelCount entry
-	nextLevelCountIndex := int64(len(offsets)) // offsets already has the initial 0
+	// Next line index that will get a levelCount entry (set on first line append)
+	var nextLevelCountIndex int64
 
 	// ReadSlice hands back views into the reader's internal buffer instead of
 	// allocating a fresh []byte per line like ReadBytes (~10M allocations when

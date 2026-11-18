@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // buildSavedSession snapshots all open tabs into a config.SavedSession suitable
@@ -224,19 +222,4 @@ func normalizeTarget(s string) string {
 	s = strings.TrimPrefix(s, shared.SSHScheme)
 	s = strings.TrimPrefix(s, shared.FTPScheme)
 	return filepath.Clean(s)
-}
-
-// restoreSessionMsg is emitted after a background restore of extra tabs (optional).
-type restoreSessionMsg struct {
-	opened  int
-	skipped int
-}
-
-// cmdRestoreSession can be used as a tea.Cmd for deferred restore.
-func cmdRestoreSession(m *model) tea.Cmd {
-	return func() tea.Msg {
-		before := len(m.sessions)
-		m.restoreSessionTabs()
-		return restoreSessionMsg{opened: len(m.sessions) - before}
-	}
 }

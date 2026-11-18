@@ -102,14 +102,14 @@ func ParseSemVer(v string) (major, minor, patch int, prerelease, build string, o
 	}
 	// Simple semver parsing (not full spec compliant, but sufficient for our use)
 	// MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
-	
+
 	// First split by '+' to separate build metadata
 	buildParts := split(v, "+")
 	coreAndPre := buildParts[0]
 	if len(buildParts) > 1 {
 		build = buildParts[1]
 	}
-	
+
 	// Then split by '-' to separate prerelease
 	parts := split(coreAndPre, "-")
 	if len(parts) == 0 {
@@ -119,7 +119,7 @@ func ParseSemVer(v string) (major, minor, patch int, prerelease, build string, o
 	if len(parts) > 1 {
 		prerelease = parts[1]
 	}
-	
+
 	coreParts := split(core, ".")
 	if len(coreParts) != 3 {
 		return 0, 0, 0, "", "", false

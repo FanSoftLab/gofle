@@ -19,7 +19,7 @@ import (
 //
 // Parameters:
 //   - dir: The directory where gofle.log should be created. Typically the config directory.
-//          If empty, only stderr logging is used.
+//     If empty, only stderr logging is used.
 //
 // Returns a cleanup function that closes the log file. Call this on application shutdown.
 //

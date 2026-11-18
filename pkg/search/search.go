@@ -39,9 +39,9 @@ type SearchOptions struct { //nolint:revive // renaming would break the public s
 	SecondaryQuery string `json:"secondary_query,omitempty"`
 	// SecondaryMode is "and" (default) or "or" for combining primary and secondary.
 	SecondaryMode string `json:"secondary_mode,omitempty"`
-	IsRegex        bool   `json:"is_regex"`
-	CaseSensitive  bool   `json:"case_sensitive"`
-	InvertMatch    bool   `json:"invert_match"`
+	IsRegex       bool   `json:"is_regex"`
+	CaseSensitive bool   `json:"case_sensitive"`
+	InvertMatch   bool   `json:"invert_match"`
 
 	// --- Advanced filters (optional; empty = disabled) ---
 
@@ -364,11 +364,11 @@ func (se *SearchEngine) matchRangeWithLevels(ctx context.Context, opts SearchOpt
 	}
 
 	type chunkResultWithLevels struct {
-		seq      int
-		matches  []int64
-		errCount int64
+		seq       int
+		matches   []int64
+		errCount  int64
 		warnCount int64
-		err      error
+		err       error
 	}
 
 	jobs := make(chan int64, numChunks)
@@ -407,13 +407,14 @@ func (se *SearchEngine) matchRangeWithLevels(ctx context.Context, opts SearchOpt
 
 				err := se.indexer.ScanLinesRetry(startIdx, count, func(idx int64, content []byte) bool {
 					isMatch := false
-					if opts.IsRegex {
+					switch {
+					case opts.IsRegex:
 						isMatch = re.Match(content)
-					} else if opts.CaseSensitive {
+					case opts.CaseSensitive:
 						isMatch = bytes.Contains(content, queryBytes)
-					} else if queryIsASCII {
+					case queryIsASCII:
 						isMatch = containsFoldASCIIBytes(content, queryLowerBytes)
-					} else {
+					default:
 						isMatch = containsFoldRune(content, queryLowerRunes)
 					}
 
@@ -516,7 +517,7 @@ func (se *SearchEngine) matchRange(ctx context.Context, opts SearchOptions, star
 	if opts.MatchAll && opts.SecondaryQuery == "" {
 		n := end - start
 		out := make([]int64, n)
-		for i := int64(0); i < n; i++ {
+		for i := range n {
 			out[i] = start + i
 		}
 		if onProgress != nil {
@@ -1021,8 +1022,6 @@ func foldRuneAt(content []byte, want []rune) bool {
 	return true
 }
 
-
-
 // ApplyAdvancedFilters post-processes primary match line indices in a single
 // pass where possible. Priority: low memory (no extra full-file structures) and
 // few indexer reads (small line cache for nearby windows).
@@ -1118,9 +1117,9 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 	// at every use made two copies per line (plus one more per nearby window
 	// line). The cached slices are read-only and never mutated.
 	getLine := func(ln int64) ([]byte, error) {
-		for i := len(cache) - 1; i >= 0; i-- {
-			if cache[i].ln == ln {
-				return cache[i].txt, nil
+		for _, c := range slices.Backward(cache) {
+			if c.ln == ln {
+				return c.txt, nil
 			}
 		}
 		txt, err := se.indexer.GetLineBytes(ln)
@@ -1189,19 +1188,13 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 			var start, end int64
 			switch mode {
 			case "before":
-				start = ln - int64(win)
-				if start < 0 {
-					start = 0
-				}
+				start = max(ln-int64(win), 0)
 				end = ln
 			case "after":
 				start = ln + 1
 				end = ln + 1 + int64(win)
 			default:
-				start = ln - int64(win)
-				if start < 0 {
-					start = 0
-				}
+				start = max(ln-int64(win), 0)
 				end = ln + 1 + int64(win)
 			}
 			if end > total {
@@ -1230,7 +1223,6 @@ func (se *SearchEngine) ApplyAdvancedFilters(ctx context.Context, opts SearchOpt
 	}
 	return out, nil
 }
-
 
 // ExpandMatchesWithContext inserts neighboring line indices around each match.
 // Order is preserved; duplicates are removed. before/after are clamped to [0, 50].
@@ -1327,10 +1319,6 @@ func lineLevelBytes(content []byte) string {
 // lineLevel is the string twin of lineLevelBytes, kept for existing callers.
 func lineLevel(content string) string {
 	return lineLevelBytes([]byte(content))
-}
-
-func hasFold(s, sub string) bool {
-	return containsFoldASCIIBytes([]byte(s), []byte(strings.ToLower(sub)))
 }
 
 var timeLayouts = []string{

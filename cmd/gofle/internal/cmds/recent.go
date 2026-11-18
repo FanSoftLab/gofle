@@ -1,11 +1,11 @@
 package cmds
 
 import (
-	"context"
 	"GoFLE/cmd/gofle/internal/shared"
 	"GoFLE/cmd/gofle/internal/tui"
 	"GoFLE/pkg/config"
 	"GoFLE/pkg/remote"
+	"context"
 	"fmt"
 	"strconv"
 	"strings"

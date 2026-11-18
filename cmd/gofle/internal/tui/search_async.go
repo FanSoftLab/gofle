@@ -136,7 +136,6 @@ func (m *model) startSearchCmd() tea.Cmd {
 	return tea.Batch(searchCmd, tickCmd)
 }
 
-
 // applySearchProgress updates the status line while a search is in flight.
 func (m *model) applySearchProgress(msg searchProgressMsg) tea.Cmd {
 	if !m.searching || msg.gen != m.searchGen {

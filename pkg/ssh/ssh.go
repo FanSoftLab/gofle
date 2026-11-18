@@ -902,7 +902,7 @@ func (s *Streamer) initialSyncParallel(ctx context.Context) error {
 	}
 
 	// Launch workers for each range
-	for i := 0; i < parallelSyncWorkers; i++ {
+	for i := range parallelSyncWorkers {
 		start := int64(i) * rangeSize
 		end := start + rangeSize
 		if i == parallelSyncWorkers-1 {
@@ -985,7 +985,7 @@ func (s *Streamer) downloadRange(ctx context.Context, start, end int64) (int64, 
 
 	// We need to handle the skipBytes offset in the first block
 	// The dd command reads from skipBlocks*blockSize, so we need to skip the first skipBytes
-	var reader io.Reader = stdout
+	reader := stdout
 	if skipBytes > 0 {
 		// Wrap to skip the first skipBytes
 		reader = &offsetReader{r: stdout, skip: skipBytes}
@@ -1568,7 +1568,8 @@ func (s *Streamer) openRemoteStream(cmd string) (io.Reader, io.Reader, func() er
 			select {
 			case o := <-resCh:
 				o.abort()
-			case <-errCh:
+			case err := <-errCh:
+				_ = err // channel closed or error received
 			case <-openDone:
 			case <-s.stopCh:
 			case <-time.After(streamOpenContainmentTimeout):

@@ -415,10 +415,7 @@ func (m *model) openTopUnique() {
 	}
 	const maxScan = 20000
 	counts := make(map[string]int, 256)
-	n := len(src)
-	if n > maxScan {
-		n = maxScan
-	}
+	n := min(len(src), maxScan)
 	opts := m.effectiveSearchOptions()
 	for i := 0; i < n; i++ {
 		ln := src[i]
@@ -505,10 +502,7 @@ func extractMatchSnippet(line, pattern string, isRegex, caseSensitive bool) stri
 	if i < 0 {
 		return ""
 	}
-	end := i + len(pattern)
-	if end > len(line) {
-		end = len(line)
-	}
+	end := min(i+len(pattern), len(line))
 	return line[i:end]
 }
 
@@ -615,11 +609,12 @@ func (m *model) openPresetPicker() {
 func (m *model) presetKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if m.presetSaveMode {
-		switch {
-		case msg.Type == tea.KeyEsc:
+		//nolint:exhaustive // only Esc/Enter handled in save mode; others ignored
+		switch msg.Type {
+		case tea.KeyEsc:
 			m.presetSaveMode = false
 			return *m, nil
-		case msg.Type == tea.KeyEnter:
+		case tea.KeyEnter:
 			name := strings.TrimSpace(m.presetNameInput.Value())
 			if name == "" {
 				name = "preset"

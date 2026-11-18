@@ -44,8 +44,7 @@ func main() {
 
 	st, err := ftp.NewStreamer(context.Background(), cfg)
 	if err != nil {
-		var ce *ftp.CertUnknownError
-		if errors.As(err, &ce) {
+		if ce, ok := errors.AsType[*ftp.CertUnknownError](err); ok {
 			fmt.Println("CERT_UNKNOWN (expected on first FTPS contact):")
 			fmt.Println("  host:", ce.Host)
 			fmt.Println("  fingerprint:", ce.Fingerprint)

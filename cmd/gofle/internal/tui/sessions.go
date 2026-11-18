@@ -18,32 +18,31 @@ import (
 // This keeps the Bubbletea model thin: switch = snapshot + restore, no full
 // model clone.
 type fileSession struct {
-	target   string
-	idx      *indexer.FileIndexer
-	se       *search.SearchEngine
-	cleanup  func()
-	remote   *remote.Config
+	target      string
+	idx         *indexer.FileIndexer
+	se          *search.SearchEngine
+	cleanup     func()
+	remote      *remote.Config
 	remoteProto string
 
 	// View / search snapshot.
-	top, topWrap       int64
-	wordWrap           bool
-	hOffset            int
-	height             int // not restored from session; comes from terminal
-	matches            []int64
-	matchCursor        int
-	primaryMatches     []int64
-	primaryKey         string
-	query              string
-	secondaryQuery     string
-	searchOpts         search.SearchOptions
-	onlyMatches        bool
-	splitView          bool
-	splitFocus         int
-	resTop             int
-	tailOn             bool
-	selActive          bool
-	selAnchor          int64
+	top, topWrap   int64
+	wordWrap       bool
+	hOffset        int
+	matches        []int64
+	matchCursor    int
+	primaryMatches []int64
+	primaryKey     string
+	query          string
+	secondaryQuery string
+	searchOpts     search.SearchOptions
+	onlyMatches    bool
+	splitView      bool
+	splitFocus     int
+	resTop         int
+	tailOn         bool
+	selActive      bool
+	selAnchor      int64
 
 	// Advanced filters snapshot.
 	advExclude      []string
@@ -351,12 +350,13 @@ func (m model) tabsBar() string {
 	for i, s := range m.sessions {
 		label := sessionLabel(s)
 		cell := fmt.Sprintf(" %d:%s ", i+1, label)
-		if i == m.activeSession {
+		switch {
+		case i == m.activeSession:
 			b.WriteString(matchCursorStyle.Render(cell))
-		} else if s != nil && s.groupColor != "" {
+		case s != nil && s.groupColor != "":
 			st := lipgloss.NewStyle().Foreground(lipgloss.Color(s.groupColor))
 			b.WriteString(st.Render(cell))
-		} else {
+		default:
 			b.WriteString(dimStyle.Render(cell))
 		}
 	}

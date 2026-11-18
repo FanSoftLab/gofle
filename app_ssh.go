@@ -187,10 +187,10 @@ func (a *App) ListSSHFiles(sshCfg SSHConfig, path string) ([]ssh.DirEntry, error
 		KeyPassphrase:  sshCfg.KeyPassphrase,
 		RemoteFilePath: sshCfg.RemoteFilePath,
 		KnownHostsPath: a.cfg.KnownHostsPath(),
-	
-			ConnectTimeout: connectTO,
-			StallTimeout:   stallTO,
-		}
+
+		ConnectTimeout: connectTO,
+		StallTimeout:   stallTO,
+	}
 	key := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
 	// Reuse the cached lister for this host if we have one.
@@ -309,7 +309,6 @@ func (a *App) AckSSHHost(host string) error {
 //
 //nolint:dupl // symmetric SSH/FTP stream openers
 func (a *App) openSSHStream(sshCfg SSHConfig, sshPathDisplay string, sshSummary *config.SSHConfigSummary, tabID string) (*FileStatsResponse, error) {
-
 	// 1 tab = 1 file, for ALL callers (open / accept-host / restore): a tab
 	// registered while another open of the same remote is still dialing is not
 	// visible to findOpenTab yet, so concurrent opens must be collapsed here.
@@ -436,7 +435,7 @@ func (a *App) openSSHResources(
 			RemoteFilePath: sshCfg.RemoteFilePath,
 			KnownHostsPath: a.cfg.KnownHostsPath(),
 			Progress:       progress,
-		
+
 			ConnectTimeout: connectTO,
 			StallTimeout:   stallTO,
 		})

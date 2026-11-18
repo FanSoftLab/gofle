@@ -124,9 +124,9 @@ type AppConfig struct {
 	SearchSide        string `json:"search_side"`
 	// ViewMode is the CLI (and shared) layout preference:
 	// "normal" | "results" | "split". Empty means "split" (default).
-	ViewMode        string `json:"view_mode"`
+	ViewMode string `json:"view_mode"`
 	// LogFontSize is the desktop log font size in px (shared settings.json).
-	LogFontSize     int    `json:"log_font_size"`
+	LogFontSize int `json:"log_font_size"`
 	// LogFontFamily is a CSS font-family stack for the log view.
 	LogFontFamily string `json:"log_font_family"`
 	// LineDensity is "compact" | "normal" | "comfortable" (row spacing).
@@ -138,8 +138,8 @@ type AppConfig struct {
 	// DefaultFollow enables tail/follow when a new tab is opened.
 	DefaultFollow bool `json:"default_follow"`
 	// Default search option toggles applied to newly opened tabs.
-	DefaultSearchCase  bool `json:"default_search_case"`
-	DefaultSearchRegex bool `json:"default_search_regex"`
+	DefaultSearchCase   bool `json:"default_search_case"`
+	DefaultSearchRegex  bool `json:"default_search_regex"`
 	DefaultSearchInvert bool `json:"default_search_invert"`
 	// DefaultSearchCombine is "and" or "or" for the secondary search field.
 	DefaultSearchCombine string `json:"default_search_combine"`
@@ -162,18 +162,18 @@ type AppConfig struct {
 	// StartupBehavior: "session" (restore tabs) | "empty" | "open_dialog".
 	StartupBehavior string `json:"startup_behavior"`
 	// Remote connection preferences (desktop GUI).
-	SSHConnectTimeoutSec int  `json:"ssh_connect_timeout_sec"`
-	RemoteStallTimeoutSec int `json:"remote_stall_timeout_sec"`
+	SSHConnectTimeoutSec  int  `json:"ssh_connect_timeout_sec"`
+	RemoteStallTimeoutSec int  `json:"remote_stall_timeout_sec"`
 	AutoAcceptHostKey     bool `json:"auto_accept_host_key"`
 	ConnMaxAttempts       int  `json:"conn_max_attempts"`
 	ConnAttemptWindowMin  int  `json:"conn_attempt_window_min"`
 	ConnLockoutMin        int  `json:"conn_lockout_min"`
 	DefaultSSHPort        int  `json:"default_ssh_port"`
 	DefaultFTPPort        int  `json:"default_ftp_port"`
-	WindowWidth     int `json:"window_width"`
-	WindowHeight    int `json:"window_height"`
-	WindowMaximized bool `json:"window_maximized"`
-	MaxHistorySize  int `json:"-"`
+	WindowWidth           int  `json:"window_width"`
+	WindowHeight          int  `json:"window_height"`
+	WindowMaximized       bool `json:"window_maximized"`
+	MaxHistorySize        int  `json:"-"`
 
 	RecentFiles  []RecentFileItem    `json:"-"`
 	SavedSession *SavedSession       `json:"-"`
@@ -198,50 +198,50 @@ type AppConfig struct {
 // SaveTabsExit is a pointer so a missing JSON key does not silently force the
 // flag to false (Go's zero value) and wipe the "save open tabs" default.
 type settingsFile struct {
-	Theme             string `json:"theme"`
-	Language          string `json:"language"`
-	SaveTabsExit      *bool  `json:"save_tabs_exit"`
-	SearchPaneHeight  int    `json:"search_pane_height"`
-	WindowWidth       int    `json:"window_width"`
-	WindowHeight      int    `json:"window_height"`
-	SearchOrientation string `json:"search_orientation"`
-	SearchPaneWidth   int    `json:"search_pane_width"`
-	SearchSide        string `json:"search_side"`
-	ViewMode          string `json:"view_mode"`
-	LogFontSize       int    `json:"log_font_size"`
-	LogFontFamily     string `json:"log_font_family"`
-	LineDensity       string `json:"line_density"`
-	WordWrap          *bool  `json:"word_wrap"`
-	ShowLineNumbers   *bool  `json:"show_line_numbers"`
-	DefaultFollow     *bool  `json:"default_follow"`
-	DefaultSearchCase   *bool `json:"default_search_case"`
-	DefaultSearchRegex  *bool `json:"default_search_regex"`
-	DefaultSearchInvert *bool `json:"default_search_invert"`
-	DefaultSearchCombine string `json:"default_search_combine"`
-	CtxBefore           int    `json:"ctx_before"`
-	CtxAfter            int    `json:"ctx_after"`
-	NearbyMode          string `json:"nearby_mode"`
-	NearbyWindow        int    `json:"nearby_window"`
-	ExcludeRegexDefault *bool  `json:"exclude_regex_default"`
-	TimeRequireStamp    *bool  `json:"time_require_stamp"`
-	TopLimit            int    `json:"top_limit"`
-	HlPrimary           *bool  `json:"hl_primary"`
-	HlSecondary         *bool  `json:"hl_secondary"`
-	HlNearby            *bool  `json:"hl_nearby"`
-	HlExclude           *bool  `json:"hl_exclude"`
-	MaxRecentFiles    int    `json:"max_recent_files"`
-	ConfirmCloseTab   *bool  `json:"confirm_close_tab"`
-	StartupBehavior   string `json:"startup_behavior"`
-	SSHConnectTimeoutSec  int `json:"ssh_connect_timeout_sec"`
-	RemoteStallTimeoutSec int `json:"remote_stall_timeout_sec"`
-	AutoAcceptHostKey     *bool `json:"auto_accept_host_key"`
-	ConnMaxAttempts       int `json:"conn_max_attempts"`
-	ConnAttemptWindowMin  int `json:"conn_attempt_window_min"`
-	ConnLockoutMin        int `json:"conn_lockout_min"`
-	DefaultSSHPort        int `json:"default_ssh_port"`
-	DefaultFTPPort        int `json:"default_ftp_port"`
-	WindowMaximized   bool   `json:"window_maximized"`
-	MaxHistorySize    int    `json:"max_history_size"`
+	Theme                 string `json:"theme"`
+	Language              string `json:"language"`
+	SaveTabsExit          *bool  `json:"save_tabs_exit"`
+	SearchPaneHeight      int    `json:"search_pane_height"`
+	WindowWidth           int    `json:"window_width"`
+	WindowHeight          int    `json:"window_height"`
+	SearchOrientation     string `json:"search_orientation"`
+	SearchPaneWidth       int    `json:"search_pane_width"`
+	SearchSide            string `json:"search_side"`
+	ViewMode              string `json:"view_mode"`
+	LogFontSize           int    `json:"log_font_size"`
+	LogFontFamily         string `json:"log_font_family"`
+	LineDensity           string `json:"line_density"`
+	WordWrap              *bool  `json:"word_wrap"`
+	ShowLineNumbers       *bool  `json:"show_line_numbers"`
+	DefaultFollow         *bool  `json:"default_follow"`
+	DefaultSearchCase     *bool  `json:"default_search_case"`
+	DefaultSearchRegex    *bool  `json:"default_search_regex"`
+	DefaultSearchInvert   *bool  `json:"default_search_invert"`
+	DefaultSearchCombine  string `json:"default_search_combine"`
+	CtxBefore             int    `json:"ctx_before"`
+	CtxAfter              int    `json:"ctx_after"`
+	NearbyMode            string `json:"nearby_mode"`
+	NearbyWindow          int    `json:"nearby_window"`
+	ExcludeRegexDefault   *bool  `json:"exclude_regex_default"`
+	TimeRequireStamp      *bool  `json:"time_require_stamp"`
+	TopLimit              int    `json:"top_limit"`
+	HlPrimary             *bool  `json:"hl_primary"`
+	HlSecondary           *bool  `json:"hl_secondary"`
+	HlNearby              *bool  `json:"hl_nearby"`
+	HlExclude             *bool  `json:"hl_exclude"`
+	MaxRecentFiles        int    `json:"max_recent_files"`
+	ConfirmCloseTab       *bool  `json:"confirm_close_tab"`
+	StartupBehavior       string `json:"startup_behavior"`
+	SSHConnectTimeoutSec  int    `json:"ssh_connect_timeout_sec"`
+	RemoteStallTimeoutSec int    `json:"remote_stall_timeout_sec"`
+	AutoAcceptHostKey     *bool  `json:"auto_accept_host_key"`
+	ConnMaxAttempts       int    `json:"conn_max_attempts"`
+	ConnAttemptWindowMin  int    `json:"conn_attempt_window_min"`
+	ConnLockoutMin        int    `json:"conn_lockout_min"`
+	DefaultSSHPort        int    `json:"default_ssh_port"`
+	DefaultFTPPort        int    `json:"default_ftp_port"`
+	WindowMaximized       bool   `json:"window_maximized"`
+	MaxHistorySize        int    `json:"max_history_size"`
 }
 
 const (
@@ -336,39 +336,39 @@ func LoadConfig() (*AppConfig, error) {
 	}
 
 	cfg := &AppConfig{
-		configDir:         appDir,
-		Theme:             "system",
-		Language:          "system",
-		SaveTabsExit:      true,
-		SearchPaneHeight:  0,
-		SearchPaneWidth:   0,
-		SearchOrientation: "horizontal",
-		SearchSide:        "bottom",
-		ViewMode:          "split", // CLI default: split view
-		LogFontSize:       13,
-		LogFontFamily:     "monospace",
-		LineDensity:       "normal",
-		WordWrap:          false,
-		ShowLineNumbers:   true,
-		DefaultFollow:     true,
-		DefaultSearchCase: false,
-		DefaultSearchRegex: false,
-		DefaultSearchInvert:  false,
-		CtxBefore:            0,
-		CtxAfter:             0,
-		NearbyMode:           "either",
-		NearbyWindow:         10,
-		ExcludeRegexDefault:  false,
-		TimeRequireStamp:     false,
-		TopLimit:             100,
-		HlPrimary:            true,
-		HlSecondary:          true,
-		HlNearby:             true,
-		HlExclude:            false,
-		DefaultSearchCombine: "or",
-		MaxRecentFiles:    20,
-		ConfirmCloseTab:   true,
-		StartupBehavior:   "session",
+		configDir:             appDir,
+		Theme:                 "system",
+		Language:              "system",
+		SaveTabsExit:          true,
+		SearchPaneHeight:      0,
+		SearchPaneWidth:       0,
+		SearchOrientation:     "horizontal",
+		SearchSide:            "bottom",
+		ViewMode:              "split", // CLI default: split view
+		LogFontSize:           13,
+		LogFontFamily:         "monospace",
+		LineDensity:           "normal",
+		WordWrap:              false,
+		ShowLineNumbers:       true,
+		DefaultFollow:         true,
+		DefaultSearchCase:     false,
+		DefaultSearchRegex:    false,
+		DefaultSearchInvert:   false,
+		CtxBefore:             0,
+		CtxAfter:              0,
+		NearbyMode:            "either",
+		NearbyWindow:          10,
+		ExcludeRegexDefault:   false,
+		TimeRequireStamp:      false,
+		TopLimit:              100,
+		HlPrimary:             true,
+		HlSecondary:           true,
+		HlNearby:              true,
+		HlExclude:             false,
+		DefaultSearchCombine:  "or",
+		MaxRecentFiles:        20,
+		ConfirmCloseTab:       true,
+		StartupBehavior:       "session",
 		SSHConnectTimeoutSec:  10,
 		RemoteStallTimeoutSec: 60,
 		AutoAcceptHostKey:     false,
@@ -377,10 +377,10 @@ func LoadConfig() (*AppConfig, error) {
 		ConnLockoutMin:        5,
 		DefaultSSHPort:        22,
 		DefaultFTPPort:        21,
-		WindowWidth:       1280,
-		WindowHeight:      800,
-		WindowMaximized:   true,
-		MaxHistorySize:    100,
+		WindowWidth:           1280,
+		WindowHeight:          800,
+		WindowMaximized:       true,
+		MaxHistorySize:        100,
 	}
 
 	// The AES secret key must be initialized BEFORE any persisted state loads:
@@ -553,26 +553,26 @@ func (c *AppConfig) persistSettings() error {
 	confirmClose := c.ConfirmCloseTab
 	autoHost := c.AutoAcceptHostKey
 	sf := settingsFile{
-		Theme:             c.Theme,
-		Language:          c.Language,
-		SaveTabsExit:      &saveTabs,
-		SearchPaneHeight:  c.SearchPaneHeight,
-		SearchPaneWidth:   c.SearchPaneWidth,
-		SearchOrientation: c.SearchOrientation,
-		SearchSide:        c.SearchSide,
-		ViewMode:          c.ViewMode,
-		LogFontSize:       c.LogFontSize,
-		LogFontFamily:     c.LogFontFamily,
-		LineDensity:       c.LineDensity,
-		WordWrap:          &wordWrap,
-		ShowLineNumbers:   &showLN,
-		DefaultFollow:     &defFollow,
-		DefaultSearchCase:   &defCase,
-		DefaultSearchRegex:  &defRegex,
-		DefaultSearchInvert: &defInvert,
-		MaxRecentFiles:    c.MaxRecentFiles,
-		ConfirmCloseTab:   &confirmClose,
-		StartupBehavior:   c.StartupBehavior,
+		Theme:                 c.Theme,
+		Language:              c.Language,
+		SaveTabsExit:          &saveTabs,
+		SearchPaneHeight:      c.SearchPaneHeight,
+		SearchPaneWidth:       c.SearchPaneWidth,
+		SearchOrientation:     c.SearchOrientation,
+		SearchSide:            c.SearchSide,
+		ViewMode:              c.ViewMode,
+		LogFontSize:           c.LogFontSize,
+		LogFontFamily:         c.LogFontFamily,
+		LineDensity:           c.LineDensity,
+		WordWrap:              &wordWrap,
+		ShowLineNumbers:       &showLN,
+		DefaultFollow:         &defFollow,
+		DefaultSearchCase:     &defCase,
+		DefaultSearchRegex:    &defRegex,
+		DefaultSearchInvert:   &defInvert,
+		MaxRecentFiles:        c.MaxRecentFiles,
+		ConfirmCloseTab:       &confirmClose,
+		StartupBehavior:       c.StartupBehavior,
 		SSHConnectTimeoutSec:  c.SSHConnectTimeoutSec,
 		RemoteStallTimeoutSec: c.RemoteStallTimeoutSec,
 		AutoAcceptHostKey:     &autoHost,
@@ -581,22 +581,22 @@ func (c *AppConfig) persistSettings() error {
 		ConnLockoutMin:        c.ConnLockoutMin,
 		DefaultSSHPort:        c.DefaultSSHPort,
 		DefaultFTPPort:        c.DefaultFTPPort,
-		WindowWidth:       c.WindowWidth,
-		WindowHeight:      c.WindowHeight,
-		WindowMaximized:   c.WindowMaximized,
-		DefaultSearchCombine: c.DefaultSearchCombine,
-		CtxBefore: c.CtxBefore,
-		CtxAfter: c.CtxAfter,
-		NearbyMode: c.NearbyMode,
-		NearbyWindow: c.NearbyWindow,
-		ExcludeRegexDefault: &c.ExcludeRegexDefault,
-		TimeRequireStamp: &c.TimeRequireStamp,
-		TopLimit: c.TopLimit,
-		HlPrimary: &c.HlPrimary,
-		HlSecondary: &c.HlSecondary,
-		HlNearby: &c.HlNearby,
-		HlExclude: &c.HlExclude,
-		MaxHistorySize:    c.MaxHistorySize,
+		WindowWidth:           c.WindowWidth,
+		WindowHeight:          c.WindowHeight,
+		WindowMaximized:       c.WindowMaximized,
+		DefaultSearchCombine:  c.DefaultSearchCombine,
+		CtxBefore:             c.CtxBefore,
+		CtxAfter:              c.CtxAfter,
+		NearbyMode:            c.NearbyMode,
+		NearbyWindow:          c.NearbyWindow,
+		ExcludeRegexDefault:   &c.ExcludeRegexDefault,
+		TimeRequireStamp:      &c.TimeRequireStamp,
+		TopLimit:              c.TopLimit,
+		HlPrimary:             &c.HlPrimary,
+		HlSecondary:           &c.HlSecondary,
+		HlNearby:              &c.HlNearby,
+		HlExclude:             &c.HlExclude,
+		MaxHistorySize:        c.MaxHistorySize,
 	}
 
 	data, err := json.MarshalIndent(sf, "", "  ")
@@ -1444,10 +1444,10 @@ func generateSecretKey() (string, error) {
 // This avoids re-deriving the key (Argon2id) on every encrypt/decrypt call,
 // which is significant when many SSH credentials are stored/loaded frequently.
 var cachedAESKey struct {
-	mu        sync.Mutex
-	key       [32]byte // Argon2id derived key
-	cachedRaw string   // raw secret key for quick comparison
-	cachedSalt string  // salt for quick comparison
+	mu         sync.Mutex
+	key        [32]byte // Argon2id derived key
+	cachedRaw  string   // raw secret key for quick comparison
+	cachedSalt string   // salt for quick comparison
 }
 
 // getOrCreateAESKey returns the derived AES key for the given secretKey and salt.
@@ -1576,7 +1576,7 @@ func (c *AppConfig) GetSearchPresets() []SearchPreset {
 		return nil
 	}
 	path := filepath.Join(c.configDir, searchPresetsFile)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // configDir is controlled
 	if err != nil {
 		return nil
 	}

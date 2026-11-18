@@ -137,8 +137,7 @@ func TestCertVerifier(t *testing.T) {
 					t.Fatalf("unexpected Line: %q", ce.Line)
 				}
 			case errors.As(tc.wantErr, &mismatchTarget):
-				var cm *CertMismatchError
-				if !errors.As(err, &cm) {
+				if _, ok := errors.AsType[*CertMismatchError](err); !ok {
 					t.Fatalf("expected *CertMismatchError, got %T: %v", err, err)
 				}
 			}

@@ -70,21 +70,21 @@ type TabState struct {
 	FileName string
 	// gzCleanup removes the decompressed temp file backing a .gz tab; nil for
 	// plain files. Invoked from CloseTab/Shutdown.
-	gzCleanup        func()
-	Indexer          *indexer.FileIndexer
-	Searcher         *search.SearchEngine
-	MatchedLines     []int64
-	MatchSet         map[int64]struct{} // true search hits (before context expand)
+	gzCleanup    func()
+	Indexer      *indexer.FileIndexer
+	Searcher     *search.SearchEngine
+	MatchedLines []int64
+	MatchSet     map[int64]struct{} // true search hits (before context expand)
 	// PrimaryMatches is the last full-file (primary) result before SecondaryQuery
 	// was applied. Used to refine the AND-filter in O(matches) via FilterLines
 	// instead of rescanning the whole file.
 	PrimaryMatches []int64
-	AutoScroll       bool
-	LastSearchOpts   search.SearchOptions
+	AutoScroll     bool
+	LastSearchOpts search.SearchOptions
 	// searchCancel cancels an in-flight SearchLines for this tab when the user
 	// types a new query (debounce fires again). Guarded by searchCancelMu.
-	searchCancel   context.CancelFunc
-	searchCancelMu sync.Mutex
+	searchCancel     context.CancelFunc
+	searchCancelMu   sync.Mutex
 	IsSSH            bool
 	IsFTP            bool
 	TempFile         string
@@ -178,11 +178,10 @@ type App struct {
 
 // connAttemptInfo tracks connection attempts for rate limiting.
 type connAttemptInfo struct {
-	count     int
+	count       int
 	lastAttempt time.Time
 	lockedUntil time.Time
 }
-
 
 func (a *App) connLimitParams() (maxAttempts int, window, lockout time.Duration) {
 	maxAttempts = 5
@@ -204,7 +203,6 @@ func (a *App) connLimitParams() (maxAttempts int, window, lockout time.Duration)
 	}
 	return
 }
-
 
 // NewApp constructs the application, loading persisted configuration. Returns
 // an error if the config directory or secret key cannot be initialized.
@@ -239,7 +237,6 @@ func (a *App) emitEvent(name string, data any) {
 		runtime.EventsEmit(a.ctx, name, data)
 	}
 }
-
 
 // onSecondInstanceLaunch is invoked by Wails SingleInstanceLock when the user
 // launches GoFLE again (e.g. "Open with" on a log file) while an instance is
@@ -336,7 +333,6 @@ func closeRemoteStreamerAsync(s remote.Streamer) {
 func (a *App) GetVersion() string {
 	return version.Get().String()
 }
-
 
 // remoteTimeouts returns connect and stall timeouts from settings (with defaults).
 func (a *App) remoteTimeouts() (connect, stall time.Duration) {

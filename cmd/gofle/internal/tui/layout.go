@@ -103,24 +103,6 @@ func (m model) buildLayout() layout {
 	return l
 }
 
-// footerLines returns how many rows the footer will occupy — kept as a thin
-// wrapper so existing call sites stay readable.
-func (m model) footerLines() int {
-	l := m.buildLayout()
-	n := 0
-	if l.showPrompt {
-		n += l.promptRows
-	}
-	if l.showStatus {
-		n++
-	}
-	n += l.msgRows
-	if l.showHint {
-		n++
-	}
-	return max(n, 1)
-}
-
 // recomputeHeight applies buildLayout's body height to the model.
 func (m *model) recomputeHeight() {
 	if m.fullHeight <= 0 {

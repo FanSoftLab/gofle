@@ -123,7 +123,7 @@ func TestAckSSHHostWritesKnownHost(t *testing.T) {
 func TestAckSSHHostPartialPending(t *testing.T) {
 	cfg := config.NewTestConfig(t)
 	app := &App{
-		cfg: cfg,
+		cfg:              cfg,
 		pendingSSHHost:   map[string]string{"example.com": "some-line"},
 		pendingSSHConfig: map[string]SSHConfig{}, // no config for this host
 	}
@@ -153,9 +153,9 @@ func TestCheckConnRateLimitLockedOut(t *testing.T) {
 		cfg: cfg,
 		connAttempts: map[string]*connAttemptInfo{
 			"example.com:22": {
-				count:        5,
-				lockedUntil:  time.Now().Add(5 * time.Minute),
-				lastAttempt:  time.Now(),
+				count:       5,
+				lockedUntil: time.Now().Add(5 * time.Minute),
+				lastAttempt: time.Now(),
 			},
 		},
 	}
@@ -179,7 +179,7 @@ func TestRecordConnFailureThenSuccess(t *testing.T) {
 	}
 
 	// Record failures up to the limit.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		app.recordConnFailure("example.com", 22)
 	}
 

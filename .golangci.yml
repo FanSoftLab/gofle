@@ -100,6 +100,18 @@ linters:
     - protogetter      # proto field access via getters — only for protobuf users
     - spancheck        # OpenTelemetry span checks — only for OTel users
     - zerologlint      # zerolog usage — only for zerolog users
+    # v2 additions — too noisy for existing codebase:
+    - wsl_v5           # whitespace rules
+    - goconst          # string constants
+    - gocyclo          # cyclomatic complexity
+    - dupl             # code duplication
+    - nestif           # nested if chains
+    - funlen           # function length
+    - perfsprint       # fmt.Sprintf optimization
+    - revive           # style rules
+    - intrange         # C-style loops
+    - modernize        # old patterns
+    - nolintlint       # nolint directive style
     # Disabled by project decision: blanket t.Parallel() is unsafe here. The
     # app package (app_*.go) and config hold global/singleton state shared
     # across tests, so auto-parallelizing would introduce data races. Revisit

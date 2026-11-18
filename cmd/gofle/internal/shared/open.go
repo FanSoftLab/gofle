@@ -176,8 +176,7 @@ func resolveFTP(ctx context.Context, target string, c *config.AppConfig) (idx *i
 
 	s, err := ftp.NewStreamer(ctx, cfg)
 	if err != nil {
-		var ce *ftp.CertUnknownError
-		if errors.As(err, &ce) {
+		if _, ok := errors.AsType[*ftp.CertUnknownError](err); ok {
 			return nil, nil, nil, err
 		}
 

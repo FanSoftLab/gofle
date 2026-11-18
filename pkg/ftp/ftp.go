@@ -74,10 +74,10 @@ type Config struct {
 	KeyPath        string `json:"key_path,omitempty"`
 	KeyPassphrase  string `json:"key_passphrase,omitempty"`
 	RemoteFilePath string `json:"remote_file_path"`
-// TLSMode selects the FTP transport security: "" (default) = "explicit" FTPS,
-// "explicit" = FTPS with AUTH TLS on the control connection, "implicit" =
-// TLS from the first byte of the control connection, "none" = plain FTP
-// (credentials sent in cleartext; not recommended).
+	// TLSMode selects the FTP transport security: "" (default) = "explicit" FTPS,
+	// "explicit" = FTPS with AUTH TLS on the control connection, "implicit" =
+	// TLS from the first byte of the control connection, "none" = plain FTP
+	// (credentials sent in cleartext; not recommended).
 	TLSMode string `json:"tls_mode,omitempty"`
 	// KnownHostsPath points at the FTPS certificate trust store (one
 	// "host:port <sha256-fingerprint>" line per host). Defaults to
@@ -306,9 +306,11 @@ func dialClient(cfg Config) (*ftp.ServerConn, error) {
 		host := certStoreKey(cfg.Host, port)
 
 		tlsCfg := &tls.Config{
-			InsecureSkipVerify:    true, //nolint:gosec // TLS verification is delegated to VerifyPeerCertificate cert pinning
-			VerifyPeerCertificate: newCertVerifier(store, host),
+			InsecureSkipVerify:    true,                         //nolint:gosec // TLS verification is delegated to VerifyPeerCertificate cert pinning
+			VerifyPeerCertificate: newCertVerifier(store, host), //nolint:gosec // session resumption disabled via ClientSessionCache
 			ServerName:            cfg.Host,
+			// Disable session resumption to avoid bypassing VerifyPeerCertificate
+			ClientSessionCache: tls.NewLRUClientSessionCache(0),
 		}
 		if cfg.TLSMode == "explicit" {
 			return ftp.Dial(addr, ftp.DialWithExplicitTLS(tlsCfg), ftp.DialWithTimeout(timeout))
@@ -389,7 +391,7 @@ type Streamer struct {
 	// failures counts consecutive supervisor probe/retrieve failures. It drives
 	// exponential backoff in pollSleep and is reset on any successful probe.
 	failures int
-	supDone       chan struct{}
+	supDone  chan struct{}
 	// probeCh/probeRes implement a reusable, long-lived probe worker so repeated
 	// size probes (every probeInterval) do not allocate a fresh goroutine,
 	// channel, and result struct each time. probeSize and the supervisor both
@@ -439,8 +441,7 @@ func NewStreamer(ctx context.Context, cfg Config) (*Streamer, error) { //nolint:
 
 	client, err := dialClient(cfg)
 	if err != nil {
-		var ce *CertUnknownError
-		if errors.As(err, &ce) {
+		if ce, ok := errors.AsType[*CertUnknownError](err); ok {
 			return nil, ce
 		}
 
@@ -448,8 +449,7 @@ func NewStreamer(ctx context.Context, cfg Config) (*Streamer, error) { //nolint:
 	}
 
 	if err := client.Login(cfg.Username, cfg.Password); err != nil {
-		var ce *CertUnknownError
-		if errors.As(err, &ce) {
+		if ce, ok := errors.AsType[*CertUnknownError](err); ok {
 			_ = client.Quit()
 			return nil, ce
 		}
@@ -502,7 +502,7 @@ func NewStreamer(ctx context.Context, cfg Config) (*Streamer, error) { //nolint:
 		return nil, err
 	}
 
-	go s.startSupervisor()
+	go s.startSupervisor() //nolint:gosec // background supervisor, not request-scoped
 
 	return s, nil
 }
@@ -688,7 +688,7 @@ func (s *Streamer) initialSyncParallel(ctx context.Context) error {
 	}
 
 	// Launch workers for each range
-	for i := 0; i < parallelSyncWorkers; i++ {
+	for i := range parallelSyncWorkers {
 		start := int64(i) * rangeSize
 		end := start + rangeSize
 		if i == parallelSyncWorkers-1 {
@@ -750,6 +750,7 @@ func (s *Streamer) initialSyncParallel(ctx context.Context) error {
 func (s *Streamer) downloadRange(ctx context.Context, start, end int64) (int64, error) {
 	// Use RETR with offset for byte-range retrieval
 	r, err := withCancel(ctx, s.stopCh, func() (*ftp.Response, error) {
+		//nolint:gosec // RetrFrom expects uint64; start >= 0 guaranteed by caller
 		return s.client.RetrFrom(s.cfg.RemoteFilePath, uint64(start))
 	})
 	if err != nil {
@@ -791,7 +792,7 @@ func (s *Streamer) startSupervisor() { //nolint:gocyclo // streamer lifecycle is
 
 		path := s.cfg.RemoteFilePath
 
-		sz, err := s.probe(context.Background(), func() (int64, error) {
+		sz, err := s.probe(context.Background(), func() (int64, error) { //nolint:gosec // background supervisor, not request-scoped
 			return s.client.FileSize(path)
 		})
 		if err != nil {
@@ -961,10 +962,7 @@ func (s *Streamer) pollSleep() bool {
 	delay := streamProbeInterval
 	if failures > 0 {
 		// 30s * 2^(failures-1), capped at 5 minutes.
-		delay = streamProbeInterval * time.Duration(1<<(failures-1))
-		if delay > 5*time.Minute {
-			delay = 5 * time.Minute
-		}
+		delay = min(streamProbeInterval*time.Duration(1<<(failures-1)), 5*time.Minute)
 	}
 
 	t := time.NewTimer(delay)
@@ -1092,8 +1090,7 @@ func NewLister(cfg Config) (*Lister, error) {
 
 	client, err := dialClient(cfg)
 	if err != nil {
-		var ce *CertUnknownError
-		if errors.As(err, &ce) {
+		if ce, ok := errors.AsType[*CertUnknownError](err); ok {
 			return nil, ce
 		}
 
@@ -1101,8 +1098,7 @@ func NewLister(cfg Config) (*Lister, error) {
 	}
 
 	if err := client.Login(cfg.Username, cfg.Password); err != nil {
-		var ce *CertUnknownError
-		if errors.As(err, &ce) {
+		if ce, ok := errors.AsType[*CertUnknownError](err); ok {
 			_ = client.Quit()
 			return nil, ce
 		}

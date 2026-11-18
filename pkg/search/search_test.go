@@ -1548,7 +1548,7 @@ func TestApplyAdvancedFilters_NearbyQuery(t *testing.T) {
 	// Window=3: line 1 (ERROR) checks lines 0-4 (excl 1), WARN at 5 not in range
 	// line 7 (ERROR) checks lines 4-10 (excl 7), WARN at 5 IS in range
 	filtered, err := se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "WARN",
+		NearbyQuery:  "WARN",
 		NearbyWindow: 3,
 	}, []int64{1, 7}) // ERROR lines
 	if err != nil {
@@ -1562,8 +1562,8 @@ func TestApplyAdvancedFilters_NearbyQuery(t *testing.T) {
 
 	// Nearby mode "before"
 	filtered, err = se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "ERROR",
-		NearbyMode:  "before",
+		NearbyQuery:  "ERROR",
+		NearbyMode:   "before",
 		NearbyWindow: 5,
 	}, []int64{5}) // WARN line
 	if err != nil {
@@ -1579,8 +1579,8 @@ func TestApplyAdvancedFilters_NearbyQuery(t *testing.T) {
 
 	// Nearby mode "after"
 	filtered, err = se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "WARN",
-		NearbyMode:  "after",
+		NearbyQuery:  "WARN",
+		NearbyMode:   "after",
 		NearbyWindow: 5,
 	}, []int64{1}) // ERROR line
 	if err != nil {
@@ -1593,7 +1593,7 @@ func TestApplyAdvancedFilters_NearbyQuery(t *testing.T) {
 
 	// Window clamping (capped at 200)
 	filtered, err = se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "WARN",
+		NearbyQuery:  "WARN",
 		NearbyWindow: 500,
 	}, []int64{1})
 	if err != nil {
@@ -1721,8 +1721,8 @@ func TestApplyAdvancedFilters_CombinedFilters(t *testing.T) {
 
 	// Combine: Levels ERROR + TimeFrom 11:00
 	filtered, err := se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		Levels:    []string{"ERROR"},
-		TimeFrom:  "2024-01-01 11:00:00",
+		Levels:   []string{"ERROR"},
+		TimeFrom: "2024-01-01 11:00:00",
 	}, all)
 	if err != nil {
 		t.Fatal(err)
@@ -1748,11 +1748,11 @@ func TestApplyAdvancedFilters_CombinedFilters(t *testing.T) {
 
 	// Combine: Nearby + Time + Levels
 	filtered, err = se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "WARN",
-		NearbyMode:  "either",
+		NearbyQuery:  "WARN",
+		NearbyMode:   "either",
 		NearbyWindow: 10,
-		TimeFrom:    "2024-01-01 11:30:00",
-		Levels:      []string{"ERROR"},
+		TimeFrom:     "2024-01-01 11:30:00",
+		Levels:       []string{"ERROR"},
 	}, all)
 	if err != nil {
 		t.Fatal(err)
@@ -1834,7 +1834,7 @@ func TestApplyAdvancedFilters_InvalidTimeFormat(t *testing.T) {
 	}
 }
 
-// matchRangeWithLevels additional tests
+// matchRangeWithLevels additional tests.
 func TestMatchRangeWithLevels_Cancellation(t *testing.T) {
 	var buf strings.Builder
 	for range 10000 {
@@ -1927,9 +1927,9 @@ func TestMatchRangeWithLevels_SecondaryMatcherError(t *testing.T) {
 
 	// Invalid secondary regex should return error
 	_, _, _, err := se.matchRangeWithLevels(t.Context(), SearchOptions{
-		Query:           "error",
-		SecondaryQuery:  "(",
-		IsRegex:         true,
+		Query:          "error",
+		SecondaryQuery: "(",
+		IsRegex:        true,
 	}, 0, 10)
 	if err == nil {
 		t.Fatal("expected error for invalid secondary regex")
@@ -1994,8 +1994,8 @@ func TestMatchRangeWithLevels_SecondaryMatch(t *testing.T) {
 
 	// Secondary query narrows results (AND semantics) - matchRangeWithLevels only supports AND
 	matches, _, _, err := se.matchRangeWithLevels(t.Context(), SearchOptions{
-		Query:           "Exception",
-		SecondaryQuery:  "Timeout",
+		Query:          "Exception",
+		SecondaryQuery: "Timeout",
 	}, 0, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -2053,8 +2053,8 @@ func TestMatchRange_MatchAllFastPath(t *testing.T) {
 
 	// MatchAll with secondary should NOT use fast path
 	matches, err = se.matchRange(t.Context(), SearchOptions{
-		MatchAll:        true,
-		SecondaryQuery:  "b",
+		MatchAll:       true,
+		SecondaryQuery: "b",
 	}, 1, 4, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2085,9 +2085,9 @@ func TestMatchRange_SecondaryMatcherError(t *testing.T) {
 	se := NewSearchEngine(idx)
 
 	_, err := se.matchRange(t.Context(), SearchOptions{
-		Query:           "error",
-		SecondaryQuery:  "(",
-		IsRegex:         true,
+		Query:          "error",
+		SecondaryQuery: "(",
+		IsRegex:        true,
 	}, 0, 10, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid secondary regex")
@@ -2126,8 +2126,8 @@ func TestMatchRange_MatchAllWithInvert(t *testing.T) {
 	// MatchAll with InvertMatch - the fast path for MatchAll (no secondary) ignores InvertMatch
 	// This tests the fast path behavior
 	matches, err := se.matchRange(t.Context(), SearchOptions{
-		MatchAll:     true,
-		InvertMatch:  true,
+		MatchAll:    true,
+		InvertMatch: true,
 	}, 0, 10, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2139,9 +2139,9 @@ func TestMatchRange_MatchAllWithInvert(t *testing.T) {
 
 	// With secondary, InvertMatch is applied (not fast path)
 	matches, err = se.matchRange(t.Context(), SearchOptions{
-		MatchAll:        true,
-		InvertMatch:     true,
-		SecondaryQuery:  "x", // dummy secondary to disable fast path
+		MatchAll:       true,
+		InvertMatch:    true,
+		SecondaryQuery: "x", // dummy secondary to disable fast path
 	}, 0, 10, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2165,9 +2165,9 @@ func TestMatchRange_SecondaryOrMode(t *testing.T) {
 
 	// Secondary with OR mode
 	matches, err := se.matchRange(t.Context(), SearchOptions{
-		Query:           "ERROR",
-		SecondaryQuery:  "Timeout",
-		SecondaryMode:   "or",
+		Query:          "ERROR",
+		SecondaryQuery: "Timeout",
+		SecondaryMode:  "or",
 	}, 0, 10, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2279,7 +2279,7 @@ func TestApplyAdvancedFilters_NearbyWithContextCancellation(t *testing.T) {
 	cancel()
 
 	_, err := se.ApplyAdvancedFilters(ctx, SearchOptions{
-		NearbyQuery: "something",
+		NearbyQuery:  "something",
 		NearbyWindow: 10,
 	}, all)
 	if err == nil {
@@ -2359,7 +2359,7 @@ func TestParseLineTime_LongPrefixTruncation(t *testing.T) {
 	}
 }
 
-// Tests for remaining uncovered paths in matchRangeWithLevels
+// Tests for remaining uncovered paths in matchRange.WithLevels.
 func TestMatchRangeWithLevels_EmptyQuery(t *testing.T) {
 	idx := newIndexer(t, "error\ninfo\nerror\n")
 	se := NewSearchEngine(idx)
@@ -2484,7 +2484,7 @@ func TestMatchRangeWithLevels_MultipleErrorsJoined(t *testing.T) {
 	}
 }
 
-// Tests for remaining uncovered paths in matchRange
+// Tests for remaining uncovered paths in matchRange.
 func TestMatchRange_FastPathOnProgress(t *testing.T) {
 	idx := newIndexer(t, "a\nb\nc\nd\ne\n")
 	se := NewSearchEngine(idx)
@@ -2576,7 +2576,7 @@ func TestMatchRange_MultipleErrorsJoined(t *testing.T) {
 	}
 }
 
-// Test for FilterLines GetLine error
+// Test for FilterLines GetLine error.
 func TestFilterLines_GetLineError(t *testing.T) {
 	// This tests the error path when GetLine fails
 	// We can't easily trigger a real GetLine error, but we verify the code compiles
@@ -2592,7 +2592,7 @@ func TestFilterLines_GetLineError(t *testing.T) {
 	}
 }
 
-// Tests for ApplyAdvancedFilters remaining paths
+// Tests for ApplyAdvancedFilters remaining paths.
 func TestApplyAdvancedFilters_CacheEviction(t *testing.T) {
 	// Test the cache eviction path (dropping oldest half)
 	lines := make([]string, 300)
@@ -2609,7 +2609,7 @@ func TestApplyAdvancedFilters_CacheEviction(t *testing.T) {
 
 	// With nearby window, cache will be used and may evict
 	filtered, err := se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "WARN",
+		NearbyQuery:  "WARN",
 		NearbyWindow: 10,
 	}, all)
 	if err != nil {
@@ -2651,8 +2651,8 @@ func TestApplyAdvancedFilters_NearbyBeforeModeStartClamp(t *testing.T) {
 	// Search for ERROR at line 3, with nearby "before" window 10
 	// Should find WARN at line 0 (within 3 lines before)
 	filtered, err := se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "WARN",
-		NearbyMode:  "before",
+		NearbyQuery:  "WARN",
+		NearbyMode:   "before",
 		NearbyWindow: 10,
 	}, []int64{3})
 	if err != nil {
@@ -2676,13 +2676,13 @@ func TestApplyAdvancedFilters_NearbyGetLineError(t *testing.T) {
 	// Search for line 2 (index 2), nearby "test" in window 10
 	// Should find "test" in lines 0 and 1
 	filtered, err := se.ApplyAdvancedFilters(t.Context(), SearchOptions{
-		NearbyQuery: "test",
+		NearbyQuery:  "test",
 		NearbyWindow: 10,
 	}, []int64{2})
 	if err != nil {
 		t.Fatal(err)
 	}
-if len(filtered) != 1 {
+	if len(filtered) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(filtered))
 	}
 }
