@@ -13,6 +13,7 @@ ARG APP_NAME=gofle
 ARG GO_VERSION=1.27
 ARG BUILD_MODE=prod
 ARG PLATFORMS=linux/amd64
+ARG GUI_PLATFORMS=linux/amd64,windows/amd64
 ARG MULTI=false
 ARG CLI_APP_NAME=gofle_cli
 ARG GOFILE_VERSION=prod
@@ -58,6 +59,7 @@ ARG RUN_TESTS
 ARG APP_NAME
 ARG BUILD_MODE
 ARG PLATFORMS
+ARG GUI_PLATFORMS
 ARG MULTI
 ARG CLI_APP_NAME
 ARG GOFILE_VERSION
@@ -146,12 +148,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go vet ./...
 
 # ---------- GUI builds ----------
-# Iterate platforms so we can set correct compiler, tags and skip darwin GUI.
+# Uses GUI_PLATFORMS (pre-filtered by build.sh to only supported platforms)
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     if [ "$BUILD_TARGET" = "gui" ] || [ "$BUILD_TARGET" = "all" ]; then \
         set -e; \
-        IFS=','; set -- $PLATFORMS; \
+        IFS=','; set -- $GUI_PLATFORMS; \
         FIRST=true; \
         for p in "$@"; do \
             goos="${p%/*}"; \
@@ -165,20 +167,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
                     [ "$BUILD_MODE" = "prod" ] && TAGS="$TAGS,production"; \
                     FLAGS=""; \
                     [ "$BUILD_MODE" = "dev" ] && FLAGS="-debug"; \
-                    if [ "$goarch" = "arm64" ]; then \
-                        export CC=aarch64-linux-gnu-gcc; \
-                        export CXX=aarch64-linux-gnu-g++; \
-                        export CGO_ENABLED=1; \
-                    fi; \
                     if [ "$FIRST" = "true" ]; then \
                         wails build $FLAGS -platform "$goos/$goarch" \
                             -ldflags="${VERSION_LDFLAGS} -s -w" -tags "$TAGS" -o "$APP_NAME"; \
                     else \
                         wails build $FLAGS -platform "$goos/$goarch" -skipbindings \
                             -ldflags="${VERSION_LDFLAGS} -s -w" -tags "$TAGS" -o "$APP_NAME"; \
-                    fi; \
-                    if [ "$goarch" = "arm64" ]; then \
-                        unset CC CXX; \
                     fi; \
                     if [ -f "build/bin/$APP_NAME" ]; then \
                         mv "build/bin/$APP_NAME" "build/bin/${APP_NAME}-linux-${goarch}"; \
@@ -192,10 +186,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
                     if [ "$goarch" = "amd64" ]; then \
                         export CC=x86_64-w64-mingw32-gcc; \
                         export CXX=x86_64-w64-mingw32-g++; \
-                    elif [ "$goarch" = "arm64" ]; then \
-                        echo "WARNING: Windows/arm64 GUI cross-compile needs aarch64 MinGW which is not in Debian bookworm."; \
-                        echo "         Skipping GUI for windows/arm64. Use -arch amd64 or build natively."; \
-                        continue; \
                     else \
                         echo "Unsupported Windows arch: $goarch"; exit 1; \
                     fi; \

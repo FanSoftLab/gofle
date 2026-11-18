@@ -116,23 +116,55 @@ mapfile -t OS_LIST < <(parse_os_list "$TARGET_OS")
 mapfile -t ARCH_LIST < <(parse_arch_list "$TARGET_ARCH")
 
 # Build the GOOS/GOARCH platform list (comma-separated)
+# For GUI: filter out unsupported platforms with warnings
 PLATFORMS=""
+GUI_PLATFORMS=""
 for os in "${OS_LIST[@]}"; do
     for arch in "${ARCH_LIST[@]}"; do
+        platform="$os/$arch"
+
+        # Always add to full platform list (for CLI)
         if [ -z "$PLATFORMS" ]; then
-            PLATFORMS="$os/$arch"
+            PLATFORMS="$platform"
         else
-            PLATFORMS="$PLATFORMS,$os/$arch"
+            PLATFORMS="$PLATFORMS,$platform"
+        fi
+
+        # For GUI, filter unsupported platforms
+        if [[ "$BUILD_TARGET" == "gui" || "$BUILD_TARGET" == "all" ]]; then
+            case "$platform" in
+                linux/arm64)
+                    echo "⚠  GUI for linux/arm64 SKIPPED — cross-compile from x86_64 fails (CGO/GTK headers mismatch)"
+                    ;;
+                windows/arm64)
+                    echo "⚠  GUI for windows/arm64 SKIPPED — aarch64 MinGW not available in Debian"
+                    ;;
+                darwin/*)
+                    echo "⚠  GUI for $platform SKIPPED — Wails v2 cannot cross-compile GUI from Linux"
+                    ;;
+                *)
+                    # Supported GUI platform
+                    if [ -z "$GUI_PLATFORMS" ]; then
+                        GUI_PLATFORMS="$platform"
+                    else
+                        GUI_PLATFORMS="$GUI_PLATFORMS,$platform"
+                    fi
+                    ;;
+            esac
         fi
     done
 done
 
-# Warn early about macOS GUI
+# For GUI builds, use filtered platform list
 if [[ "$BUILD_TARGET" == "gui" || "$BUILD_TARGET" == "all" ]]; then
-    if [[ "$PLATFORMS" == *darwin* ]]; then
-        echo "⚠  GUI for macOS (darwin) will be SKIPPED — Wails v2 cannot cross-compile GUI from Linux."
-        echo "   CLI for darwin will still be built."
+    if [ -z "$GUI_PLATFORMS" ]; then
+        echo "ERROR: No supported GUI platforms for selected OS/arch combination." >&2
+        echo "       Supported: linux/amd64, windows/amd64" >&2
+        exit 1
     fi
+    # Override PLATFORMS for GUI build phase
+    GUI_PLATFORMS_ORIGINAL="$PLATFORMS"
+    PLATFORMS="$GUI_PLATFORMS"
 fi
 
 # Single-binary behaviour only for native prod linux/amd64
@@ -254,6 +286,7 @@ docker build \
   --build-arg APP_NAME="$APP_NAME" \
   --build-arg BUILD_MODE="$MODE" \
   --build-arg PLATFORMS="$PLATFORMS" \
+  --build-arg GUI_PLATFORMS="${GUI_PLATFORMS:-$PLATFORMS}" \
   --build-arg MULTI="$MULTI" \
   --build-arg TARGET_UID="$TARGET_UID" \
   --build-arg TARGET_GID="$TARGET_GID" \
