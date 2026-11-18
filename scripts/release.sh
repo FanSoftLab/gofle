@@ -5,11 +5,12 @@
 #   ./scripts/release.sh v2.1.0              # full release (needs GITHUB_TOKEN)
 #   ./scripts/release.sh v2.1.0 --snapshot   # build + package, no publish
 #   ./scripts/release.sh v2.1.0 --skip-build # only package existing dist/ + publish
+#   ./scripts/release.sh v2.1.0 --no-publish # build + package, create tag, but don't publish release
 #
 # Prerequisites:
 #   - goreleaser: go install github.com/goreleaser/goreleaser/v2@latest
 #   - Docker (for ./build.sh)
-#   - GITHUB_TOKEN with repo scope (for publish)
+#   - GITHUB_TOKEN with repo scope (for publish) — will be prompted securely
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,13 +19,15 @@ cd "$ROOT"
 VERSION_ARG=""
 SNAPSHOT=false
 SKIP_BUILD=false
+NO_PUBLISH=false
 
 usage() {
   cat <<EOFU
-Usage: $0 vX.Y.Z [--snapshot] [--skip-build]
+Usage: $0 vX.Y.Z [--snapshot] [--skip-build] [--no-publish]
 
   --snapshot     Package only, do not publish to GitHub
   --skip-build   Do not run build.sh (use existing files in dist/)
+  --no-publish   Build and package, create git tag, but don't publish release
 EOFU
   exit 0
 }
@@ -34,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage ;;
     --snapshot) SNAPSHOT=true; shift ;;
     --skip-build) SKIP_BUILD=true; shift ;;
+    --no-publish) NO_PUBLISH=true; shift ;;
     v*) VERSION_ARG="$1"; shift ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -43,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$VERSION_ARG" ]]; then
-  echo "Usage: $0 vX.Y.Z [--snapshot] [--skip-build]" >&2
+  echo "Usage: $0 vX.Y.Z [--snapshot] [--skip-build] [--no-publish]" >&2
   exit 1
 fi
 
@@ -75,8 +79,8 @@ if [[ "$SKIP_BUILD" == false ]]; then
   echo "──────────────────────────────────────────────────"
   echo "build.sh  →  GUI only  ($VERSION)"
   echo "──────────────────────────────────────────────────"
-  # linux: GUI only amd64 (arm64 GUI cross-compile needs target GTK/WebKit libs)
-  # windows: GUI only amd64 (arm64 MinGW not in Debian bookworm)
+  # linux: GUI amd64 only (arm64 GUI cross-compile from x86_64 fails — needs native arm64 builder)
+  # windows: GUI amd64 only (arm64 MinGW not in Debian bookworm)
   # macOS skipped — no simple cross-build for Wails GUI
   ./build.sh -os linux -arch amd64 -target gui -v "$VERSION"
   # Normalize name (first build uses MULTI=false → no platform suffix)
@@ -127,13 +131,29 @@ if [[ "$SNAPSHOT" == true ]]; then
   exit 0
 fi
 
+# Prompt for GITHUB_TOKEN securely (like a password)
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   echo "GITHUB_TOKEN is not set." >&2
-  echo "  export GITHUB_TOKEN=ghp_…   # classic token with 'repo' scope" >&2
-  exit 1
+  read -rsp "Enter GITHUB_TOKEN (input hidden): " GITHUB_TOKEN
+  echo
+  if [[ -z "$GITHUB_TOKEN" ]]; then
+    echo "GITHUB_TOKEN is required for publishing." >&2
+    exit 1
+  fi
+  export GITHUB_TOKEN
 fi
 
+# Push tag
 git push origin "$TAG" 2>/dev/null || git push origin "refs/tags/$TAG"
+
+if [[ "$NO_PUBLISH" == true ]]; then
+  echo "──────────────────────────────────────────────────"
+  echo "Release $TAG packaged (not published)."
+  echo "  Tag pushed: https://github.com/FanSoftLab/gofle/releases/tag/$TAG"
+  echo "  Run 'goreleaser release --clean' manually to publish."
+  echo "──────────────────────────────────────────────────"
+  exit 0
+fi
 
 goreleaser release --clean
 
