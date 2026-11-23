@@ -1067,6 +1067,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, 100);
     };
 
+    // Debounce file_updated UI refresh to avoid flicker on rapid tail polls (every 500ms).
+    // Only the active tab's UI needs to re-render; tab data (totalLines/fileSize/matchedLines)
+    // is updated immediately on each event so the model stays correct.
+    let fileUpdateUITimer: number | undefined;
+    const scheduleFileUpdateUI = (tabId: string) => {
+        if (fileUpdateUITimer !== undefined) {
+            clearTimeout(fileUpdateUITimer);
+        }
+        fileUpdateUITimer = window.setTimeout(() => {
+            fileUpdateUITimer = undefined;
+            // Guard against tab switch during debounce
+            if (ctx.activeTabId === tabId && ctx.tabs.has(tabId)) {
+                updateUIState();
+                const tab = ctx.tabs.get(tabId)!;
+                if (tab.autoScroll) {
+                    scheduleFollowScroll();
+                }
+                scheduleLevelRefresh();
+            }
+        }, 150);
+    };
+
     initToasts();
 
     // --- Level stats (E/W) in the status bar ---
@@ -1129,11 +1151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 tab.fileSize = data.file_size;
                 tab.matchedLines = data.match_count;
                 if (ctx.activeTabId === data.tab_id) {
-                    updateUIState();
-                    if (tab.autoScroll) {
-                        scheduleFollowScroll();
-                    }
-                    scheduleLevelRefresh();
+                    scheduleFileUpdateUI(data.tab_id);
                 }
             }
         });
