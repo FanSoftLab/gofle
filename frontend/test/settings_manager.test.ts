@@ -64,9 +64,9 @@ describe('getPrefs', () => {
     expect(prefs.sshConnectTimeoutSec).toBe(10);
     expect(prefs.remoteStallTimeoutSec).toBe(60);
     expect(prefs.autoAcceptHostKey).toBe(false);
-    expect(prefs.connMaxAttempts).toBe(5);
-    expect(prefs.connAttemptWindowMin).toBe(15);
-    expect(prefs.connLockoutMin).toBe(5);
+    expect(prefs.connMaxAttempts).toBe(20);
+    expect(prefs.connAttemptWindowMin).toBe(5);
+    expect(prefs.connLockoutMin).toBe(1);
     expect(prefs.defaultSshPort).toBe(22);
     expect(prefs.defaultFtpPort).toBe(21);
   });

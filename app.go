@@ -421,7 +421,6 @@ func (a *App) recordConnFailure(host string, port int) {
 		a.connAttempts[key] = &connAttemptInfo{
 			count:       1,
 			lastAttempt: now,
-			lockedUntil: now.Add(lockout),
 		}
 		return
 	}

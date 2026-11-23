@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SSH/FTP connection rate limiting bug.** The first failed connection attempt incorrectly triggered an immediate 5-minute lockout due to `lockedUntil` being set unconditionally in `recordConnFailure`. Now lockout only occurs after the configured number of failed attempts (default 20).
+- **Default rate limit values increased** to be less aggressive for normal use: max attempts 5→20, window 15→5 min, lockout 5→1 min.
 - **Jump to a selected search result with word wrap on.** In the terminal
   viewer, navigating the results pane (arrows, Enter, next/previous) and the
   goto-line prompt now position the log pane in visual rows: a match can no

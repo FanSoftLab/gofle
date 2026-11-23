@@ -56,7 +56,7 @@ const defaultPrefs: AppPrefs = {
     maxRecentFiles: 20, maxHistorySize: 100, confirmCloseTab: true,
     startupBehavior: 'session', searchOrientation: 'horizontal', searchSide: 'bottom',
     sshConnectTimeoutSec: 10, remoteStallTimeoutSec: 60, autoAcceptHostKey: false,
-    connMaxAttempts: 5, connAttemptWindowMin: 15, connLockoutMin: 5,
+    connMaxAttempts: 20, connAttemptWindowMin: 5, connLockoutMin: 1,
     defaultSshPort: 22, defaultFtpPort: 21,
 };
 
@@ -157,9 +157,9 @@ export class SettingsManager {
             sshConnectTimeoutSec: cfg.ssh_connect_timeout_sec || 10,
             remoteStallTimeoutSec: cfg.remote_stall_timeout_sec || 60,
             autoAcceptHostKey: !!cfg.auto_accept_host_key,
-            connMaxAttempts: cfg.conn_max_attempts || 5,
-            connAttemptWindowMin: cfg.conn_attempt_window_min || 15,
-            connLockoutMin: cfg.conn_lockout_min || 5,
+            connMaxAttempts: cfg.conn_max_attempts || 20,
+            connAttemptWindowMin: cfg.conn_attempt_window_min || 5,
+            connLockoutMin: cfg.conn_lockout_min || 1,
             defaultSshPort: cfg.default_ssh_port || 22,
             defaultFtpPort: cfg.default_ftp_port || 21,
         };
@@ -213,8 +213,8 @@ export class SettingsManager {
             searchOrientation: sel('settings-search-orientation') || 'horizontal',
             searchSide: sel('settings-search-side') || 'bottom',
             sshConnectTimeoutSec: num('settings-ssh-timeout', 10), remoteStallTimeoutSec: num('settings-stall-timeout', 60),
-            autoAcceptHostKey: chk('settings-auto-accept-host-key'), connMaxAttempts: num('settings-conn-max-attempts', 5),
-            connAttemptWindowMin: num('settings-conn-window', 15), connLockoutMin: num('settings-conn-lockout', 5),
+            autoAcceptHostKey: chk('settings-auto-accept-host-key'), connMaxAttempts: num('settings-conn-max-attempts', 20),
+            connAttemptWindowMin: num('settings-conn-window', 5), connLockoutMin: num('settings-conn-lockout', 1),
             defaultSshPort: 22, defaultFtpPort: 21,
         };
     }
